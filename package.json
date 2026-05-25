@@ -1,0 +1,21 @@
+{
+  "name": "wangwang-local-viewer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run build -w @wangwang/shared && concurrently -n api,web -c cyan,magenta \"npm run dev -w @wangwang/api\" \"npm run dev -w @wangwang/web\"",
+    "dev:api": "npm run dev -w @wangwang/api",
+    "dev:web": "npm run dev -w @wangwang/web",
+    "build": "npm run build -w @wangwang/shared && npm run build -w @wangwang/api && npm run build -w @wangwang/web",
+    "typecheck": "npm run build -w @wangwang/shared && npm run typecheck -w @wangwang/api && npm run typecheck -w @wangwang/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  }
+}

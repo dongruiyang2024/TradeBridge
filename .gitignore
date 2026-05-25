@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+apps/*/dist/
+packages/*/dist/
+.vite/
+.vite-temp/
+*.tsbuildinfo
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Logs and runtime output
+*.log
+logs/*
+!logs/.gitkeep
+
+# Exported chat/message data may contain sensitive business content.
+exports/*
+!exports/.gitkeep
+
+# Local browser/CDP probe profiles
+.tmp-*/
+.tmp-alicrm-cdp-profile/
+
+# Python probe caches
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
