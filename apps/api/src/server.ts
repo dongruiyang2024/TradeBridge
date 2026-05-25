@@ -13,12 +13,7 @@ import {
   sessionStatusRouteSchema
 } from "./api-schemas.js";
 import { isOpenApiRoute, registerOpenApi } from "./openapi.js";
-import {
-  discoverAliWorkbenchCookieDbs,
-  discoverAliWorkbenchTokenCacheFiles,
-  extractAliWorkbenchCookies,
-  getCtoken
-} from "./session.js";
+import { detectSession } from "@wangwang/onetalk-adapter";
 
 const app = Fastify({
   logger: {
@@ -59,20 +54,21 @@ app.get("/health", { schema: healthRouteSchema }, async (): Promise<HealthRespon
 }));
 
 app.get("/api/v1/session/status", { schema: sessionStatusRouteSchema }, async (): Promise<SessionStatusResponse> => {
-  const cookieDbPaths = COOKIE_DB_PATHS.length ? COOKIE_DB_PATHS : discoverAliWorkbenchCookieDbs();
-  const tokenCachePaths = discoverAliWorkbenchTokenCacheFiles();
-  const cookies = extractAliWorkbenchCookies(LOG_PATHS, { cookieDbPaths, tokenCachePaths });
+  const session = detectSession({
+    logPaths: LOG_PATHS,
+    cookieDbPaths: COOKIE_DB_PATHS.length ? COOKIE_DB_PATHS : undefined
+  });
   const keychainTimeoutMs = Number(process.env.WANGWANG_KEYCHAIN_TIMEOUT_MS || 10000);
   return {
     ok: true,
-    cookieNames: Object.keys(cookies).sort(),
-    hasCtoken: Boolean(getCtoken(cookies)),
-    hasTbToken: Boolean(cookies._tb_token_),
-    hasCookie2: Boolean(cookies.cookie2),
-    hasSgcookie: Boolean(cookies.sgcookie),
-    logPathCount: LOG_PATHS.length,
-    cookieDbPathCount: cookieDbPaths.length,
-    tokenCachePathCount: tokenCachePaths.length,
+    cookieNames: session.cookieNames,
+    hasCtoken: session.hasCtoken,
+    hasTbToken: session.hasTbToken,
+    hasCookie2: session.hasCookie2,
+    hasSgcookie: session.hasSgcookie,
+    logPathCount: session.logPaths.length,
+    cookieDbPathCount: session.cookieDbPaths.length,
+    tokenCachePathCount: session.tokenCachePaths.length,
     keychainTimeoutMs: Number.isFinite(keychainTimeoutMs) && keychainTimeoutMs > 0 ? keychainTimeoutMs : 10000
   };
 });

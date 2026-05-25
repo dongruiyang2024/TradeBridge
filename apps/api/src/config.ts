@@ -11,9 +11,6 @@ export const LOCAL_API_TOKEN = process.env.WANGWANG_API_TOKEN || "";
 
 export const EXPORTS_DIR = path.resolve(WORKSPACE_ROOT, "exports");
 
-export const ALIWORKBENCH_UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/108 Safari/537.36 AlibabaSupplier/11.39.80E";
-
 export const LOG_PATHS = envPathList("WANGWANG_LOG_PATHS") || defaultLogPaths();
 export const COOKIE_DB_PATHS = envPathList("WANGWANG_COOKIE_DB_PATHS") || [];
 

@@ -5,9 +5,13 @@ import type {
   MessageItem,
   MessagesResponse
 } from "@wangwang/shared";
+import {
+  OnetalkClient,
+  detectSession,
+  fetchConversations as fetchOnetalkConversations,
+  fetchMessages as fetchOnetalkMessages
+} from "@wangwang/onetalk-adapter";
 import { COOKIE_DB_PATHS, LOG_PATHS } from "./config.js";
-import { OnetalkClient } from "./onetalk-client.js";
-import { extractAliWorkbenchCookies } from "./session.js";
 import { sanitizeValue, shortHash } from "./redact.js";
 import { CustomerLogIndex } from "./customer-log-index.js";
 
@@ -35,8 +39,8 @@ export class ConversationService {
     if (!conversation) {
       throw new Error("conversation_not_found");
     }
-    const client = new OnetalkClient(extractAliCookies());
-    const response = await client.getChatMessages({
+    const response = await fetchOnetalkMessages({
+      cookies: extractAliCookies(),
       conversation,
       bootstrap: state.bootstrap,
       before: before ?? Date.now(),
@@ -178,8 +182,7 @@ export class ConversationService {
   private async ensureState(refresh: boolean): Promise<CachedState> {
     if (this.state && !refresh) return this.state;
     const cookies = extractAliCookies();
-    const client = new OnetalkClient(cookies);
-    const webLite = await client.fetchWeblite();
+    const webLite = await fetchOnetalkConversations({ cookies });
     const rawConversations = webLite.conversations.filter(isProbeableConversation);
     const byId = new Map<string, Record<string, unknown>>();
     rawConversations.forEach((conversation, index) => byId.set(this.localId(conversation, index), conversation));
@@ -233,9 +236,10 @@ export class ConversationService {
 }
 
 function extractAliCookies() {
-  return extractAliWorkbenchCookies(LOG_PATHS, {
+  return detectSession({
+    logPaths: LOG_PATHS,
     cookieDbPaths: COOKIE_DB_PATHS.length ? COOKIE_DB_PATHS : undefined
-  });
+  }).cookies;
 }
 
 function isProbeableConversation(value: Record<string, unknown>): boolean {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -13,7 +13,7 @@ import {
   extractCookies,
   extractCookiesFromText,
   getCtoken
-} from "@wangwang/onetalk-adapter";
+} from "../src/index.js";
 
 const tempRoots: string[] = [];
 
@@ -38,7 +38,7 @@ test("extractCookiesFromText keeps the latest whitelisted cookie values", () => 
 });
 
 test("extractCookies reads text log paths", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "wangwang-session-test-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "onetalk-adapter-session-test-"));
   tempRoots.push(root);
   const logPath = path.join(root, "cef.log");
   fs.writeFileSync(logPath, "xman_us_t=ctoken%3Dfrom-log; _tb_token_=tb-log", "utf8");
@@ -63,7 +63,7 @@ test("decryptMacChromiumCookie decrypts Chromium v10 AES-CBC values", () => {
 });
 
 test("discoverAliWorkbenchCookieDbs finds account Cookies files on macOS layout", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "wangwang-session-test-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "onetalk-adapter-session-test-"));
   tempRoots.push(root);
   const accountDir = path.join(root, "Library", "Application Support", "AliWorkbenchTemp", "202500001744639");
   fs.mkdirSync(accountDir, { recursive: true });
@@ -73,7 +73,7 @@ test("discoverAliWorkbenchCookieDbs finds account Cookies files on macOS layout"
 });
 
 test("discoverAliWorkbenchTokenCacheFiles finds cached request files on macOS layout", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "wangwang-session-test-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "onetalk-adapter-session-test-"));
   tempRoots.push(root);
   const cacheDir = path.join(root, "Library", "Application Support", "AliWorkbenchTemp", "202500001744639", "Cache", "Cache_Data");
   const codeCacheDir = path.join(root, "Library", "Application Support", "AliWorkbenchTemp", "202500001744639", "Code Cache", "js");
@@ -88,7 +88,7 @@ test("discoverAliWorkbenchTokenCacheFiles finds cached request files on macOS la
 });
 
 test("defaultMacKeychainPaths points at login keychain on macOS layout", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "wangwang-session-test-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "onetalk-adapter-session-test-"));
   tempRoots.push(root);
   const keychainDir = path.join(root, "Library", "Keychains");
   const loginKeychain = path.join(keychainDir, "login.keychain-db");
@@ -117,7 +117,7 @@ test("extractCookies decrypts macOS Chromium Cookies database values", (t) => {
     return;
   }
 
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "wangwang-session-test-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "onetalk-adapter-session-test-"));
   tempRoots.push(root);
   const dbPath = path.join(root, "Cookies");
   const password = "test-safe-storage-secret";
@@ -133,30 +133,17 @@ test("extractCookies decrypts macOS Chromium Cookies database values", (t) => {
     ].join(" ")
   ]);
 
-  assert.deepEqual(extractCookies([], {
-    cookieDbPaths: [dbPath],
-    platform: "darwin",
-    safeStoragePassword: password
-  }), {
-    _tb_token_: "_tb_token_value_",
-    cookie2: "cookie2-value"
-  });
-
-  const previousPassword = process.env.WANGWANG_CHROMIUM_SAFE_STORAGE_PASSWORD;
-  process.env.WANGWANG_CHROMIUM_SAFE_STORAGE_PASSWORD = password;
-  try {
-    assert.equal(extractCookies([], {
+  assert.deepEqual(
+    extractCookies([], {
       cookieDbPaths: [dbPath],
       platform: "darwin",
-      keychainPaths: []
-    }).cookie2, "cookie2-value");
-  } finally {
-    if (previousPassword === undefined) {
-      delete process.env.WANGWANG_CHROMIUM_SAFE_STORAGE_PASSWORD;
-    } else {
-      process.env.WANGWANG_CHROMIUM_SAFE_STORAGE_PASSWORD = previousPassword;
+      safeStoragePassword: password
+    }),
+    {
+      _tb_token_: "_tb_token_value_",
+      cookie2: "cookie2-value"
     }
-  }
+  );
 });
 
 test("extractCookies decrypts AliSupplier mock-keychain cookies", (t) => {
@@ -167,7 +154,7 @@ test("extractCookies decrypts AliSupplier mock-keychain cookies", (t) => {
     return;
   }
 
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "wangwang-session-test-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "onetalk-adapter-session-test-"));
   tempRoots.push(root);
   const dbPath = path.join(root, "Cookies");
   const cookie2 = encryptMacCookie("cookie2-value", "mock_password");
@@ -181,14 +168,17 @@ test("extractCookies decrypts AliSupplier mock-keychain cookies", (t) => {
     ].join(" ")
   ]);
 
-  assert.deepEqual(extractCookies([], {
-    cookieDbPaths: [dbPath],
-    platform: "darwin",
-    keychainPaths: []
-  }), {
-    cookie2: "cookie2-value",
-    sgcookie: "sgcookie-value"
-  });
+  assert.deepEqual(
+    extractCookies([], {
+      cookieDbPaths: [dbPath],
+      platform: "darwin",
+      keychainPaths: []
+    }),
+    {
+      cookie2: "cookie2-value",
+      sgcookie: "sgcookie-value"
+    }
+  );
 });
 
 function encryptMacCookie(value: string, password: string): string {
