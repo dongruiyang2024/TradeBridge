@@ -15,11 +15,13 @@ import type {
   CreateReplySuggestionInput,
   CreateUserInvitationInput,
   CustomerScope,
+  GetInternalUserCredentialsByEmailInput,
   GetInternalUserCredentialsInput,
   InternalRole,
   InternalSession,
   InternalUser,
   InternalUserCredentials,
+  InternalWorkspaceSummary,
   IssueInternalSessionInput,
   MessageDirection,
   RegisteredCollectorDevice,
@@ -38,6 +40,7 @@ import type {
   StoredSellerAccount,
   StoredReplySuggestion,
   StoredUserInvitation,
+  SwitchInternalSessionOrgInput,
   SyncBatch,
   SyncBatchResult,
   SyncMessageInput,
@@ -179,6 +182,20 @@ interface InternalUserRow {
 
 interface InternalUserCredentialsRow extends InternalUserRow {
   passwordHash: string;
+}
+
+interface InternalWorkspaceSummaryRow {
+  orgId: string;
+  name: string;
+  userId: string;
+  email: string;
+  displayName: string;
+  roles: InternalRole[] | string;
+}
+
+interface SwitchInternalSessionCurrentRow {
+  tokenHash: string;
+  email: string;
 }
 
 interface InternalSessionRow {
@@ -1052,6 +1069,62 @@ export class PostgresSyncStore {
     return row ? { ...mapInternalUser(row), passwordHash: row.passwordHash } : null;
   }
 
+  async getInternalUserCredentialsByEmail(
+    input: GetInternalUserCredentialsByEmailInput
+  ): Promise<InternalUserCredentials[]> {
+    const normalizedEmail = input.email.trim().toLowerCase();
+    const result = await this.client.query<InternalUserCredentialsRow>(
+      `
+      /* get_internal_user_credentials_by_email */
+      SELECT
+        u.id::text AS "id",
+        u.org_id AS "orgId",
+        u.email AS "email",
+        u.display_name AS "displayName",
+        u.status AS "status",
+        COALESCE(array_agg(r.name ORDER BY r.name) FILTER (WHERE r.name IS NOT NULL), '{}'::text[]) AS "roles",
+        u.created_at AS "createdAt",
+        u.updated_at AS "updatedAt",
+        u.password_hash AS "passwordHash"
+      FROM app_user u
+      LEFT JOIN user_role ur ON ur.user_id = u.id AND ur.org_id = u.org_id
+      LEFT JOIN role r ON r.id = ur.role_id
+      WHERE u.email = $1
+        AND u.status = 'active'
+      GROUP BY u.id
+      ORDER BY u.org_id ASC
+      `,
+      [normalizedEmail]
+    );
+    return result.rows.map((row) => ({ ...mapInternalUser(row), passwordHash: row.passwordHash }));
+  }
+
+  async listInternalUserWorkspacesByEmail(email: string): Promise<InternalWorkspaceSummary[]> {
+    const normalizedEmail = email.trim().toLowerCase();
+    const result = await this.client.query<InternalWorkspaceSummaryRow>(
+      `
+      /* list_internal_user_workspaces_by_email */
+      SELECT
+        o.id AS "orgId",
+        o.name AS "name",
+        u.id::text AS "userId",
+        u.email AS "email",
+        u.display_name AS "displayName",
+        COALESCE(array_agg(r.name ORDER BY r.name) FILTER (WHERE r.name IS NOT NULL), '{}'::text[]) AS "roles"
+      FROM app_user u
+      INNER JOIN org o ON o.id = u.org_id
+      LEFT JOIN user_role ur ON ur.user_id = u.id AND ur.org_id = u.org_id
+      LEFT JOIN role r ON r.id = ur.role_id
+      WHERE u.email = $1
+        AND u.status = 'active'
+      GROUP BY o.id, u.id
+      ORDER BY o.name ASC
+      `,
+      [normalizedEmail]
+    );
+    return result.rows.map(mapInternalWorkspaceSummary);
+  }
+
   async updateInternalUser(input: UpdateInternalUserInput): Promise<InternalUser> {
     const roles = input.roles ?? null;
     const result = await this.client.query<InternalUserRow>(
@@ -1137,6 +1210,84 @@ export class PostgresSyncStore {
       [hashContent(input.token)]
     );
     return result.rowCount > 0;
+  }
+
+  async switchInternalSessionOrg(input: SwitchInternalSessionOrgInput): Promise<InternalSession> {
+    const tokenHash = hashContent(input.token);
+    const currentResult = await this.client.query<SwitchInternalSessionCurrentRow>(
+      `
+      /* switch_internal_session_org_current */
+      SELECT
+        s.token_hash AS "tokenHash",
+        u.email AS "email"
+      FROM internal_session s
+      INNER JOIN app_user u ON u.id = s.user_id
+      WHERE s.token_hash = $1
+        AND s.revoked_at IS NULL
+        AND s.expires_at > now()
+      LIMIT 1
+      `,
+      [tokenHash]
+    );
+    const current = currentResult.rows[0];
+    if (!current) throw new Error("internal_session_not_found");
+
+    const targetResult = await this.client.query<InternalUserRow>(
+      `
+      /* switch_internal_session_org_target */
+      SELECT
+        u.id::text AS "id",
+        u.org_id AS "orgId",
+        u.email AS "email",
+        u.display_name AS "displayName",
+        u.status AS "status",
+        COALESCE(array_agg(r.name ORDER BY r.name) FILTER (WHERE r.name IS NOT NULL), '{}'::text[]) AS "roles",
+        u.created_at AS "createdAt",
+        u.updated_at AS "updatedAt"
+      FROM app_user u
+      LEFT JOIN user_role ur ON ur.user_id = u.id AND ur.org_id = u.org_id
+      LEFT JOIN role r ON r.id = ur.role_id
+      WHERE u.org_id = $1
+        AND u.email = $2
+        AND u.status = 'active'
+      GROUP BY u.id
+      LIMIT 1
+      `,
+      [input.orgId, current.email]
+    );
+    const target = targetResult.rows[0];
+    if (!target) throw new Error("workspace_not_found");
+
+    const updatedResult = await this.client.query<InternalSessionRow>(
+      `
+      /* switch_internal_session_org_update */
+      WITH updated_session AS (
+        UPDATE internal_session
+        SET org_id = $2,
+            user_id = $3
+        WHERE token_hash = $1
+          AND revoked_at IS NULL
+          AND expires_at > now()
+        RETURNING token_hash, created_at, expires_at
+      )
+      SELECT
+        s.token_hash AS "tokenHash",
+        u.org_id AS "orgId",
+        u.id::text AS "userId",
+        u.email AS "email",
+        u.display_name AS "displayName",
+        COALESCE(array_agg(r.name ORDER BY r.name) FILTER (WHERE r.name IS NOT NULL), '{}'::text[]) AS "roles",
+        s.created_at AS "createdAt",
+        s.expires_at AS "expiresAt"
+      FROM updated_session s
+      INNER JOIN app_user u ON u.id = $3
+      LEFT JOIN user_role ur ON ur.user_id = u.id AND ur.org_id = u.org_id
+      LEFT JOIN role r ON r.id = ur.role_id
+      GROUP BY s.token_hash, s.created_at, s.expires_at, u.id
+      `,
+      [tokenHash, input.orgId, target.id]
+    );
+    return mapInternalSession(requiredRow(updatedResult.rows[0], "internal_session"), input.token);
   }
 
   async createUserInvitation(input: CreateUserInvitationInput): Promise<StoredUserInvitation> {
@@ -1936,6 +2087,17 @@ function mapInternalUser(row: InternalUserRow): InternalUser {
     roles: normalizeRoles(row.roles),
     createdAt: isoString(row.createdAt) || "",
     updatedAt: isoString(row.updatedAt) || ""
+  };
+}
+
+function mapInternalWorkspaceSummary(row: InternalWorkspaceSummaryRow): InternalWorkspaceSummary {
+  return {
+    orgId: row.orgId,
+    name: row.name,
+    userId: row.userId,
+    email: row.email,
+    displayName: row.displayName,
+    roles: normalizeRoles(row.roles)
   };
 }
 

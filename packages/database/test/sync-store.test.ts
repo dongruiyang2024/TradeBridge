@@ -433,3 +433,77 @@ test("collector devices authenticate by one-time tokens and can be revoked", asy
   assert.equal(revoked.status, "revoked");
   assert.equal(await store.authenticateCollectorDevice("collector-token"), null);
 });
+
+test("internal workspace lookup lists active memberships for an email", async () => {
+  const store = new InMemorySyncStore();
+  await store.createInternalUser({
+    orgId: "org_internal",
+    email: "sales@example.com",
+    displayName: "Sales Internal",
+    passwordHash: "hash-1",
+    roles: ["sales"]
+  });
+  await store.createInternalUser({
+    orgId: "org_other",
+    email: "sales@example.com",
+    displayName: "Sales Other",
+    passwordHash: "hash-2",
+    roles: ["supervisor"]
+  });
+  await store.createInternalUser({
+    orgId: "org_disabled",
+    email: "sales@example.com",
+    displayName: "Disabled",
+    passwordHash: "hash-3",
+    roles: ["sales"],
+    status: "disabled"
+  });
+
+  const memberships = await store.listInternalUserWorkspacesByEmail(" Sales@Example.COM ");
+
+  assert.deepEqual(
+    memberships.map((item) => ({
+      orgId: item.orgId,
+      name: item.name,
+      roles: item.roles
+    })),
+    [
+      { orgId: "org_internal", name: "org_internal", roles: ["sales"] },
+      { orgId: "org_other", name: "org_other", roles: ["supervisor"] }
+    ]
+  );
+});
+
+test("internal session can switch to another workspace for the same email", async () => {
+  const store = new InMemorySyncStore();
+  await store.createInternalUser({
+    orgId: "org_internal",
+    email: "sales@example.com",
+    displayName: "Sales Internal",
+    passwordHash: "hash-1",
+    roles: ["sales"]
+  });
+  await store.createInternalUser({
+    orgId: "org_other",
+    email: "sales@example.com",
+    displayName: "Sales Other",
+    passwordHash: "hash-2",
+    roles: ["supervisor"]
+  });
+  const session = await store.issueInternalSession({
+    orgId: "org_internal",
+    email: "sales@example.com",
+    passwordHash: "hash-1",
+    token: "session-token"
+  });
+
+  const switched = await store.switchInternalSessionOrg({
+    token: session.token,
+    orgId: "org_other"
+  });
+
+  assert.equal(switched.orgId, "org_other");
+  assert.equal(switched.displayName, "Sales Other");
+  assert.deepEqual(switched.roles, ["supervisor"]);
+  assert.equal((await store.getInternalSession("session-token"))?.orgId, "org_other");
+});

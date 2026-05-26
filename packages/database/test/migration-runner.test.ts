@@ -23,19 +23,29 @@ test("runMigrations creates migration table and applies pending migrations", asy
   const client = new FakeSqlClient();
   const result = await runMigrations(client);
 
-  assert.deepEqual(result.appliedIds, ["001_internal_sync_schema"]);
+  assert.deepEqual(
+    result.appliedIds,
+    INTERNAL_SYNC_MIGRATIONS.map((migration) => migration.id)
+  );
   assert.equal(result.skippedIds.length, 0);
   assert.match(client.queries[0].sql, /CREATE TABLE IF NOT EXISTS schema_migration/i);
   assert.match(client.queries[1].sql, /SELECT id FROM schema_migration/i);
-  assert.equal(client.queries.some((query) => query.sql === INTERNAL_SYNC_MIGRATIONS[0].sql), true);
-  assert.deepEqual(client.queries.at(-1)?.params, ["001_internal_sync_schema"]);
+  for (const migration of INTERNAL_SYNC_MIGRATIONS) {
+    assert.equal(client.queries.some((query) => query.sql === migration.sql), true);
+  }
+  assert.deepEqual(client.queries.at(-1)?.params, ["002_workspace_login_facade"]);
 });
 
 test("runMigrations skips already applied migrations", async () => {
-  const client = new FakeSqlClient(["001_internal_sync_schema"]);
+  const client = new FakeSqlClient(INTERNAL_SYNC_MIGRATIONS.map((migration) => migration.id));
   const result = await runMigrations(client);
 
   assert.deepEqual(result.appliedIds, []);
-  assert.deepEqual(result.skippedIds, ["001_internal_sync_schema"]);
-  assert.equal(client.queries.some((query) => query.sql === INTERNAL_SYNC_MIGRATIONS[0].sql), false);
+  assert.deepEqual(
+    result.skippedIds,
+    INTERNAL_SYNC_MIGRATIONS.map((migration) => migration.id)
+  );
+  for (const migration of INTERNAL_SYNC_MIGRATIONS) {
+    assert.equal(client.queries.some((query) => query.sql === migration.sql), false);
+  }
 });

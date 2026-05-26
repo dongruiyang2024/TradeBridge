@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { INTERNAL_SYNC_MIGRATIONS } from "../src/index.js";
 
 test("internal sync migrations expose the initial schema in order", () => {
-  assert.equal(INTERNAL_SYNC_MIGRATIONS.length, 1);
+  assert.equal(INTERNAL_SYNC_MIGRATIONS.length, 2);
   assert.equal(INTERNAL_SYNC_MIGRATIONS[0].id, "001_internal_sync_schema");
   assert.equal(INTERNAL_SYNC_MIGRATIONS[0].filename, "001_internal_sync_schema.sql");
   assert.match(INTERNAL_SYNC_MIGRATIONS[0].sql, /CREATE TABLE IF NOT EXISTS org/i);
@@ -89,4 +89,17 @@ test("initial schema does not define raw OneTalk credential columns", () => {
   for (const marker of forbidden) {
     assert.equal(sql.includes(marker), false, `schema must not include ${marker}`);
   }
+});
+
+test("workspace login facade migration is exported after the initial schema", () => {
+  assert.equal(INTERNAL_SYNC_MIGRATIONS.length, 2);
+  assert.equal(INTERNAL_SYNC_MIGRATIONS[1].id, "002_workspace_login_facade");
+  assert.equal(INTERNAL_SYNC_MIGRATIONS[1].filename, "002_workspace_login_facade.sql");
+});
+
+test("workspace login facade migration adds lookup indexes for email login and session switching", () => {
+  const normalized = INTERNAL_SYNC_MIGRATIONS[1].sql.replace(/\s+/g, " ").toLowerCase();
+
+  assert.match(normalized, /create index if not exists idx_app_user_email on app_user \(email\)/);
+  assert.match(normalized, /create index if not exists idx_internal_session_user_id on internal_session \(user_id\)/);
 });
