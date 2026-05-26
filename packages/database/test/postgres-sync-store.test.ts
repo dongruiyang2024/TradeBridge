@@ -320,6 +320,123 @@ class FakePostgresClient implements SqlClient {
         rowCount: 1
       };
     }
+    if (/list_internal_users/i.test(sql)) {
+      return {
+        rows: [
+          {
+            id: "user-db-id",
+            orgId: "org_internal",
+            email: "admin@example.com",
+            displayName: "Admin User",
+            status: "active",
+            roles: ["admin"],
+            createdAt: "2026-05-25T10:00:00.000Z",
+            updatedAt: "2026-05-25T10:00:00.000Z"
+          }
+        ] as T[],
+        rowCount: 1
+      };
+    }
+    if (/get_internal_user_credentials/i.test(sql)) {
+      return {
+        rows: [
+          {
+            id: "user-db-id",
+            orgId: "org_internal",
+            email: "admin@example.com",
+            displayName: "Admin User",
+            status: "active",
+            roles: ["admin"],
+            createdAt: "2026-05-25T10:00:00.000Z",
+            updatedAt: "2026-05-25T10:00:00.000Z",
+            passwordHash: "password-hash"
+          }
+        ] as T[],
+        rowCount: 1
+      };
+    }
+    if (/update_internal_user/i.test(sql)) {
+      return {
+        rows: [
+          {
+            id: "user-db-id",
+            orgId: "org_internal",
+            email: "admin@example.com",
+            displayName: "Renamed Admin",
+            status: "active",
+            roles: ["admin", "supervisor"],
+            createdAt: "2026-05-25T10:00:00.000Z",
+            updatedAt: "2026-05-25T10:05:00.000Z"
+          }
+        ] as T[],
+        rowCount: 1
+      };
+    }
+    if (/revoke_internal_session/i.test(sql)) {
+      return { rows: [] as T[], rowCount: 1 };
+    }
+    if (/create_user_invitation/i.test(sql)) {
+      return {
+        rows: [
+          {
+            id: "inv-1",
+            orgId: "org_internal",
+            email: "invitee@example.com",
+            displayName: "Invitee",
+            roles: ["sales"],
+            createdByUserId: null,
+            expiresAt: "2030-01-01T00:00:00.000Z",
+            acceptedAt: null,
+            createdAt: "2026-05-26T00:00:00.000Z"
+          }
+        ] as T[],
+        rowCount: 1
+      };
+    }
+    if (/get_user_invitation/i.test(sql)) {
+      return {
+        rows: [
+          {
+            id: "inv-1",
+            orgId: "org_internal",
+            email: "invitee@example.com",
+            displayName: "Invitee",
+            roles: ["sales"],
+            createdByUserId: null,
+            expiresAt: "2030-01-01T00:00:00.000Z",
+            acceptedAt: null,
+            createdAt: "2026-05-26T00:00:00.000Z"
+          }
+        ] as T[],
+        rowCount: 1
+      };
+    }
+    if (/accept_user_invitation/i.test(sql)) {
+      return {
+        rows: [
+          {
+            errorCode: null,
+            id: "inv-1",
+            orgId: "org_internal",
+            email: "invitee@example.com",
+            displayName: "Invitee",
+            roles: ["sales"],
+            createdByUserId: null,
+            expiresAt: "2030-01-01T00:00:00.000Z",
+            acceptedAt: "2026-05-26T00:01:00.000Z",
+            createdAt: "2026-05-26T00:00:00.000Z",
+            userId: "user-db-id",
+            userEmail: "invitee@example.com",
+            userDisplayName: "Invitee",
+            userStatus: "active",
+            userRoles: ["sales"],
+            userCreatedAt: "2026-05-26T00:01:00.000Z",
+            userUpdatedAt: "2026-05-26T00:01:00.000Z"
+          }
+        ] as T[],
+        rowCount: 1
+      };
+    }
     if (/issue_internal_session/i.test(sql)) {
       return {
         rows: [
@@ -436,6 +553,19 @@ class FakePostgresClient implements SqlClient {
     }
 
     return { rows: [], rowCount: 0 };
+  }
+}
+
+class AcceptedInvitationClient extends FakePostgresClient {
+  override async query<T>(sql: string, params: readonly unknown[] = []): Promise<{ rows: T[]; rowCount: number }> {
+    if (/accept_user_invitation/i.test(sql)) {
+      this.queries.push({ sql, params });
+      return {
+        rows: [{ errorCode: "invitation_already_accepted" }] as T[],
+        rowCount: 1
+      };
+    }
+    return super.query<T>(sql, params);
   }
 }
 
@@ -814,14 +944,14 @@ test("PostgresSyncStore creates internal users and resolves sessions without sto
 
   const user = await store.createInternalUser({
     orgId: "org_internal",
-    email: "admin@example.com",
+    email: " Admin@Example.com ",
     displayName: "Admin User",
     passwordHash: "password-hash",
     roles: ["admin"]
   });
   const session = await store.issueInternalSession({
     orgId: "org_internal",
-    email: "admin@example.com",
+    email: " Admin@Example.com ",
     passwordHash: "password-hash",
     token: "session-token",
     expiresAt: "2026-05-26T00:00:00.000Z"
@@ -841,12 +971,99 @@ test("PostgresSyncStore creates internal users and resolves sessions without sto
     ["admin"],
     "active"
   ]);
+  const createSql = client.queries.find((query) => /create_internal_user/i.test(query.sql))?.sql || "";
+  assert.match(createSql, /DELETE\s+FROM\s+user_role/i);
+  assert.match(createSql, /roles_removed/i);
+  assert.match(createSql, /CROSS JOIN roles_removed/i);
   const issueParams = client.queries.find((query) => /issue_internal_session/i.test(query.sql))?.params || [];
   assert.equal(issueParams.includes("session-token"), false);
   assert.equal(issueParams[0], "org_internal");
   assert.equal(issueParams[1], "admin@example.com");
   assert.equal(issueParams[2], "password-hash");
   assert.equal(issueParams[4], "2026-05-26T00:00:00.000Z");
+});
+
+test("PostgresSyncStore supports internal user management and invitations", async () => {
+  const client = new FakePostgresClient();
+  const store = new PostgresSyncStore(client);
+
+  const users = await store.listInternalUsers("org_internal");
+  const credentials = await store.getInternalUserCredentials({
+    orgId: "org_internal",
+    email: " Admin@Example.com "
+  });
+  const updated = await store.updateInternalUser({
+    orgId: "org_internal",
+    userId: "user-db-id",
+    displayName: "Renamed Admin",
+    roles: ["admin", "supervisor"]
+  });
+  const revoked = await store.revokeInternalSession({ token: "session-token" });
+  const invitation = await store.createUserInvitation({
+    orgId: "org_internal",
+    email: " Invitee@Example.com ",
+    displayName: "Invitee",
+    roles: ["sales"],
+    token: "invite-token"
+  });
+  const inspected = await store.getUserInvitation("invite-token");
+  const accepted = await store.acceptUserInvitation({
+    token: "invite-token",
+    passwordHash: "scrypt$password"
+  });
+
+  assert.equal(users[0].email, "admin@example.com");
+  assert.equal(credentials?.passwordHash, "password-hash");
+  assert.equal(updated.displayName, "Renamed Admin");
+  assert.equal(revoked, true);
+  assert.equal(invitation.token, "invite-token");
+  assert.equal("tokenHash" in invitation, false);
+  assert.equal(client.queries.find((query) => /create_user_invitation/i.test(query.sql))?.params[1], "invitee@example.com");
+  assert.equal(inspected?.email, "invitee@example.com");
+  assert.equal(inspected && "token" in inspected, false);
+  assert.equal(accepted.user.email, "invitee@example.com");
+  assert.equal("token" in accepted.invitation, false);
+
+  const sqlText = client.queries.map((query) => query.sql).join("\n");
+  const updateSql = client.queries.find((query) => /update_internal_user/i.test(query.sql))?.sql || "";
+  const acceptSql = client.queries.find((query) => /accept_user_invitation/i.test(query.sql))?.sql || "";
+  assert.match(sqlText, /list_internal_users/);
+  assert.match(sqlText, /get_internal_user_credentials/);
+  assert.match(sqlText, /update_internal_user/);
+  assert.match(sqlText, /revoke_internal_session/);
+  assert.match(sqlText, /create_user_invitation/);
+  assert.match(sqlText, /get_user_invitation/);
+  assert.match(sqlText, /accept_user_invitation/);
+  assert.equal(
+    client.queries.find((query) => /get_internal_user_credentials/i.test(query.sql))?.params[1],
+    "admin@example.com"
+  );
+  assert.equal(client.queries.some((query) => query.params.includes("invite-token")), false);
+  assert.match(
+    acceptSql,
+    /UPDATE\s+user_invitation[\s\S]*WHERE\s+token_hash\s*=\s*\$1[\s\S]*accepted_at\s+IS\s+NULL[\s\S]*expires_at\s*>\s*now\(\)/i
+  );
+  assert.match(updateSql, /roles_removed/i);
+  assert.match(updateSql, /CROSS JOIN roles_removed/i);
+  assert.match(updateSql, /FROM\s+updated_user[\s\S]*CROSS JOIN LATERAL\s+unnest/i);
+  assert.match(acceptSql, /roles_removed/i);
+  assert.match(acceptSql, /CROSS JOIN roles_removed/i);
+});
+
+test("PostgresSyncStore reports already accepted invitations distinctly", async () => {
+  const client = new AcceptedInvitationClient();
+  const store = new PostgresSyncStore(client);
+
+  await assert.rejects(
+    () =>
+      store.acceptUserInvitation({
+        token: "invite-token",
+        passwordHash: "scrypt$password"
+      }),
+    /invitation_already_accepted/
+  );
+
+  assert.equal(client.queries.some((query) => query.params.includes("invite-token")), false);
 });
 
 test("PostgresSyncStore manages collector devices without storing raw tokens", async () => {

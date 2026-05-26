@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import type {
   AddCustomerTagInput,
+  AcceptUserInvitationInput,
+  AcceptUserInvitationResult,
   AssignCustomerInput,
   CollectorDevice,
   ConversationCustomerScope,
@@ -10,6 +12,7 @@ import type {
   CreateFollowUpTaskInput,
   CreateInternalUserInput,
   CreateReplySuggestionInput,
+  CreateUserInvitationInput,
   CustomerScope,
   GetInternalUserCredentialsInput,
   InternalSession,
@@ -31,6 +34,7 @@ import type {
   StoredMessage,
   StoredReplySuggestion,
   StoredSellerAccount,
+  StoredUserInvitation,
   SyncBatch,
   SyncBatchResult,
   SyncConversationInput,
@@ -54,6 +58,7 @@ export class InMemorySyncStore {
   private readonly auditLogs: StoredAuditLog[] = [];
   private readonly internalUsers = new Map<string, InternalUser & { passwordHash: string }>();
   private readonly internalSessions = new Map<string, InternalSession>();
+  private readonly userInvitations = new Map<string, StoredUserInvitation & { tokenHash: string }>();
   private readonly collectorDevices = new Map<string, CollectorDevice & { tokenHash: string }>();
   private collaborationSequence = 0;
   private internalUserSequence = 0;
@@ -358,6 +363,53 @@ export class InMemorySyncStore {
 
   async revokeInternalSession(input: RevokeInternalSessionInput): Promise<boolean> {
     return this.internalSessions.delete(hashContent(input.token));
+  }
+
+  async createUserInvitation(input: CreateUserInvitationInput): Promise<StoredUserInvitation> {
+    const now = new Date().toISOString();
+    const token = input.token || crypto.randomBytes(32).toString("hex");
+    const invitation: StoredUserInvitation & { tokenHash: string } = {
+      id: this.nextInternalUserId().replace("user_", "inv_"),
+      orgId: input.orgId,
+      email: input.email.trim().toLowerCase(),
+      displayName: input.displayName,
+      roles: input.roles,
+      token,
+      tokenHash: hashContent(token),
+      createdByUserId: input.createdByUserId,
+      expiresAt: input.expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      createdAt: now
+    };
+    this.userInvitations.set(invitation.tokenHash, invitation);
+    const { tokenHash: _tokenHash, ...publicInvitation } = invitation;
+    return publicInvitation;
+  }
+
+  async getUserInvitation(token: string): Promise<StoredUserInvitation | null> {
+    const invitation = this.userInvitations.get(hashContent(token));
+    if (!invitation || invitation.acceptedAt || Date.parse(invitation.expiresAt) <= Date.now()) return null;
+    const { tokenHash: _tokenHash, token: _rawToken, ...publicInvitation } = invitation;
+    return publicInvitation;
+  }
+
+  async acceptUserInvitation(input: AcceptUserInvitationInput): Promise<AcceptUserInvitationResult> {
+    const tokenHash = hashContent(input.token);
+    const invitation = this.userInvitations.get(tokenHash);
+    if (!invitation) throw new Error("invitation_not_found");
+    if (invitation.acceptedAt) throw new Error("invitation_already_accepted");
+    if (Date.parse(invitation.expiresAt) <= Date.now()) throw new Error("invitation_expired");
+
+    const user = await this.createInternalUser({
+      orgId: invitation.orgId,
+      email: invitation.email,
+      displayName: invitation.displayName,
+      passwordHash: input.passwordHash,
+      roles: invitation.roles,
+      status: "active"
+    });
+    invitation.acceptedAt = new Date().toISOString();
+    const { tokenHash: _tokenHash, token: _rawToken, ...publicInvitation } = invitation;
+    return { invitation: publicInvitation, user };
   }
 
   async getInternalSession(token: string): Promise<InternalSession | null> {

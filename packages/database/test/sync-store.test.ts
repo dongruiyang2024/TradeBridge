@@ -260,6 +260,40 @@ test("AI summaries and reply suggestions are scoped and retrievable", async () =
   );
 });
 
+test("internal user invitations can be created, inspected, and accepted once", async () => {
+  const store = new InMemorySyncStore();
+  const invitation = await store.createUserInvitation({
+    orgId: "org_internal",
+    email: "Invitee@Example.com",
+    displayName: "Invitee",
+    roles: ["sales"],
+    createdByUserId: "admin-1",
+    token: "invite-token",
+    expiresAt: "2030-01-01T00:00:00.000Z"
+  });
+
+  assert.equal(invitation.email, "invitee@example.com");
+  assert.equal(invitation.token, "invite-token");
+  assert.equal("tokenHash" in invitation, false);
+
+  const inspected = await store.getUserInvitation("invite-token");
+  assert.equal(inspected?.email, "invitee@example.com");
+  assert.equal(inspected && "token" in inspected, false);
+
+  const accepted = await store.acceptUserInvitation({
+    token: "invite-token",
+    passwordHash: "scrypt$password"
+  });
+  assert.equal(accepted.user.email, "invitee@example.com");
+  assert.equal(accepted.invitation.acceptedAt !== undefined, true);
+  assert.equal("token" in accepted.invitation, false);
+
+  await assert.rejects(
+    () => store.acceptUserInvitation({ token: "invite-token", passwordHash: "scrypt$password" }),
+    /invitation_already_accepted/
+  );
+});
+
 test("internal users can issue and resolve sessions", async () => {
   const store = new InMemorySyncStore();
   const futureExpiresAt = new Date(Date.now() + 60_000).toISOString();

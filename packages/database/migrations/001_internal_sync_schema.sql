@@ -46,6 +46,20 @@ CREATE TABLE IF NOT EXISTS internal_session (
   UNIQUE (token_hash)
 );
 
+CREATE TABLE IF NOT EXISTS user_invitation (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id TEXT NOT NULL REFERENCES org(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  roles TEXT[] NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_by UUID REFERENCES app_user(id) ON DELETE SET NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  accepted_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (org_id, email, token_hash)
+);
+
 CREATE TABLE IF NOT EXISTS seller_account (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   org_id TEXT NOT NULL REFERENCES org(id) ON DELETE CASCADE,
@@ -228,3 +242,5 @@ CREATE INDEX IF NOT EXISTS idx_message_conversation_sent_at ON message (org_id, 
 CREATE INDEX IF NOT EXISTS idx_customer_owner ON customer (org_id, owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_follow_up_task_due ON follow_up_task (org_id, status, due_at);
 CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log (org_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_user_invitation_email ON user_invitation (org_id, email);
+CREATE INDEX IF NOT EXISTS idx_user_invitation_token_hash ON user_invitation (token_hash);
