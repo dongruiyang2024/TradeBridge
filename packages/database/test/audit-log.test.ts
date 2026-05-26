@@ -81,12 +81,11 @@ test("PostgresSyncStore appends audit logs with parameterized metadata", async (
   assert.equal(log.id, "audit-db-id");
   assert.deepEqual(logs, [log]);
   assert.deepEqual(client.queries.find((query) => /append_audit_log/i.test(query.sql))?.params, [
-    "org_internal",
     "manager-1",
     "customer.assignment.updated",
     "customer",
     "assignment-db-id",
     { assignedToUserId: "user-2" }
   ]);
-  assert.deepEqual(client.queries.find((query) => /list_audit_logs/i.test(query.sql))?.params, ["org_internal"]);
+  assert.deepEqual(client.queries.find((query) => /list_audit_logs/i.test(query.sql))?.params, []);
 });

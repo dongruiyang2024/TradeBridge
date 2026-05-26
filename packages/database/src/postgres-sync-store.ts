@@ -21,7 +21,6 @@ import type {
   InternalSession,
   InternalUser,
   InternalUserCredentials,
-  InternalWorkspaceSummary,
   IssueInternalSessionInput,
   MessageDirection,
   RegisteredCollectorDevice,
@@ -40,7 +39,6 @@ import type {
   StoredSellerAccount,
   StoredReplySuggestion,
   StoredUserInvitation,
-  SwitchInternalSessionOrgInput,
   SyncBatch,
   SyncBatchResult,
   SyncMessageInput,
@@ -53,7 +51,6 @@ interface IdRow {
 }
 
 interface CustomerRow {
-  orgId: string;
   sellerAccountExternalId: string;
   externalCustomerId: string;
   loginId: string | null;
@@ -64,7 +61,6 @@ interface CustomerRow {
 }
 
 interface ConversationRow {
-  orgId: string;
   sellerAccountExternalId: string;
   externalConversationId: string;
   externalCustomerId: string | null;
@@ -72,7 +68,6 @@ interface ConversationRow {
 }
 
 interface MessageRow {
-  orgId: string;
   sellerAccountExternalId: string;
   externalConversationId: string;
   externalMessageId: string | null;
@@ -87,7 +82,6 @@ interface MessageRow {
 
 interface CustomerNoteRow {
   id: string;
-  orgId: string;
   sellerAccountExternalId: string;
   externalCustomerId: string;
   body: string;
@@ -98,7 +92,6 @@ interface CustomerNoteRow {
 
 interface CustomerTagRow {
   id: string;
-  orgId: string;
   sellerAccountExternalId: string;
   externalCustomerId: string;
   tag: string;
@@ -108,7 +101,6 @@ interface CustomerTagRow {
 
 interface FollowUpTaskRow {
   id: string;
-  orgId: string;
   sellerAccountExternalId: string;
   externalCustomerId: string;
   title: string;
@@ -121,7 +113,6 @@ interface FollowUpTaskRow {
 
 interface CustomerAssignmentRow {
   id: string;
-  orgId: string;
   sellerAccountExternalId: string;
   externalCustomerId: string;
   assignedToUserId: string;
@@ -132,7 +123,6 @@ interface CustomerAssignmentRow {
 
 interface AuditLogRow {
   id: string;
-  orgId: string;
   actorUserId: string | null;
   action: string;
   targetType: string;
@@ -143,7 +133,6 @@ interface AuditLogRow {
 
 interface AiSummaryRow {
   id: string;
-  orgId: string;
   sellerAccountExternalId: string;
   externalCustomerId: string;
   promptVersion: string;
@@ -157,7 +146,6 @@ interface AiSummaryRow {
 
 interface ReplySuggestionRow {
   id: string;
-  orgId: string;
   sellerAccountExternalId: string;
   externalCustomerId: string;
   externalConversationId: string;
@@ -171,7 +159,6 @@ interface ReplySuggestionRow {
 
 interface InternalUserRow {
   id: string;
-  orgId: string;
   email: string;
   displayName: string;
   status: string;
@@ -184,23 +171,8 @@ interface InternalUserCredentialsRow extends InternalUserRow {
   passwordHash: string;
 }
 
-interface InternalWorkspaceSummaryRow {
-  orgId: string;
-  name: string;
-  userId: string;
-  email: string;
-  displayName: string;
-  roles: InternalRole[] | string;
-}
-
-interface SwitchInternalSessionCurrentRow {
-  tokenHash: string;
-  email: string;
-}
-
 interface InternalSessionRow {
   tokenHash: string;
-  orgId: string;
   userId: string;
   email: string;
   displayName: string;
@@ -211,7 +183,6 @@ interface InternalSessionRow {
 
 interface UserInvitationRow {
   id: string;
-  orgId: string;
   email: string;
   displayName: string;
   roles: InternalRole[] | string;
@@ -234,7 +205,6 @@ interface AcceptUserInvitationRow extends UserInvitationRow {
 
 interface CollectorDeviceRow {
   id: string;
-  orgId: string;
   sellerAccountExternalId: string | null;
   deviceName: string | null;
   status: string;
@@ -264,7 +234,6 @@ export class PostgresSyncStore {
     let rejectedCount = 0;
     let nextCursor: string | null = null;
 
-    await this.ensureOrg(batch.orgId);
     const sellerAccountId = await this.upsertSellerAccount(batch);
     const deviceId = await this.upsertCollectorDevice(batch, sellerAccountId);
     const customerIds = new Map<string, string>();
@@ -309,16 +278,15 @@ export class PostgresSyncStore {
     return result;
   }
 
-  async listSellerAccounts(_orgId: string): Promise<StoredSellerAccount[]> {
+  async listSellerAccounts(): Promise<StoredSellerAccount[]> {
     return [];
   }
 
-  async listCustomers(_orgId: string): Promise<StoredCustomer[]> {
+  async listCustomers(): Promise<StoredCustomer[]> {
     const result = await this.client.query<CustomerRow>(
       `
       /* list_customers */
       SELECT
-        c.org_id AS "orgId",
         s.external_account_id AS "sellerAccountExternalId",
         c.external_customer_id AS "externalCustomerId",
         c.login_id AS "loginId",
@@ -328,14 +296,12 @@ export class PostgresSyncStore {
         c.stage AS "stage"
       FROM customer c
       INNER JOIN seller_account s ON s.id = c.seller_account_id
-      WHERE c.org_id = $1
       ORDER BY c.updated_at DESC, c.external_customer_id ASC
       `,
-      [_orgId]
+      []
     );
 
     return result.rows.map((row) => ({
-      orgId: row.orgId,
       sellerAccountExternalId: row.sellerAccountExternalId,
       externalCustomerId: row.externalCustomerId,
       ...optionalProps({
@@ -348,12 +314,11 @@ export class PostgresSyncStore {
     }));
   }
 
-  async listConversations(_orgId: string): Promise<StoredConversation[]> {
+  async listConversations(): Promise<StoredConversation[]> {
     const result = await this.client.query<ConversationRow>(
       `
       /* list_conversations */
       SELECT
-        conv.org_id AS "orgId",
         s.external_account_id AS "sellerAccountExternalId",
         conv.external_conversation_id AS "externalConversationId",
         c.external_customer_id AS "externalCustomerId",
@@ -361,14 +326,12 @@ export class PostgresSyncStore {
       FROM conversation conv
       INNER JOIN seller_account s ON s.id = conv.seller_account_id
       LEFT JOIN customer c ON c.id = conv.customer_id
-      WHERE conv.org_id = $1
       ORDER BY conv.last_message_at DESC NULLS LAST, conv.external_conversation_id ASC
       `,
-      [_orgId]
+      []
     );
 
     return result.rows.map((row) => ({
-      orgId: row.orgId,
       sellerAccountExternalId: row.sellerAccountExternalId,
       externalConversationId: row.externalConversationId,
       ...optionalProps({
@@ -378,12 +341,11 @@ export class PostgresSyncStore {
     }));
   }
 
-  async listMessages(_orgId: string, externalConversationId?: string): Promise<StoredMessage[]> {
+  async listMessages(externalConversationId?: string): Promise<StoredMessage[]> {
     const result = await this.client.query<MessageRow>(
       `
       /* list_messages */
       SELECT
-        m.org_id AS "orgId",
         s.external_account_id AS "sellerAccountExternalId",
         conv.external_conversation_id AS "externalConversationId",
         m.external_message_id AS "externalMessageId",
@@ -400,15 +362,13 @@ export class PostgresSyncStore {
       FROM message m
       INNER JOIN seller_account s ON s.id = m.seller_account_id
       INNER JOIN conversation conv ON conv.id = m.conversation_id
-      WHERE m.org_id = $1
-        AND ($2::text IS NULL OR conv.external_conversation_id = $2)
+      WHERE ($1::text IS NULL OR conv.external_conversation_id = $1)
       ORDER BY m.sent_at ASC NULLS LAST, m.id ASC
       `,
-      [_orgId, externalConversationId || null]
+      [externalConversationId || null]
     );
 
     return result.rows.map((row) => ({
-      orgId: row.orgId,
       sellerAccountExternalId: row.sellerAccountExternalId,
       externalConversationId: row.externalConversationId,
       direction: row.direction,
@@ -429,28 +389,25 @@ export class PostgresSyncStore {
       `
       /* create_customer_note */
       WITH scoped_customer AS (
-        SELECT c.id AS customer_id, c.org_id
+        SELECT c.id AS customer_id
         FROM customer c
         INNER JOIN seller_account s ON s.id = c.seller_account_id
-        WHERE c.org_id = $1
-          AND s.external_account_id = $2
-          AND c.external_customer_id = $3
+        WHERE s.external_account_id = $1
+          AND c.external_customer_id = $2
       )
-      INSERT INTO customer_note (org_id, customer_id, body, created_by)
-      SELECT org_id, customer_id, $4, $5
+      INSERT INTO customer_note (customer_id, body, created_by)
+      SELECT customer_id, $3, $4
       FROM scoped_customer
       RETURNING
         id::text AS "id",
-        org_id::text AS "orgId",
-        $2::text AS "sellerAccountExternalId",
-        $3::text AS "externalCustomerId",
+        $1::text AS "sellerAccountExternalId",
+        $2::text AS "externalCustomerId",
         body AS "body",
         created_by::text AS "createdByUserId",
         created_at AS "createdAt",
         updated_at AS "updatedAt"
       `,
       [
-        input.orgId,
         input.sellerAccountExternalId,
         input.externalCustomerId,
         input.body,
@@ -466,7 +423,6 @@ export class PostgresSyncStore {
       /* list_customer_notes */
       SELECT
         n.id::text AS "id",
-        n.org_id::text AS "orgId",
         s.external_account_id AS "sellerAccountExternalId",
         c.external_customer_id AS "externalCustomerId",
         n.body AS "body",
@@ -476,9 +432,8 @@ export class PostgresSyncStore {
       FROM customer_note n
       INNER JOIN customer c ON c.id = n.customer_id
       INNER JOIN seller_account s ON s.id = c.seller_account_id
-      WHERE n.org_id = $1
-        AND s.external_account_id = $2
-        AND c.external_customer_id = $3
+      WHERE s.external_account_id = $1
+        AND c.external_customer_id = $2
       ORDER BY n.created_at DESC, n.id ASC
       `,
       customerScopeParams(scope)
@@ -491,29 +446,26 @@ export class PostgresSyncStore {
       `
       /* add_customer_tag */
       WITH scoped_customer AS (
-        SELECT c.id AS customer_id, c.org_id
+        SELECT c.id AS customer_id
         FROM customer c
         INNER JOIN seller_account s ON s.id = c.seller_account_id
-        WHERE c.org_id = $1
-          AND s.external_account_id = $2
-          AND c.external_customer_id = $3
+        WHERE s.external_account_id = $1
+          AND c.external_customer_id = $2
       )
-      INSERT INTO customer_tag (org_id, customer_id, tag, created_by)
-      SELECT org_id, customer_id, $4, $5
+      INSERT INTO customer_tag (customer_id, tag, created_by)
+      SELECT customer_id, $3, $4
       FROM scoped_customer
-      ON CONFLICT (org_id, customer_id, tag)
+      ON CONFLICT (customer_id, tag)
       DO UPDATE SET tag = customer_tag.tag
       RETURNING
         id::text AS "id",
-        org_id::text AS "orgId",
-        $2::text AS "sellerAccountExternalId",
-        $3::text AS "externalCustomerId",
+        $1::text AS "sellerAccountExternalId",
+        $2::text AS "externalCustomerId",
         tag AS "tag",
         created_by::text AS "createdByUserId",
         created_at AS "createdAt"
       `,
       [
-        input.orgId,
         input.sellerAccountExternalId,
         input.externalCustomerId,
         input.tag,
@@ -529,7 +481,6 @@ export class PostgresSyncStore {
       /* list_customer_tags */
       SELECT
         t.id::text AS "id",
-        t.org_id::text AS "orgId",
         s.external_account_id AS "sellerAccountExternalId",
         c.external_customer_id AS "externalCustomerId",
         t.tag AS "tag",
@@ -538,9 +489,8 @@ export class PostgresSyncStore {
       FROM customer_tag t
       INNER JOIN customer c ON c.id = t.customer_id
       INNER JOIN seller_account s ON s.id = c.seller_account_id
-      WHERE t.org_id = $1
-        AND s.external_account_id = $2
-        AND c.external_customer_id = $3
+      WHERE s.external_account_id = $1
+        AND c.external_customer_id = $2
       ORDER BY t.tag ASC
       `,
       customerScopeParams(scope)
@@ -554,21 +504,19 @@ export class PostgresSyncStore {
       `
       /* create_follow_up_task */
       WITH scoped_customer AS (
-        SELECT c.id AS customer_id, c.org_id
+        SELECT c.id AS customer_id
         FROM customer c
         INNER JOIN seller_account s ON s.id = c.seller_account_id
-        WHERE c.org_id = $1
-          AND s.external_account_id = $2
-          AND c.external_customer_id = $3
+        WHERE s.external_account_id = $1
+          AND c.external_customer_id = $2
       )
-      INSERT INTO follow_up_task (org_id, customer_id, title, assigned_to, due_at, status)
-      SELECT org_id, customer_id, $4, $5, $6, $7
+      INSERT INTO follow_up_task (customer_id, title, assigned_to, due_at, status)
+      SELECT customer_id, $3, $4, $5, $6
       FROM scoped_customer
       RETURNING
         id::text AS "id",
-        org_id::text AS "orgId",
-        $2::text AS "sellerAccountExternalId",
-        $3::text AS "externalCustomerId",
+        $1::text AS "sellerAccountExternalId",
+        $2::text AS "externalCustomerId",
         title AS "title",
         assigned_to::text AS "assignedToUserId",
         status AS "status",
@@ -577,7 +525,6 @@ export class PostgresSyncStore {
         updated_at AS "updatedAt"
       `,
       [
-        input.orgId,
         input.sellerAccountExternalId,
         input.externalCustomerId,
         input.title,
@@ -595,7 +542,6 @@ export class PostgresSyncStore {
       /* list_follow_up_tasks */
       SELECT
         f.id::text AS "id",
-        f.org_id::text AS "orgId",
         s.external_account_id AS "sellerAccountExternalId",
         c.external_customer_id AS "externalCustomerId",
         f.title AS "title",
@@ -607,9 +553,8 @@ export class PostgresSyncStore {
       FROM follow_up_task f
       INNER JOIN customer c ON c.id = f.customer_id
       INNER JOIN seller_account s ON s.id = c.seller_account_id
-      WHERE f.org_id = $1
-        AND s.external_account_id = $2
-        AND c.external_customer_id = $3
+      WHERE s.external_account_id = $1
+        AND c.external_customer_id = $2
       ORDER BY f.due_at ASC NULLS LAST, f.created_at DESC
       `,
       customerScopeParams(scope)
@@ -622,32 +567,29 @@ export class PostgresSyncStore {
       `
       /* assign_customer */
       WITH scoped_customer AS (
-        SELECT c.id AS customer_id, c.org_id
+        SELECT c.id AS customer_id
         FROM customer c
         INNER JOIN seller_account s ON s.id = c.seller_account_id
-        WHERE c.org_id = $1
-          AND s.external_account_id = $2
-          AND c.external_customer_id = $3
+        WHERE s.external_account_id = $1
+          AND c.external_customer_id = $2
       )
-      INSERT INTO customer_assignment (org_id, customer_id, user_id, assigned_by)
-      SELECT org_id, customer_id, $4, $5
+      INSERT INTO customer_assignment (customer_id, user_id, assigned_by)
+      SELECT customer_id, $3, $4
       FROM scoped_customer
-      ON CONFLICT (org_id, customer_id, user_id)
+      ON CONFLICT (customer_id, user_id)
       DO UPDATE SET
         assigned_by = EXCLUDED.assigned_by,
         updated_at = now()
       RETURNING
         id::text AS "id",
-        org_id::text AS "orgId",
-        $2::text AS "sellerAccountExternalId",
-        $3::text AS "externalCustomerId",
+        $1::text AS "sellerAccountExternalId",
+        $2::text AS "externalCustomerId",
         user_id::text AS "assignedToUserId",
         assigned_by::text AS "assignedByUserId",
         assigned_at AS "assignedAt",
         updated_at AS "updatedAt"
       `,
       [
-        input.orgId,
         input.sellerAccountExternalId,
         input.externalCustomerId,
         input.assignedToUserId,
@@ -663,7 +605,6 @@ export class PostgresSyncStore {
       /* get_customer_assignment */
       SELECT
         a.id::text AS "id",
-        a.org_id::text AS "orgId",
         s.external_account_id AS "sellerAccountExternalId",
         c.external_customer_id AS "externalCustomerId",
         a.user_id::text AS "assignedToUserId",
@@ -673,9 +614,8 @@ export class PostgresSyncStore {
       FROM customer_assignment a
       INNER JOIN customer c ON c.id = a.customer_id
       INNER JOIN seller_account s ON s.id = c.seller_account_id
-      WHERE a.org_id = $1
-        AND s.external_account_id = $2
-        AND c.external_customer_id = $3
+      WHERE s.external_account_id = $1
+        AND c.external_customer_id = $2
       ORDER BY a.updated_at DESC, a.assigned_at DESC
       LIMIT 1
       `,
@@ -692,18 +632,16 @@ export class PostgresSyncStore {
       WITH updated_task AS (
         UPDATE follow_up_task
         SET
-          status = COALESCE($3, status),
-          title = COALESCE($4, title),
-          assigned_to = COALESCE($5, assigned_to),
-          due_at = COALESCE($6, due_at),
+          status = COALESCE($2, status),
+          title = COALESCE($3, title),
+          assigned_to = COALESCE($4, assigned_to),
+          due_at = COALESCE($5, due_at),
           updated_at = now()
-        WHERE org_id = $1
-          AND id = $2
-        RETURNING id, org_id, customer_id, title, assigned_to, status, due_at, created_at, updated_at
+        WHERE id = $1
+        RETURNING id, customer_id, title, assigned_to, status, due_at, created_at, updated_at
       )
       SELECT
         f.id::text AS "id",
-        f.org_id::text AS "orgId",
         s.external_account_id AS "sellerAccountExternalId",
         c.external_customer_id AS "externalCustomerId",
         f.title AS "title",
@@ -717,7 +655,6 @@ export class PostgresSyncStore {
       INNER JOIN seller_account s ON s.id = c.seller_account_id
       `,
       [
-        input.orgId,
         input.taskId,
         input.status || null,
         input.title || null,
@@ -732,11 +669,10 @@ export class PostgresSyncStore {
     const result = await this.client.query<AuditLogRow>(
       `
       /* append_audit_log */
-      INSERT INTO audit_log (org_id, actor_user_id, action, target_type, target_id, metadata)
-      VALUES ($1, $2, $3, $4, $5, $6)
+      INSERT INTO audit_log (actor_user_id, action, target_type, target_id, metadata)
+      VALUES ($1, $2, $3, $4, $5)
       RETURNING
         id::text AS "id",
-        org_id::text AS "orgId",
         actor_user_id::text AS "actorUserId",
         action AS "action",
         target_type AS "targetType",
@@ -745,7 +681,6 @@ export class PostgresSyncStore {
         created_at AS "createdAt"
       `,
       [
-        input.orgId,
         input.actorUserId || null,
         input.action,
         input.targetType,
@@ -756,13 +691,12 @@ export class PostgresSyncStore {
     return mapAuditLog(requiredRow(result.rows[0], "audit_log"));
   }
 
-  async listAuditLogs(orgId: string): Promise<StoredAuditLog[]> {
+  async listAuditLogs(): Promise<StoredAuditLog[]> {
     const result = await this.client.query<AuditLogRow>(
       `
       /* list_audit_logs */
       SELECT
         id::text AS "id",
-        org_id::text AS "orgId",
         actor_user_id::text AS "actorUserId",
         action AS "action",
         target_type AS "targetType",
@@ -770,10 +704,9 @@ export class PostgresSyncStore {
         metadata AS "metadata",
         created_at AS "createdAt"
       FROM audit_log
-      WHERE org_id = $1
       ORDER BY created_at ASC
       `,
-      [orgId]
+      []
     );
     return result.rows.map(mapAuditLog);
   }
@@ -783,15 +716,13 @@ export class PostgresSyncStore {
       `
       /* create_ai_summary */
       WITH scoped_customer AS (
-        SELECT c.id AS customer_id, c.org_id
+        SELECT c.id AS customer_id
         FROM customer c
         INNER JOIN seller_account s ON s.id = c.seller_account_id
-        WHERE c.org_id = $1
-          AND s.external_account_id = $2
-          AND c.external_customer_id = $3
+        WHERE s.external_account_id = $1
+          AND c.external_customer_id = $2
       )
       INSERT INTO ai_summary (
-        org_id,
         customer_id,
         prompt_version,
         summary,
@@ -800,13 +731,12 @@ export class PostgresSyncStore {
         source_message_start_at,
         source_message_end_at
       )
-      SELECT org_id, customer_id, $4, $5, $6, $7, $8, $9
+      SELECT customer_id, $3, $4, $5, $6, $7, $8
       FROM scoped_customer
       RETURNING
         id::text AS "id",
-        org_id::text AS "orgId",
-        $2::text AS "sellerAccountExternalId",
-        $3::text AS "externalCustomerId",
+        $1::text AS "sellerAccountExternalId",
+        $2::text AS "externalCustomerId",
         prompt_version AS "promptVersion",
         summary AS "summary",
         intent_level AS "intentLevel",
@@ -816,7 +746,6 @@ export class PostgresSyncStore {
         created_at AS "createdAt"
       `,
       [
-        input.orgId,
         input.sellerAccountExternalId,
         input.externalCustomerId,
         input.promptVersion,
@@ -836,7 +765,6 @@ export class PostgresSyncStore {
       /* get_latest_ai_summary */
       SELECT
         a.id::text AS "id",
-        a.org_id::text AS "orgId",
         s.external_account_id AS "sellerAccountExternalId",
         c.external_customer_id AS "externalCustomerId",
         a.prompt_version AS "promptVersion",
@@ -849,9 +777,8 @@ export class PostgresSyncStore {
       FROM ai_summary a
       INNER JOIN customer c ON c.id = a.customer_id
       INNER JOIN seller_account s ON s.id = c.seller_account_id
-      WHERE a.org_id = $1
-        AND s.external_account_id = $2
-        AND c.external_customer_id = $3
+      WHERE s.external_account_id = $1
+        AND c.external_customer_id = $2
       ORDER BY a.created_at DESC, a.id DESC
       LIMIT 1
       `,
@@ -868,18 +795,15 @@ export class PostgresSyncStore {
       WITH scoped_conversation AS (
         SELECT
           conv.id AS conversation_id,
-          conv.org_id,
           conv.customer_id,
           c.external_customer_id
         FROM conversation conv
         INNER JOIN seller_account s ON s.id = conv.seller_account_id
         INNER JOIN customer c ON c.id = conv.customer_id
-        WHERE conv.org_id = $1
-          AND s.external_account_id = $2
-          AND conv.external_conversation_id = $3
+        WHERE s.external_account_id = $1
+          AND conv.external_conversation_id = $2
       )
       INSERT INTO reply_suggestion (
-        org_id,
         customer_id,
         conversation_id,
         prompt_version,
@@ -887,14 +811,13 @@ export class PostgresSyncStore {
         status,
         created_by
       )
-      SELECT org_id, customer_id, conversation_id, $4, $5, $6, $7
+      SELECT customer_id, conversation_id, $3, $4, $5, $6
       FROM scoped_conversation
       RETURNING
         id::text AS "id",
-        org_id::text AS "orgId",
-        $2::text AS "sellerAccountExternalId",
+        $1::text AS "sellerAccountExternalId",
         (SELECT external_customer_id FROM scoped_conversation) AS "externalCustomerId",
-        $3::text AS "externalConversationId",
+        $2::text AS "externalConversationId",
         prompt_version AS "promptVersion",
         suggestion AS "suggestion",
         status AS "status",
@@ -903,7 +826,6 @@ export class PostgresSyncStore {
         updated_at AS "updatedAt"
       `,
       [
-        input.orgId,
         input.sellerAccountExternalId,
         input.externalConversationId,
         input.promptVersion,
@@ -921,7 +843,6 @@ export class PostgresSyncStore {
       /* list_reply_suggestions */
       SELECT
         r.id::text AS "id",
-        r.org_id::text AS "orgId",
         s.external_account_id AS "sellerAccountExternalId",
         c.external_customer_id AS "externalCustomerId",
         conv.external_conversation_id AS "externalConversationId",
@@ -935,38 +856,35 @@ export class PostgresSyncStore {
       INNER JOIN conversation conv ON conv.id = r.conversation_id
       INNER JOIN customer c ON c.id = r.customer_id
       INNER JOIN seller_account s ON s.id = conv.seller_account_id
-      WHERE r.org_id = $1
-        AND s.external_account_id = $2
-        AND conv.external_conversation_id = $3
+      WHERE s.external_account_id = $1
+        AND conv.external_conversation_id = $2
       ORDER BY r.created_at DESC, r.id DESC
       `,
-      [scope.orgId, scope.sellerAccountExternalId, scope.externalConversationId]
+      [scope.sellerAccountExternalId, scope.externalConversationId]
     );
     return result.rows.map(mapReplySuggestion);
   }
 
   async createInternalUser(input: CreateInternalUserInput): Promise<InternalUser> {
-    await this.ensureOrg(input.orgId);
     const roles = input.roles ?? ["sales"];
     const normalizedEmail = input.email.trim().toLowerCase();
     const result = await this.client.query<InternalUserRow>(
       `
       /* create_internal_user */
       WITH upsert_user AS (
-        INSERT INTO app_user (org_id, email, display_name, password_hash, status)
-        VALUES ($1, $2, $3, $4, $6)
-        ON CONFLICT (org_id, email)
+        INSERT INTO app_user (email, display_name, password_hash, status)
+        VALUES ($1, $2, $3, $5)
+        ON CONFLICT (email)
         DO UPDATE SET
           display_name = EXCLUDED.display_name,
           password_hash = EXCLUDED.password_hash,
           status = EXCLUDED.status,
           updated_at = now()
-        RETURNING id, org_id, email, display_name, status, created_at, updated_at
+        RETURNING id, email, display_name, status, created_at, updated_at
       ),
       removed_roles AS (
         DELETE FROM user_role
-        WHERE org_id = $1
-          AND user_id = (SELECT id FROM upsert_user)
+        WHERE user_id = (SELECT id FROM upsert_user)
         RETURNING 1
       ),
       roles_removed AS (
@@ -977,17 +895,17 @@ export class PostgresSyncStore {
       requested_roles AS (
         SELECT role_name AS name
         FROM upsert_user
-        CROSS JOIN LATERAL unnest($5::text[]) AS role_name
+        CROSS JOIN LATERAL unnest($4::text[]) AS role_name
       ),
       upsert_roles AS (
-        INSERT INTO role (org_id, name)
-        SELECT $1, name FROM requested_roles
-        ON CONFLICT (org_id, name) DO UPDATE SET name = EXCLUDED.name
+        INSERT INTO role (name)
+        SELECT name FROM requested_roles
+        ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
         RETURNING id, name
       ),
       linked_roles AS (
-        INSERT INTO user_role (org_id, user_id, role_id)
-        SELECT $1, upsert_user.id, upsert_roles.id
+        INSERT INTO user_role (user_id, role_id)
+        SELECT upsert_user.id, upsert_roles.id
         FROM upsert_user
         CROSS JOIN upsert_roles
         CROSS JOIN roles_removed
@@ -995,17 +913,15 @@ export class PostgresSyncStore {
       )
       SELECT
         id::text AS "id",
-        org_id AS "orgId",
         email AS "email",
         display_name AS "displayName",
         status AS "status",
-        $5::text[] AS "roles",
+        $4::text[] AS "roles",
         created_at AS "createdAt",
         updated_at AS "updatedAt"
       FROM upsert_user
       `,
       [
-        input.orgId,
         normalizedEmail,
         input.displayName,
         input.passwordHash,
@@ -1016,13 +932,12 @@ export class PostgresSyncStore {
     return mapInternalUser(requiredRow(result.rows[0], "internal_user"));
   }
 
-  async listInternalUsers(orgId: string): Promise<InternalUser[]> {
+  async listInternalUsers(): Promise<InternalUser[]> {
     const result = await this.client.query<InternalUserRow>(
       `
       /* list_internal_users */
       SELECT
         u.id::text AS "id",
-        u.org_id AS "orgId",
         u.email AS "email",
         u.display_name AS "displayName",
         u.status AS "status",
@@ -1030,13 +945,12 @@ export class PostgresSyncStore {
         u.created_at AS "createdAt",
         u.updated_at AS "updatedAt"
       FROM app_user u
-      LEFT JOIN user_role ur ON ur.user_id = u.id AND ur.org_id = u.org_id
+      LEFT JOIN user_role ur ON ur.user_id = u.id
       LEFT JOIN role r ON r.id = ur.role_id
-      WHERE u.org_id = $1
       GROUP BY u.id
       ORDER BY u.email ASC
       `,
-      [orgId]
+      []
     );
     return result.rows.map(mapInternalUser);
   }
@@ -1048,7 +962,6 @@ export class PostgresSyncStore {
       /* get_internal_user_credentials */
       SELECT
         u.id::text AS "id",
-        u.org_id AS "orgId",
         u.email AS "email",
         u.display_name AS "displayName",
         u.status AS "status",
@@ -1057,13 +970,12 @@ export class PostgresSyncStore {
         u.updated_at AS "updatedAt",
         u.password_hash AS "passwordHash"
       FROM app_user u
-      LEFT JOIN user_role ur ON ur.user_id = u.id AND ur.org_id = u.org_id
+      LEFT JOIN user_role ur ON ur.user_id = u.id
       LEFT JOIN role r ON r.id = ur.role_id
-      WHERE u.org_id = $1
-        AND u.email = $2
+      WHERE u.email = $1
       GROUP BY u.id
       `,
-      [input.orgId, normalizedEmail]
+      [normalizedEmail]
     );
     const row = result.rows[0];
     return row ? { ...mapInternalUser(row), passwordHash: row.passwordHash } : null;
@@ -1078,7 +990,6 @@ export class PostgresSyncStore {
       /* get_internal_user_credentials_by_email */
       SELECT
         u.id::text AS "id",
-        u.org_id AS "orgId",
         u.email AS "email",
         u.display_name AS "displayName",
         u.status AS "status",
@@ -1087,42 +998,16 @@ export class PostgresSyncStore {
         u.updated_at AS "updatedAt",
         u.password_hash AS "passwordHash"
       FROM app_user u
-      LEFT JOIN user_role ur ON ur.user_id = u.id AND ur.org_id = u.org_id
+      LEFT JOIN user_role ur ON ur.user_id = u.id
       LEFT JOIN role r ON r.id = ur.role_id
       WHERE u.email = $1
         AND u.status = 'active'
       GROUP BY u.id
-      ORDER BY u.org_id ASC
+      ORDER BY u.email ASC
       `,
       [normalizedEmail]
     );
     return result.rows.map((row) => ({ ...mapInternalUser(row), passwordHash: row.passwordHash }));
-  }
-
-  async listInternalUserWorkspacesByEmail(email: string): Promise<InternalWorkspaceSummary[]> {
-    const normalizedEmail = email.trim().toLowerCase();
-    const result = await this.client.query<InternalWorkspaceSummaryRow>(
-      `
-      /* list_internal_user_workspaces_by_email */
-      SELECT
-        o.id AS "orgId",
-        o.name AS "name",
-        u.id::text AS "userId",
-        u.email AS "email",
-        u.display_name AS "displayName",
-        COALESCE(array_agg(r.name ORDER BY r.name) FILTER (WHERE r.name IS NOT NULL), '{}'::text[]) AS "roles"
-      FROM app_user u
-      INNER JOIN org o ON o.id = u.org_id
-      LEFT JOIN user_role ur ON ur.user_id = u.id AND ur.org_id = u.org_id
-      LEFT JOIN role r ON r.id = ur.role_id
-      WHERE u.email = $1
-        AND u.status = 'active'
-      GROUP BY o.id, u.id
-      ORDER BY o.name ASC
-      `,
-      [normalizedEmail]
-    );
-    return result.rows.map(mapInternalWorkspaceSummary);
   }
 
   async updateInternalUser(input: UpdateInternalUserInput): Promise<InternalUser> {
@@ -1133,19 +1018,17 @@ export class PostgresSyncStore {
       WITH updated_user AS (
         UPDATE app_user
         SET
-          display_name = COALESCE($3, display_name),
-          password_hash = COALESCE($4, password_hash),
-          status = COALESCE($6, status),
+          display_name = COALESCE($2, display_name),
+          password_hash = COALESCE($3, password_hash),
+          status = COALESCE($5, status),
           updated_at = now()
-        WHERE org_id = $1
-          AND id = $2
-        RETURNING id, org_id, email, display_name, status, created_at, updated_at
+        WHERE id = $1
+        RETURNING id, email, display_name, status, created_at, updated_at
       ),
       removed_roles AS (
         DELETE FROM user_role
-        WHERE org_id = $1
-          AND user_id = $2
-          AND $5::text[] IS NOT NULL
+        WHERE user_id = $1
+          AND $4::text[] IS NOT NULL
         RETURNING 1
       ),
       roles_removed AS (
@@ -1156,17 +1039,17 @@ export class PostgresSyncStore {
       requested_roles AS (
         SELECT role_name AS name
         FROM updated_user
-        CROSS JOIN LATERAL unnest(COALESCE($5::text[], '{}'::text[])) AS role_name
+        CROSS JOIN LATERAL unnest(COALESCE($4::text[], '{}'::text[])) AS role_name
       ),
       upsert_roles AS (
-        INSERT INTO role (org_id, name)
-        SELECT $1, name FROM requested_roles
-        ON CONFLICT (org_id, name) DO UPDATE SET name = EXCLUDED.name
+        INSERT INTO role (name)
+        SELECT name FROM requested_roles
+        ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
         RETURNING id, name
       ),
       linked_roles AS (
-        INSERT INTO user_role (org_id, user_id, role_id)
-        SELECT $1, updated_user.id, upsert_roles.id
+        INSERT INTO user_role (user_id, role_id)
+        SELECT updated_user.id, upsert_roles.id
         FROM updated_user
         CROSS JOIN upsert_roles
         CROSS JOIN roles_removed
@@ -1174,20 +1057,18 @@ export class PostgresSyncStore {
       )
       SELECT
         u.id::text AS "id",
-        u.org_id AS "orgId",
         u.email AS "email",
         u.display_name AS "displayName",
         u.status AS "status",
-        COALESCE($5::text[], array_agg(r.name ORDER BY r.name) FILTER (WHERE r.name IS NOT NULL), '{}'::text[]) AS "roles",
+        COALESCE($4::text[], array_agg(r.name ORDER BY r.name) FILTER (WHERE r.name IS NOT NULL), '{}'::text[]) AS "roles",
         u.created_at AS "createdAt",
         u.updated_at AS "updatedAt"
       FROM updated_user u
-      LEFT JOIN user_role ur ON ur.user_id = u.id AND ur.org_id = u.org_id
+      LEFT JOIN user_role ur ON ur.user_id = u.id
       LEFT JOIN role r ON r.id = ur.role_id
-      GROUP BY u.id, u.org_id, u.email, u.display_name, u.status, u.created_at, u.updated_at
+      GROUP BY u.id, u.email, u.display_name, u.status, u.created_at, u.updated_at
       `,
       [
-        input.orgId,
         input.userId,
         input.displayName || null,
         input.passwordHash || null,
@@ -1212,97 +1093,17 @@ export class PostgresSyncStore {
     return result.rowCount > 0;
   }
 
-  async switchInternalSessionOrg(input: SwitchInternalSessionOrgInput): Promise<InternalSession> {
-    const tokenHash = hashContent(input.token);
-    const currentResult = await this.client.query<SwitchInternalSessionCurrentRow>(
-      `
-      /* switch_internal_session_org_current */
-      SELECT
-        s.token_hash AS "tokenHash",
-        u.email AS "email"
-      FROM internal_session s
-      INNER JOIN app_user u ON u.id = s.user_id
-      WHERE s.token_hash = $1
-        AND s.revoked_at IS NULL
-        AND s.expires_at > now()
-      LIMIT 1
-      `,
-      [tokenHash]
-    );
-    const current = currentResult.rows[0];
-    if (!current) throw new Error("internal_session_not_found");
-
-    const targetResult = await this.client.query<InternalUserRow>(
-      `
-      /* switch_internal_session_org_target */
-      SELECT
-        u.id::text AS "id",
-        u.org_id AS "orgId",
-        u.email AS "email",
-        u.display_name AS "displayName",
-        u.status AS "status",
-        COALESCE(array_agg(r.name ORDER BY r.name) FILTER (WHERE r.name IS NOT NULL), '{}'::text[]) AS "roles",
-        u.created_at AS "createdAt",
-        u.updated_at AS "updatedAt"
-      FROM app_user u
-      LEFT JOIN user_role ur ON ur.user_id = u.id AND ur.org_id = u.org_id
-      LEFT JOIN role r ON r.id = ur.role_id
-      WHERE u.org_id = $1
-        AND u.email = $2
-        AND u.status = 'active'
-      GROUP BY u.id
-      LIMIT 1
-      `,
-      [input.orgId, current.email]
-    );
-    const target = targetResult.rows[0];
-    if (!target) throw new Error("workspace_not_found");
-
-    const updatedResult = await this.client.query<InternalSessionRow>(
-      `
-      /* switch_internal_session_org_update */
-      WITH updated_session AS (
-        UPDATE internal_session
-        SET org_id = $2,
-            user_id = $3
-        WHERE token_hash = $1
-          AND revoked_at IS NULL
-          AND expires_at > now()
-        RETURNING token_hash, created_at, expires_at
-      )
-      SELECT
-        s.token_hash AS "tokenHash",
-        u.org_id AS "orgId",
-        u.id::text AS "userId",
-        u.email AS "email",
-        u.display_name AS "displayName",
-        COALESCE(array_agg(r.name ORDER BY r.name) FILTER (WHERE r.name IS NOT NULL), '{}'::text[]) AS "roles",
-        s.created_at AS "createdAt",
-        s.expires_at AS "expiresAt"
-      FROM updated_session s
-      INNER JOIN app_user u ON u.id = $3
-      LEFT JOIN user_role ur ON ur.user_id = u.id AND ur.org_id = u.org_id
-      LEFT JOIN role r ON r.id = ur.role_id
-      GROUP BY s.token_hash, s.created_at, s.expires_at, u.id
-      `,
-      [tokenHash, input.orgId, target.id]
-    );
-    return mapInternalSession(requiredRow(updatedResult.rows[0], "internal_session"), input.token);
-  }
-
   async createUserInvitation(input: CreateUserInvitationInput): Promise<StoredUserInvitation> {
-    await this.ensureOrg(input.orgId);
     const token = input.token || crypto.randomBytes(32).toString("hex");
     const normalizedEmail = input.email.trim().toLowerCase();
     const expiresAt = input.expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const result = await this.client.query<UserInvitationRow>(
       `
       /* create_user_invitation */
-      INSERT INTO user_invitation (org_id, email, display_name, roles, token_hash, created_by, expires_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO user_invitation (email, display_name, roles, token_hash, created_by, expires_at)
+      VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING
         id::text AS "id",
-        org_id AS "orgId",
         email AS "email",
         display_name AS "displayName",
         roles AS "roles",
@@ -1312,7 +1113,6 @@ export class PostgresSyncStore {
         created_at AS "createdAt"
       `,
       [
-        input.orgId,
         normalizedEmail,
         input.displayName,
         input.roles,
@@ -1330,7 +1130,6 @@ export class PostgresSyncStore {
       /* get_user_invitation */
       SELECT
         id::text AS "id",
-        org_id AS "orgId",
         email AS "email",
         display_name AS "displayName",
         roles AS "roles",
@@ -1364,24 +1163,23 @@ export class PostgresSyncStore {
         WHERE token_hash = $1
           AND accepted_at IS NULL
           AND expires_at > now()
-        RETURNING id, org_id, email, display_name, roles, created_by, expires_at, accepted_at, created_at
+        RETURNING id, email, display_name, roles, created_by, expires_at, accepted_at, created_at
       ),
       upsert_user AS (
-        INSERT INTO app_user (org_id, email, display_name, password_hash, status)
-        SELECT org_id, email, display_name, $2, 'active'
+        INSERT INTO app_user (email, display_name, password_hash, status)
+        SELECT email, display_name, $2, 'active'
         FROM claimed_invitation
-        ON CONFLICT (org_id, email)
+        ON CONFLICT (email)
         DO UPDATE SET
           display_name = EXCLUDED.display_name,
           password_hash = EXCLUDED.password_hash,
           status = 'active',
           updated_at = now()
-        RETURNING id, org_id, email, display_name, status, created_at, updated_at
+        RETURNING id, email, display_name, status, created_at, updated_at
       ),
       removed_roles AS (
         DELETE FROM user_role
-        WHERE org_id = (SELECT org_id FROM upsert_user)
-          AND user_id = (SELECT id FROM upsert_user)
+        WHERE user_id = (SELECT id FROM upsert_user)
         RETURNING 1
       ),
       roles_removed AS (
@@ -1393,14 +1191,14 @@ export class PostgresSyncStore {
         SELECT unnest((SELECT roles FROM claimed_invitation)) AS name
       ),
       upsert_roles AS (
-        INSERT INTO role (org_id, name)
-        SELECT (SELECT org_id FROM claimed_invitation), name FROM requested_roles
-        ON CONFLICT (org_id, name) DO UPDATE SET name = EXCLUDED.name
+        INSERT INTO role (name)
+        SELECT name FROM requested_roles
+        ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
         RETURNING id, name
       ),
       linked_roles AS (
-        INSERT INTO user_role (org_id, user_id, role_id)
-        SELECT upsert_user.org_id, upsert_user.id, upsert_roles.id
+        INSERT INTO user_role (user_id, role_id)
+        SELECT upsert_user.id, upsert_roles.id
         FROM upsert_user
         CROSS JOIN upsert_roles
         CROSS JOIN roles_removed
@@ -1415,7 +1213,6 @@ export class PostgresSyncStore {
           ELSE 'invitation_already_accepted'
         END AS "errorCode",
         i.id::text AS "id",
-        i.org_id AS "orgId",
         i.email AS "email",
         i.display_name AS "displayName",
         i.roles AS "roles",
@@ -1443,7 +1240,6 @@ export class PostgresSyncStore {
       invitation: mapUserInvitation(row),
       user: mapInternalUser({
         id: row.userId,
-        orgId: row.orgId,
         email: row.userEmail,
         displayName: row.userDisplayName,
         status: row.userStatus,
@@ -1464,28 +1260,25 @@ export class PostgresSyncStore {
       WITH matched_user AS (
         SELECT
           u.id,
-          u.org_id,
           u.email,
           u.display_name,
           COALESCE(array_agg(r.name ORDER BY r.name) FILTER (WHERE r.name IS NOT NULL), '{}'::text[]) AS roles
         FROM app_user u
-        LEFT JOIN user_role ur ON ur.user_id = u.id AND ur.org_id = u.org_id
+        LEFT JOIN user_role ur ON ur.user_id = u.id
         LEFT JOIN role r ON r.id = ur.role_id
-        WHERE u.org_id = $1
-          AND u.email = $2
-          AND u.password_hash = $3
+        WHERE u.email = $1
+          AND u.password_hash = $2
           AND u.status = 'active'
         GROUP BY u.id
       ),
       inserted_session AS (
-        INSERT INTO internal_session (org_id, user_id, token_hash, expires_at)
-        SELECT org_id, id, $4, $5
+        INSERT INTO internal_session (user_id, token_hash, expires_at)
+        SELECT id, $3, $4
         FROM matched_user
         RETURNING token_hash, created_at, expires_at
       )
       SELECT
         s.token_hash AS "tokenHash",
-        u.org_id AS "orgId",
         u.id::text AS "userId",
         u.email AS "email",
         u.display_name AS "displayName",
@@ -1496,7 +1289,6 @@ export class PostgresSyncStore {
       INNER JOIN inserted_session s ON true
       `,
       [
-        input.orgId,
         normalizedEmail,
         input.passwordHash,
         hashContent(token),
@@ -1512,7 +1304,6 @@ export class PostgresSyncStore {
       /* get_internal_session */
       SELECT
         s.token_hash AS "tokenHash",
-        u.org_id AS "orgId",
         u.id::text AS "userId",
         u.email AS "email",
         u.display_name AS "displayName",
@@ -1521,7 +1312,7 @@ export class PostgresSyncStore {
         s.expires_at AS "expiresAt"
       FROM internal_session s
       INNER JOIN app_user u ON u.id = s.user_id
-      LEFT JOIN user_role ur ON ur.user_id = u.id AND ur.org_id = u.org_id
+      LEFT JOIN user_role ur ON ur.user_id = u.id
       LEFT JOIN role r ON r.id = ur.role_id
       WHERE s.token_hash = $1
         AND s.revoked_at IS NULL
@@ -1536,7 +1327,6 @@ export class PostgresSyncStore {
   }
 
   async registerCollectorDevice(input: RegisterCollectorDeviceInput): Promise<RegisteredCollectorDevice> {
-    await this.ensureOrg(input.orgId);
     const token = input.token || crypto.randomBytes(32).toString("hex");
     const tokenHash = hashContent(token);
     const result = await this.client.query<CollectorDeviceRow>(
@@ -1545,13 +1335,12 @@ export class PostgresSyncStore {
       WITH seller AS (
         SELECT id, external_account_id
         FROM seller_account
-        WHERE org_id = $1
-          AND external_account_id = $2
+        WHERE external_account_id = $1
       ),
       upsert_device AS (
-        INSERT INTO collector_device (org_id, seller_account_id, device_name, device_token_hash, status)
-        VALUES ($1, (SELECT id FROM seller), $3, $4, $5)
-        ON CONFLICT (org_id, device_token_hash)
+        INSERT INTO collector_device (seller_account_id, device_name, device_token_hash, status)
+        VALUES ((SELECT id FROM seller), $2, $3, $4)
+        ON CONFLICT (device_token_hash)
         DO UPDATE SET
           seller_account_id = EXCLUDED.seller_account_id,
           device_name = COALESCE(EXCLUDED.device_name, collector_device.device_name),
@@ -1559,7 +1348,6 @@ export class PostgresSyncStore {
           updated_at = now()
         RETURNING
           id,
-          org_id,
           seller_account_id,
           device_name,
           device_token_hash,
@@ -1570,8 +1358,7 @@ export class PostgresSyncStore {
       )
       SELECT
         d.id::text AS "id",
-        d.org_id AS "orgId",
-        COALESCE(s.external_account_id, $2) AS "sellerAccountExternalId",
+        COALESCE(s.external_account_id, $1) AS "sellerAccountExternalId",
         d.device_name AS "deviceName",
         d.status AS "status",
         d.device_token_hash AS "tokenHash",
@@ -1582,7 +1369,6 @@ export class PostgresSyncStore {
       LEFT JOIN seller s ON s.id = d.seller_account_id
       `,
       [
-        input.orgId,
         input.sellerAccountExternalId || null,
         input.deviceName || null,
         tokenHash,
@@ -1596,13 +1382,12 @@ export class PostgresSyncStore {
     };
   }
 
-  async listCollectorDevices(orgId: string): Promise<CollectorDevice[]> {
+  async listCollectorDevices(): Promise<CollectorDevice[]> {
     const result = await this.client.query<CollectorDeviceRow>(
       `
       /* list_collector_devices */
       SELECT
         d.id::text AS "id",
-        d.org_id AS "orgId",
         s.external_account_id AS "sellerAccountExternalId",
         d.device_name AS "deviceName",
         d.status AS "status",
@@ -1611,10 +1396,9 @@ export class PostgresSyncStore {
         d.updated_at AS "updatedAt"
       FROM collector_device d
       LEFT JOIN seller_account s ON s.id = d.seller_account_id
-      WHERE d.org_id = $1
       ORDER BY d.created_at DESC
       `,
-      [orgId]
+      []
     );
     return result.rows.map(mapCollectorDevice);
   }
@@ -1627,13 +1411,11 @@ export class PostgresSyncStore {
         UPDATE collector_device
         SET status = 'revoked',
           updated_at = now()
-        WHERE org_id = $1
-          AND id = $2
-        RETURNING id, org_id, seller_account_id, device_name, status, last_heartbeat_at, created_at, updated_at
+        WHERE id = $1
+        RETURNING id, seller_account_id, device_name, status, last_heartbeat_at, created_at, updated_at
       )
       SELECT
         d.id::text AS "id",
-        d.org_id AS "orgId",
         s.external_account_id AS "sellerAccountExternalId",
         d.device_name AS "deviceName",
         d.status AS "status",
@@ -1643,7 +1425,7 @@ export class PostgresSyncStore {
       FROM revoked_device d
       LEFT JOIN seller_account s ON s.id = d.seller_account_id
       `,
-      [input.orgId, input.deviceId]
+      [input.deviceId]
     );
     return mapCollectorDevice(requiredRow(result.rows[0], "collector_device"));
   }
@@ -1658,11 +1440,10 @@ export class PostgresSyncStore {
           updated_at = now()
         WHERE device_token_hash = $1
           AND status = 'active'
-        RETURNING id, org_id, seller_account_id, device_name, status, last_heartbeat_at, created_at, updated_at
+        RETURNING id, seller_account_id, device_name, status, last_heartbeat_at, created_at, updated_at
       )
       SELECT
         d.id::text AS "id",
-        d.org_id AS "orgId",
         s.external_account_id AS "sellerAccountExternalId",
         d.device_name AS "deviceName",
         d.status AS "status",
@@ -1678,25 +1459,13 @@ export class PostgresSyncStore {
     return row ? mapCollectorDevice(row) : null;
   }
 
-  private async ensureOrg(orgId: string): Promise<void> {
-    await this.client.query(
-      `
-      /* ensure_org */
-      INSERT INTO org (id, name)
-      VALUES ($1, $1)
-      ON CONFLICT (id) DO NOTHING
-      `,
-      [orgId]
-    );
-  }
-
   private async upsertSellerAccount(batch: SyncBatch): Promise<string> {
     const result = await this.client.query<IdRow>(
       `
       /* upsert_seller_account */
-      INSERT INTO seller_account (org_id, external_account_id, display_name, last_seen_at, status)
-      VALUES ($1, $2, $3, $4, COALESCE($5, 'active'))
-      ON CONFLICT (org_id, external_account_id)
+      INSERT INTO seller_account (external_account_id, display_name, last_seen_at, status)
+      VALUES ($1, $2, $3, COALESCE($4, 'active'))
+      ON CONFLICT (external_account_id)
       DO UPDATE SET
         display_name = COALESCE(EXCLUDED.display_name, seller_account.display_name),
         last_seen_at = COALESCE(EXCLUDED.last_seen_at, seller_account.last_seen_at),
@@ -1705,7 +1474,6 @@ export class PostgresSyncStore {
       RETURNING id
       `,
       [
-        batch.orgId,
         batch.sellerAccount.externalAccountId,
         batch.sellerAccount.displayName || null,
         sourceTime(batch),
@@ -1719,9 +1487,9 @@ export class PostgresSyncStore {
     const result = await this.client.query<IdRow>(
       `
       /* upsert_collector_device */
-      INSERT INTO collector_device (org_id, seller_account_id, device_name, device_token_hash, last_heartbeat_at, status)
-      VALUES ($1, $2, $3, $4, $5, 'active')
-      ON CONFLICT (org_id, device_token_hash)
+      INSERT INTO collector_device (seller_account_id, device_name, device_token_hash, last_heartbeat_at, status)
+      VALUES ($1, $2, $3, $4, 'active')
+      ON CONFLICT (device_token_hash)
       DO UPDATE SET
         seller_account_id = EXCLUDED.seller_account_id,
         device_name = COALESCE(EXCLUDED.device_name, collector_device.device_name),
@@ -1730,7 +1498,6 @@ export class PostgresSyncStore {
       RETURNING id
       `,
       [
-        batch.orgId,
         sellerAccountId,
         batch.device.deviceName || null,
         hashContent(batch.device.deviceId),
@@ -1745,9 +1512,9 @@ export class PostgresSyncStore {
     const result = await this.client.query<IdRow>(
       `
       /* upsert_customer */
-      INSERT INTO customer (org_id, seller_account_id, external_customer_id, login_id, display_name, country, stage)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      ON CONFLICT (org_id, seller_account_id, external_customer_id)
+      INSERT INTO customer (seller_account_id, external_customer_id, login_id, display_name, country, stage)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (seller_account_id, external_customer_id)
       DO UPDATE SET
         login_id = COALESCE(EXCLUDED.login_id, customer.login_id),
         display_name = COALESCE(EXCLUDED.display_name, customer.display_name),
@@ -1757,7 +1524,6 @@ export class PostgresSyncStore {
       RETURNING id
       `,
       [
-        batch.orgId,
         sellerAccountId,
         externalCustomerId,
         customer?.loginId || null,
@@ -1779,9 +1545,9 @@ export class PostgresSyncStore {
     const result = await this.client.query<IdRow>(
       `
       /* upsert_conversation */
-      INSERT INTO conversation (org_id, seller_account_id, customer_id, external_conversation_id, last_message_at)
-      VALUES ($1, $2, $3, $4, $5)
-      ON CONFLICT (org_id, seller_account_id, external_conversation_id)
+      INSERT INTO conversation (seller_account_id, customer_id, external_conversation_id, last_message_at)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (seller_account_id, external_conversation_id)
       DO UPDATE SET
         customer_id = COALESCE(EXCLUDED.customer_id, conversation.customer_id),
         last_message_at = COALESCE(EXCLUDED.last_message_at, conversation.last_message_at),
@@ -1789,7 +1555,6 @@ export class PostgresSyncStore {
       RETURNING id
       `,
       [
-        batch.orgId,
         sellerAccountId,
         customerId,
         externalConversationId,
@@ -1804,18 +1569,16 @@ export class PostgresSyncStore {
       `
       /* insert_sync_batch */
       INSERT INTO sync_batch (
-        org_id,
         seller_account_id,
         collector_device_id,
         source_batch_key,
         cursor,
         source_meta
       )
-      VALUES ($1, $2, $3, $4, $5, $6)
-      ON CONFLICT (org_id, seller_account_id, source_batch_key) DO NOTHING
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (seller_account_id, source_batch_key) DO NOTHING
       `,
       [
-        batch.orgId,
         sellerAccountId,
         deviceId,
         sourceBatchKey(batch),
@@ -1838,15 +1601,13 @@ export class PostgresSyncStore {
         accepted_count = $1,
         rejected_count = $2,
         warnings = $3
-      WHERE org_id = $4
-        AND seller_account_id = $5
-        AND source_batch_key = $6
+      WHERE seller_account_id = $4
+        AND source_batch_key = $5
       `,
       [
         result.acceptedCount,
         result.rejectedCount,
         result.warnings,
-        batch.orgId,
         sellerAccountId,
         sourceBatchKey(batch)
       ]
@@ -1864,7 +1625,6 @@ export class PostgresSyncStore {
       `
       /* insert_message */
       INSERT INTO message (
-        org_id,
         seller_account_id,
         conversation_id,
         external_message_id,
@@ -1875,12 +1635,11 @@ export class PostgresSyncStore {
         content_hash,
         raw_sanitized
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       ON CONFLICT DO NOTHING
       RETURNING id
       `,
       [
-        batch.orgId,
         sellerAccountId,
         conversationId,
         message.externalMessageId || null,
@@ -1920,7 +1679,6 @@ function sourceBatchKey(batch: SyncBatch): string {
   if (typeof explicit === "string" && explicit) return explicit;
   return hashContent(
     JSON.stringify({
-      orgId: batch.orgId,
       seller: batch.sellerAccount.externalAccountId,
       device: batch.device.deviceId,
       cursor: batch.cursor || null,
@@ -1948,14 +1706,13 @@ function optionalProps<T extends Record<string, unknown>>(
   };
 }
 
-function customerScopeParams(scope: CustomerScope): [string, string, string] {
-  return [scope.orgId, scope.sellerAccountExternalId, scope.externalCustomerId];
+function customerScopeParams(scope: CustomerScope): [string, string] {
+  return [scope.sellerAccountExternalId, scope.externalCustomerId];
 }
 
 function mapCustomerNote(row: CustomerNoteRow): StoredCustomerNote {
   return {
     id: row.id,
-    orgId: row.orgId,
     sellerAccountExternalId: row.sellerAccountExternalId,
     externalCustomerId: row.externalCustomerId,
     body: row.body,
@@ -1970,7 +1727,6 @@ function mapCustomerNote(row: CustomerNoteRow): StoredCustomerNote {
 function mapCustomerTag(row: CustomerTagRow): StoredCustomerTag {
   return {
     id: row.id,
-    orgId: row.orgId,
     sellerAccountExternalId: row.sellerAccountExternalId,
     externalCustomerId: row.externalCustomerId,
     tag: row.tag,
@@ -1984,7 +1740,6 @@ function mapCustomerTag(row: CustomerTagRow): StoredCustomerTag {
 function mapFollowUpTask(row: FollowUpTaskRow): StoredFollowUpTask {
   return {
     id: row.id,
-    orgId: row.orgId,
     sellerAccountExternalId: row.sellerAccountExternalId,
     externalCustomerId: row.externalCustomerId,
     title: row.title,
@@ -2001,7 +1756,6 @@ function mapFollowUpTask(row: FollowUpTaskRow): StoredFollowUpTask {
 function mapCustomerAssignment(row: CustomerAssignmentRow): StoredCustomerAssignment {
   return {
     id: row.id,
-    orgId: row.orgId,
     sellerAccountExternalId: row.sellerAccountExternalId,
     externalCustomerId: row.externalCustomerId,
     assignedToUserId: row.assignedToUserId,
@@ -2016,7 +1770,6 @@ function mapCustomerAssignment(row: CustomerAssignmentRow): StoredCustomerAssign
 function mapAuditLog(row: AuditLogRow): StoredAuditLog {
   return {
     id: row.id,
-    orgId: row.orgId,
     action: row.action,
     targetType: row.targetType,
     createdAt: isoString(row.createdAt) || "",
@@ -2031,7 +1784,6 @@ function mapAuditLog(row: AuditLogRow): StoredAuditLog {
 function mapAiSummary(row: AiSummaryRow): StoredAiSummary {
   return {
     id: row.id,
-    orgId: row.orgId,
     sellerAccountExternalId: row.sellerAccountExternalId,
     externalCustomerId: row.externalCustomerId,
     promptVersion: row.promptVersion,
@@ -2049,7 +1801,6 @@ function mapAiSummary(row: AiSummaryRow): StoredAiSummary {
 function mapReplySuggestion(row: ReplySuggestionRow): StoredReplySuggestion {
   return {
     id: row.id,
-    orgId: row.orgId,
     sellerAccountExternalId: row.sellerAccountExternalId,
     externalCustomerId: row.externalCustomerId,
     externalConversationId: row.externalConversationId,
@@ -2067,7 +1818,6 @@ function mapReplySuggestion(row: ReplySuggestionRow): StoredReplySuggestion {
 function mapCollectorDevice(row: CollectorDeviceRow): CollectorDevice {
   return {
     id: row.id,
-    orgId: row.orgId,
     sellerAccountExternalId: row.sellerAccountExternalId ?? undefined,
     deviceName: row.deviceName ?? undefined,
     status: row.status,
@@ -2080,7 +1830,6 @@ function mapCollectorDevice(row: CollectorDeviceRow): CollectorDevice {
 function mapInternalUser(row: InternalUserRow): InternalUser {
   return {
     id: row.id,
-    orgId: row.orgId,
     email: row.email,
     displayName: row.displayName,
     status: row.status,
@@ -2090,22 +1839,10 @@ function mapInternalUser(row: InternalUserRow): InternalUser {
   };
 }
 
-function mapInternalWorkspaceSummary(row: InternalWorkspaceSummaryRow): InternalWorkspaceSummary {
-  return {
-    orgId: row.orgId,
-    name: row.name,
-    userId: row.userId,
-    email: row.email,
-    displayName: row.displayName,
-    roles: normalizeRoles(row.roles)
-  };
-}
-
 function mapInternalSession(row: InternalSessionRow, token: string): InternalSession {
   return {
     token,
     tokenHash: row.tokenHash,
-    orgId: row.orgId,
     userId: row.userId,
     email: row.email,
     displayName: row.displayName,
@@ -2118,7 +1855,6 @@ function mapInternalSession(row: InternalSessionRow, token: string): InternalSes
 function mapUserInvitation(row: UserInvitationRow): StoredUserInvitation {
   return {
     id: row.id,
-    orgId: row.orgId,
     email: row.email,
     displayName: row.displayName,
     roles: normalizeRoles(row.roles),

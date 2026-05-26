@@ -342,7 +342,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "user-db-id",
-            orgId: "org_internal",
             email: "admin@example.com",
             displayName: "Admin User",
             status: "active",
@@ -350,85 +349,6 @@ class FakePostgresClient implements SqlClient {
             createdAt: "2026-05-25T10:00:00.000Z",
             updatedAt: "2026-05-25T10:00:00.000Z",
             passwordHash: "password-hash"
-          },
-          {
-            id: "user-other-id",
-            orgId: "org_other",
-            email: "admin@example.com",
-            displayName: "Other Admin",
-            status: "active",
-            roles: ["supervisor"],
-            createdAt: "2026-05-25T10:00:00.000Z",
-            updatedAt: "2026-05-25T10:00:00.000Z",
-            passwordHash: "other-password-hash"
-          }
-        ] as T[],
-        rowCount: 2
-      };
-    }
-    if (/list_internal_user_workspaces_by_email/i.test(sql)) {
-      return {
-        rows: [
-          {
-            orgId: "org_internal",
-            name: "org_internal",
-            userId: "user-db-id",
-            email: "admin@example.com",
-            displayName: "Admin User",
-            roles: ["admin"]
-          },
-          {
-            orgId: "org_other",
-            name: "org_other",
-            userId: "user-other-id",
-            email: "admin@example.com",
-            displayName: "Other Admin",
-            roles: ["supervisor"]
-          }
-        ] as T[],
-        rowCount: 2
-      };
-    }
-    if (/switch_internal_session_org_current/i.test(sql)) {
-      return {
-        rows: [
-          {
-            tokenHash: "session-token-hash",
-            email: "admin@example.com"
-          }
-        ] as T[],
-        rowCount: 1
-      };
-    }
-    if (/switch_internal_session_org_target/i.test(sql)) {
-      return {
-        rows: [
-          {
-            id: "user-other-id",
-            orgId: "org_other",
-            email: "admin@example.com",
-            displayName: "Other Admin",
-            status: "active",
-            roles: ["supervisor"],
-            createdAt: "2026-05-25T10:00:00.000Z",
-            updatedAt: "2026-05-25T10:00:00.000Z"
-          }
-        ] as T[],
-        rowCount: 1
-      };
-    }
-    if (/switch_internal_session_org_update/i.test(sql)) {
-      return {
-        rows: [
-          {
-            tokenHash: "session-token-hash",
-            orgId: "org_other",
-            userId: "user-other-id",
-            email: "admin@example.com",
-            displayName: "Other Admin",
-            roles: ["supervisor"],
-            createdAt: "2026-05-25T10:01:00.000Z",
-            expiresAt: "2026-05-26T00:00:00.000Z"
           }
         ] as T[],
         rowCount: 1
@@ -676,6 +596,55 @@ class FailingMessageInsertClient extends FakePostgresClient {
   }
 }
 
+function makeBatch() {
+  return {
+    sellerAccount: { externalAccountId: "seller-1", displayName: "Seller One" },
+    device: { deviceId: "device-1", deviceName: "MacBook" },
+    sourceMeta: { collectedAt: "2026-05-25T10:00:00.000Z" },
+    customers: [{ externalCustomerId: "customer-1", displayName: "Buyer", country: "US" }],
+    conversations: [{ externalConversationId: "conv-1", externalCustomerId: "customer-1" }],
+    messages: [
+      {
+        externalConversationId: "conv-1",
+        externalMessageId: "msg-1",
+        direction: "received",
+        content: "hello",
+        sentAt: "2026-05-25T09:00:00.000Z",
+        rawSanitized: { messageId: "msg-1" }
+      }
+    ]
+  } as const;
+}
+
+test("PostgresSyncStore creates internal users without organization columns", async () => {
+  const client = new FakePostgresClient();
+  const store = new PostgresSyncStore(client);
+
+  await store.createInternalUser({
+    email: "admin@example.com",
+    displayName: "Admin",
+    passwordHash: "hash",
+    roles: ["admin"]
+  });
+
+  const sql = client.queries.map((query) => query.sql).join("\n").toLowerCase();
+  assert.doesNotMatch(sql, /\borg_id\b/);
+  assert.match(sql, /insert into app_user \(email, display_name, password_hash, status\)/);
+  assert.match(sql, /insert into role \(name\)/);
+  assert.match(sql, /insert into user_role \(user_id, role_id\)/);
+});
+
+test("PostgresSyncStore stores sync batches without organization parameters", async () => {
+  const client = new FakePostgresClient();
+  const store = new PostgresSyncStore(client);
+
+  await store.acceptSyncBatch(makeBatch());
+
+  const sql = client.queries.map((query) => query.sql).join("\n").toLowerCase();
+  assert.doesNotMatch(sql, /\borg_id\b/);
+  assert.doesNotMatch(sql, /ensure_org/);
+});
+
 test("PostgresSyncStore upserts entities and inserts messages with idempotent counts", async () => {
   const client = new FakePostgresClient();
   const store = new PostgresSyncStore(client);
@@ -744,7 +713,7 @@ test("PostgresSyncStore persists sync batch result statistics", async () => {
 
   const statsQuery = client.queries.find((query) => /update_sync_batch_result/i.test(query.sql));
   assert.ok(statsQuery);
-  assert.deepEqual(statsQuery.params, [1, 1, [], "org_internal", "seller-db-id", "batch-1"]);
+  assert.deepEqual(statsQuery.params, [1, 1, [], "seller-db-id", "batch-1"]);
 });
 
 test("PostgresSyncStore wraps sync batch writes in a transaction", async () => {
@@ -830,15 +799,14 @@ test("PostgresSyncStore parameterizes raw sanitized data and never writes raw cr
   );
 });
 
-test("PostgresSyncStore lists customers with parameterized org scope", async () => {
+test("PostgresSyncStore lists customers without organization scope", async () => {
   const client = new FakePostgresClient();
   const store = new PostgresSyncStore(client);
 
-  const customers = await store.listCustomers("org_internal");
+  const customers = await store.listCustomers();
 
   assert.deepEqual(customers, [
     {
-      orgId: "org_internal",
       sellerAccountExternalId: "seller-1",
       externalCustomerId: "customer-1",
       loginId: "buyer_login",
@@ -848,7 +816,7 @@ test("PostgresSyncStore lists customers with parameterized org scope", async () 
       stage: "qualified"
     }
   ]);
-  assert.deepEqual(client.queries.at(-1)?.params, ["org_internal"]);
+  assert.deepEqual(client.queries.at(-1)?.params, []);
   assert.match(client.queries.at(-1)?.sql || "", /list_customers/i);
 });
 
@@ -856,18 +824,17 @@ test("PostgresSyncStore lists conversations with customer linkage", async () => 
   const client = new FakePostgresClient();
   const store = new PostgresSyncStore(client);
 
-  const conversations = await store.listConversations("org_internal");
+  const conversations = await store.listConversations();
 
   assert.deepEqual(conversations, [
     {
-      orgId: "org_internal",
       sellerAccountExternalId: "seller-1",
       externalConversationId: "conv-1",
       externalCustomerId: "customer-1",
       lastMessageAt: "2026-05-25T09:30:00.000Z"
     }
   ]);
-  assert.deepEqual(client.queries.at(-1)?.params, ["org_internal"]);
+  assert.deepEqual(client.queries.at(-1)?.params, []);
   assert.match(client.queries.at(-1)?.sql || "", /list_conversations/i);
 });
 
@@ -875,11 +842,10 @@ test("PostgresSyncStore lists messages scoped by conversation", async () => {
   const client = new FakePostgresClient();
   const store = new PostgresSyncStore(client);
 
-  const messages = await store.listMessages("org_internal", "conv-1");
+  const messages = await store.listMessages("conv-1");
 
   assert.deepEqual(messages, [
     {
-      orgId: "org_internal",
       sellerAccountExternalId: "seller-1",
       externalConversationId: "conv-1",
       externalMessageId: "msg-1",
@@ -892,7 +858,7 @@ test("PostgresSyncStore lists messages scoped by conversation", async () => {
       uniqueKey: "seller-1:conv-1:msg-1"
     }
   ]);
-  assert.deepEqual(client.queries.at(-1)?.params, ["org_internal", "conv-1"]);
+  assert.deepEqual(client.queries.at(-1)?.params, ["conv-1"]);
   assert.match(client.queries.at(-1)?.sql || "", /list_messages/i);
 });
 
@@ -900,7 +866,6 @@ test("PostgresSyncStore creates and lists customer notes with scoped params", as
   const client = new FakePostgresClient();
   const store = new PostgresSyncStore(client);
   const scope = {
-    orgId: "org_internal",
     sellerAccountExternalId: "seller-1",
     externalCustomerId: "customer-1"
   };
@@ -915,14 +880,12 @@ test("PostgresSyncStore creates and lists customer notes with scoped params", as
   assert.equal(note.body, "Customer asked for updated MOQ.");
   assert.deepEqual(notes, [note]);
   assert.deepEqual(client.queries.find((query) => /create_customer_note/i.test(query.sql))?.params, [
-    "org_internal",
     "seller-1",
     "customer-1",
     "Customer asked for updated MOQ.",
     null
   ]);
   assert.deepEqual(client.queries.find((query) => /list_customer_notes/i.test(query.sql))?.params, [
-    "org_internal",
     "seller-1",
     "customer-1"
   ]);
@@ -932,7 +895,6 @@ test("PostgresSyncStore adds and lists customer tags with scoped params", async 
   const client = new FakePostgresClient();
   const store = new PostgresSyncStore(client);
   const scope = {
-    orgId: "org_internal",
     sellerAccountExternalId: "seller-1",
     externalCustomerId: "customer-1"
   };
@@ -944,7 +906,6 @@ test("PostgresSyncStore adds and lists customer tags with scoped params", async 
   assert.equal(tag.tag, "hot-lead");
   assert.deepEqual(tags, [tag]);
   assert.deepEqual(client.queries.find((query) => /add_customer_tag/i.test(query.sql))?.params, [
-    "org_internal",
     "seller-1",
     "customer-1",
     "hot-lead",
@@ -956,7 +917,6 @@ test("PostgresSyncStore creates and lists follow-up tasks with scoped params", a
   const client = new FakePostgresClient();
   const store = new PostgresSyncStore(client);
   const scope = {
-    orgId: "org_internal",
     sellerAccountExternalId: "seller-1",
     externalCustomerId: "customer-1"
   };
@@ -974,7 +934,6 @@ test("PostgresSyncStore creates and lists follow-up tasks with scoped params", a
   assert.equal(task.assignedToUserId, "user-1");
   assert.deepEqual(tasks, [task]);
   assert.deepEqual(client.queries.find((query) => /create_follow_up_task/i.test(query.sql))?.params, [
-    "org_internal",
     "seller-1",
     "customer-1",
     "Send revised quotation",
@@ -988,7 +947,6 @@ test("PostgresSyncStore assigns customers and updates follow-up tasks with scope
   const client = new FakePostgresClient();
   const store = new PostgresSyncStore(client);
   const scope = {
-    orgId: "org_internal",
     sellerAccountExternalId: "seller-1",
     externalCustomerId: "customer-1"
   };
@@ -1000,7 +958,6 @@ test("PostgresSyncStore assigns customers and updates follow-up tasks with scope
   });
   const currentAssignment = await store.getCustomerAssignment(scope);
   const task = await store.updateFollowUpTask({
-    orgId: "org_internal",
     taskId: "task-db-id",
     status: "done",
     title: "Send revised quotation tomorrow",
@@ -1014,19 +971,16 @@ test("PostgresSyncStore assigns customers and updates follow-up tasks with scope
   assert.equal(task.status, "done");
   assert.equal(task.title, "Send revised quotation tomorrow");
   assert.deepEqual(client.queries.find((query) => /assign_customer/i.test(query.sql))?.params, [
-    "org_internal",
     "seller-1",
     "customer-1",
     "user-2",
     "manager-1"
   ]);
   assert.deepEqual(client.queries.find((query) => /get_customer_assignment/i.test(query.sql))?.params, [
-    "org_internal",
     "seller-1",
     "customer-1"
   ]);
   assert.deepEqual(client.queries.find((query) => /update_follow_up_task/i.test(query.sql))?.params, [
-    "org_internal",
     "task-db-id",
     "done",
     "Send revised quotation tomorrow",
@@ -1040,14 +994,12 @@ test("PostgresSyncStore creates internal users and resolves sessions without sto
   const store = new PostgresSyncStore(client);
 
   const user = await store.createInternalUser({
-    orgId: "org_internal",
     email: " Admin@Example.com ",
     displayName: "Admin User",
     passwordHash: "password-hash",
     roles: ["admin"]
   });
   const session = await store.issueInternalSession({
-    orgId: "org_internal",
     email: " Admin@Example.com ",
     passwordHash: "password-hash",
     token: "session-token",
@@ -1061,7 +1013,6 @@ test("PostgresSyncStore creates internal users and resolves sessions without sto
   assert.equal(session.tokenHash, "session-token-hash");
   assert.deepEqual(resolved, session);
   assert.deepEqual(client.queries.find((query) => /create_internal_user/i.test(query.sql))?.params, [
-    "org_internal",
     "admin@example.com",
     "Admin User",
     "password-hash",
@@ -1074,30 +1025,26 @@ test("PostgresSyncStore creates internal users and resolves sessions without sto
   assert.match(createSql, /CROSS JOIN roles_removed/i);
   const issueParams = client.queries.find((query) => /issue_internal_session/i.test(query.sql))?.params || [];
   assert.equal(issueParams.includes("session-token"), false);
-  assert.equal(issueParams[0], "org_internal");
-  assert.equal(issueParams[1], "admin@example.com");
-  assert.equal(issueParams[2], "password-hash");
-  assert.equal(issueParams[4], "2026-05-26T00:00:00.000Z");
+  assert.equal(issueParams[0], "admin@example.com");
+  assert.equal(issueParams[1], "password-hash");
+  assert.equal(issueParams[3], "2026-05-26T00:00:00.000Z");
 });
 
 test("PostgresSyncStore supports internal user management and invitations", async () => {
   const client = new FakePostgresClient();
   const store = new PostgresSyncStore(client);
 
-  const users = await store.listInternalUsers("org_internal");
+  const users = await store.listInternalUsers();
   const credentials = await store.getInternalUserCredentials({
-    orgId: "org_internal",
     email: " Admin@Example.com "
   });
   const updated = await store.updateInternalUser({
-    orgId: "org_internal",
     userId: "user-db-id",
     displayName: "Renamed Admin",
     roles: ["admin", "supervisor"]
   });
   const revoked = await store.revokeInternalSession({ token: "session-token" });
   const invitation = await store.createUserInvitation({
-    orgId: "org_internal",
     email: " Invitee@Example.com ",
     displayName: "Invitee",
     roles: ["sales"],
@@ -1115,7 +1062,7 @@ test("PostgresSyncStore supports internal user management and invitations", asyn
   assert.equal(revoked, true);
   assert.equal(invitation.token, "invite-token");
   assert.equal("tokenHash" in invitation, false);
-  assert.equal(client.queries.find((query) => /create_user_invitation/i.test(query.sql))?.params[1], "invitee@example.com");
+  assert.equal(client.queries.find((query) => /create_user_invitation/i.test(query.sql))?.params[0], "invitee@example.com");
   assert.equal(inspected?.email, "invitee@example.com");
   assert.equal(inspected && "token" in inspected, false);
   assert.equal(accepted.user.email, "invitee@example.com");
@@ -1133,6 +1080,10 @@ test("PostgresSyncStore supports internal user management and invitations", asyn
   assert.match(sqlText, /accept_user_invitation/);
   assert.equal(
     client.queries.find((query) => /get_internal_user_credentials/i.test(query.sql))?.params[1],
+    undefined
+  );
+  assert.equal(
+    client.queries.find((query) => /get_internal_user_credentials/i.test(query.sql))?.params[0],
     "admin@example.com"
   );
   assert.equal(client.queries.some((query) => query.params.includes("invite-token")), false);
@@ -1147,56 +1098,28 @@ test("PostgresSyncStore supports internal user management and invitations", asyn
   assert.match(acceptSql, /CROSS JOIN roles_removed/i);
 });
 
-test("PostgresSyncStore exposes workspace lookup and session switching queries", async () => {
+test("PostgresSyncStore resolves credentials by email without workspace lookup", async () => {
   const client = new FakePostgresClient();
   const store = new PostgresSyncStore(client);
 
   const credentials = await store.getInternalUserCredentialsByEmail({
     email: " Admin@Example.com "
   });
-  const workspaces = await store.listInternalUserWorkspacesByEmail(" Admin@Example.com ");
-  const switched = await store.switchInternalSessionOrg({
-    token: "session-token",
-    orgId: "org_other"
-  });
 
   assert.deepEqual(
     credentials.map((item) => ({
-      orgId: item.orgId,
+      email: item.email,
       passwordHash: item.passwordHash
     })),
-    [
-      { orgId: "org_internal", passwordHash: "password-hash" },
-      { orgId: "org_other", passwordHash: "other-password-hash" }
-    ]
+    [{ email: "admin@example.com", passwordHash: "password-hash" }]
   );
-  assert.deepEqual(
-    workspaces.map((item) => ({
-      orgId: item.orgId,
-      name: item.name,
-      roles: item.roles
-    })),
-    [
-      { orgId: "org_internal", name: "org_internal", roles: ["admin"] },
-      { orgId: "org_other", name: "org_other", roles: ["supervisor"] }
-    ]
-  );
-  assert.equal(switched.orgId, "org_other");
-  assert.equal(switched.displayName, "Other Admin");
-  assert.deepEqual(switched.roles, ["supervisor"]);
 
   const sql = client.queries.map((query) => query.sql).join("\n");
   assert.match(sql, /get_internal_user_credentials_by_email/);
-  assert.match(sql, /list_internal_user_workspaces_by_email/);
-  assert.match(sql, /switch_internal_session_org_current/);
-  assert.match(sql, /switch_internal_session_org_target/);
-  assert.match(sql, /switch_internal_session_org_update/);
+  assert.doesNotMatch(sql, /workspace/i);
+  assert.doesNotMatch(sql, /switch_internal_session_org/i);
   assert.equal(
     client.queries.find((query) => /get_internal_user_credentials_by_email/i.test(query.sql))?.params[0],
-    "admin@example.com"
-  );
-  assert.equal(
-    client.queries.find((query) => /list_internal_user_workspaces_by_email/i.test(query.sql))?.params[0],
     "admin@example.com"
   );
   assert.equal(client.queries.some((query) => query.params.includes("session-token")), false);
@@ -1223,14 +1146,12 @@ test("PostgresSyncStore manages collector devices without storing raw tokens", a
   const store = new PostgresSyncStore(client);
 
   const registered = await store.registerCollectorDevice({
-    orgId: "org_internal",
     deviceName: "MacBook",
     token: "collector-token"
   });
-  const devices = await store.listCollectorDevices("org_internal");
+  const devices = await store.listCollectorDevices();
   const authenticated = await store.authenticateCollectorDevice("collector-token");
   const revoked = await store.revokeCollectorDevice({
-    orgId: "org_internal",
     deviceId: "device-db-id"
   });
 
@@ -1240,7 +1161,6 @@ test("PostgresSyncStore manages collector devices without storing raw tokens", a
   assert.deepEqual(devices, [
     {
       id: "device-db-id",
-      orgId: "org_internal",
       sellerAccountExternalId: undefined,
       deviceName: "MacBook",
       status: "active",
@@ -1259,15 +1179,14 @@ test("PostgresSyncStore manages collector devices without storing raw tokens", a
   assert.ok(authQuery);
   assert.equal(registerQuery.params.includes("collector-token"), false);
   assert.equal(authQuery.params.includes("collector-token"), false);
-  assert.equal(registerQuery.params[0], "org_internal");
-  assert.equal(registerQuery.params[2], "MacBook");
+  assert.equal(registerQuery.params[0], null);
+  assert.equal(registerQuery.params[1], "MacBook");
 });
 
 test("PostgresSyncStore creates and reads AI summaries and reply suggestions with scoped params", async () => {
   const client = new FakePostgresClient();
   const store = new PostgresSyncStore(client);
   const scope = {
-    orgId: "org_internal",
     sellerAccountExternalId: "seller-1",
     externalCustomerId: "customer-1"
   };
@@ -1299,7 +1218,6 @@ test("PostgresSyncStore creates and reads AI summaries and reply suggestions wit
   assert.equal(suggestion.id, "suggestion-db-id");
   assert.deepEqual(suggestions, [suggestion]);
   assert.deepEqual(client.queries.find((query) => /create_ai_summary/i.test(query.sql))?.params, [
-    "org_internal",
     "seller-1",
     "customer-1",
     "fake-ai-v1",
@@ -1310,7 +1228,6 @@ test("PostgresSyncStore creates and reads AI summaries and reply suggestions wit
     "2026-05-25T09:05:00.000Z"
   ]);
   assert.deepEqual(client.queries.find((query) => /create_reply_suggestion/i.test(query.sql))?.params, [
-    "org_internal",
     "seller-1",
     "conv-1",
     "fake-ai-v1",
