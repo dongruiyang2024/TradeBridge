@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>TradeBridge 设置</title>
+  </head>
+  <body>
+    <main>
+      <form id="options-form">
+        <label>Server URL <input name="serverUrl" value="http://127.0.0.1:5032" /></label>
+        <label>Org ID <input name="orgId" value="org_internal" /></label>
+        <label>Seller Account <input name="sellerAccountExternalId" /></label>
+        <label>Device ID <input name="deviceId" /></label>
+        <label>Collector Token <input name="collectorToken" type="password" /></label>
+        <button type="submit">保存</button>
+      </form>
+      <p id="options-status"></p>
+    </main>
+    <script type="module" src="./options.ts"></script>
+  </body>
+</html>
