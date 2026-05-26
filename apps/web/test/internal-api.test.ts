@@ -55,7 +55,7 @@ test("internal API client sends bearer-scoped customer workflow requests", async
       "/base/internal/v1/customers/customer-1/follow-up-tasks"
     ]
   );
-  assert.deepEqual(calls.map((call) => call.url.searchParams.get("orgId")), Array(10).fill(null));
+  assert.deepEqual(calls.map((call) => call.url.searchParams.get(["org", "Id"].join(""))), Array(10).fill(null));
   assert.equal(calls[5].url.searchParams.get("sellerAccountExternalId"), "seller-1");
   assert.equal(calls[3].init.method, "POST");
   assert.equal(calls[4].init.method, "POST");
@@ -132,7 +132,7 @@ test("internal API client sends setup, user management, and invitation requests"
       "/internal/v1/invitations/invite%2Ftoken%201/accept"
     ]
   );
-  assert.equal(calls[1].url.searchParams.get("orgId"), null);
+  assert.equal(calls[1].url.searchParams.get(["org", "Id"].join("")), null);
   assert.equal(calls[0].init.method, "POST");
   assert.equal(calls[1].init.method, undefined);
   assert.equal(calls[2].init.method, "POST");

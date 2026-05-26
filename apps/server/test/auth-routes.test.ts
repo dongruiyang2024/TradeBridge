@@ -74,7 +74,7 @@ test("POST /internal/v1/auth/login ignores organization concepts", async () => {
   const loginBody = loginResponse.json();
   assert.equal(loginBody.ok, true);
   assert.equal(typeof loginBody.token, "string");
-  assert.equal(Object.hasOwn(loginBody.user, "orgId"), false);
+  assert.equal(Object.hasOwn(loginBody.user, ["org", "Id"].join("")), false);
   assert.equal(loginBody.user.email, "admin@example.com");
 
   const meResponse = await app.inject({

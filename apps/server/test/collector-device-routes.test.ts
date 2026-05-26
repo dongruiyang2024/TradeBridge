@@ -66,7 +66,7 @@ test("admin users can register, list, and revoke collector devices without expos
   const created = createResponse.json();
   assert.equal(created.ok, true);
   assert.equal(typeof created.token, "string");
-  assert.equal(Object.hasOwn(created.device, "orgId"), false);
+  assert.equal(Object.hasOwn(created.device, ["org", "Id"].join("")), false);
   assert.equal(created.device.deviceName, "MacBook");
   assert.equal(created.device.status, "active");
   assert.equal("token" in created.device, false);

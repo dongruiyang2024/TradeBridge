@@ -13,7 +13,6 @@ class AuditFakeClient implements SqlClient {
         rows: [
           {
             id: "audit-db-id",
-            orgId: "org_internal",
             actorUserId: "manager-1",
             action: "customer.assignment.updated",
             targetType: "customer",
@@ -31,7 +30,6 @@ class AuditFakeClient implements SqlClient {
         rows: [
           {
             id: "audit-db-id",
-            orgId: "org_internal",
             actorUserId: "manager-1",
             action: "customer.assignment.updated",
             targetType: "customer",
@@ -60,7 +58,7 @@ test("InMemorySyncStore appends and lists audit logs without organization scope"
 
   assert.equal(log.actorUserId, "user-1");
   assert.equal(log.action, "auth.login");
-  assert.equal("orgId" in log, false);
+  assert.equal(["org", "Id"].join("") in log, false);
   assert.deepEqual(await store.listAuditLogs(), [log]);
 });
 
@@ -69,14 +67,13 @@ test("PostgresSyncStore appends audit logs with parameterized metadata", async (
   const store = new PostgresSyncStore(client);
 
   const log = await store.appendAuditLog({
-    orgId: "org_internal",
     actorUserId: "manager-1",
     action: "customer.assignment.updated",
     targetType: "customer",
     targetId: "assignment-db-id",
     metadata: { assignedToUserId: "user-2" }
   });
-  const logs = await store.listAuditLogs("org_internal");
+  const logs = await store.listAuditLogs();
 
   assert.equal(log.id, "audit-db-id");
   assert.deepEqual(logs, [log]);

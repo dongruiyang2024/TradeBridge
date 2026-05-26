@@ -24,7 +24,6 @@ Node 启动入口会自动读取项目根目录下的 `.env.local` 和 `.env`，
 WANGWANG_SERVER_HOST=127.0.0.1
 WANGWANG_SERVER_PORT=5032
 WANGWANG_DEVICE_TOKENS=dev-device-token
-WANGWANG_ORG_ID=org_internal
 WANGWANG_SERVER_URL=http://127.0.0.1:5032
 WANGWANG_SELLER_ACCOUNT_ID=seller-demo
 WANGWANG_COLLECTOR_DEVICE_ID=demo-device
@@ -88,14 +87,13 @@ curl http://127.0.0.1:5032/health
 curl -X POST http://127.0.0.1:5032/internal/v1/setup/admin \
   -H 'Content-Type: application/json' \
   -d '{
-    "orgId": "org_internal",
     "email": "admin@example.com",
     "displayName": "Admin User",
     "password": "change-me-password"
   }'
 ```
 
-创建完成后，可以直接用邮箱密码登录。普通登录不需要传 `orgId`：
+创建完成后，可以直接用邮箱密码登录：
 
 ```bash
 curl -X POST http://127.0.0.1:5032/internal/v1/auth/login \
@@ -106,24 +104,12 @@ curl -X POST http://127.0.0.1:5032/internal/v1/auth/login \
   }'
 ```
 
-如果同一个邮箱存在于多个工作空间，服务端会返回工作空间选择。选择后可以用显式 `orgId` 完成登录：
-
-```bash
-curl -X POST http://127.0.0.1:5032/internal/v1/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "orgId": "org_internal",
-    "email": "admin@example.com",
-    "password": "change-me-password"
-  }'
-```
-
-打开 `http://127.0.0.1:5173/` 后直接输入邮箱和密码。普通登录页面不再要求填写工作空间 ID；如果当前邮箱存在于多个工作空间，页面会在密码校验成功后显示工作空间选择。
+打开 `http://127.0.0.1:5173/` 后直接输入邮箱和密码。
 
 说明：
 
 - 内部工作台只支持邮箱密码登录。
-- 初始化接口只允许在当前空间尚无管理员时创建首个管理员。
+- 初始化接口只允许在当前实例尚无管理员时创建首个管理员。
 - 后续管理员和普通内部用户由已登录管理员在工作台中创建。
 
 ## 6. 注册采集设备
@@ -148,7 +134,6 @@ curl -X POST http://127.0.0.1:5032/internal/v1/collector-devices \
   -H 'Authorization: Bearer <登录返回 token>' \
   -H 'Content-Type: application/json' \
   -d '{
-    "orgId": "org_internal",
     "sellerAccountExternalId": "seller-demo",
     "deviceName": "Demo Mac"
   }'
@@ -168,7 +153,6 @@ npm run electron -w @wangwang/collector-desktop
 
 采集端会读取：
 
-- `WANGWANG_ORG_ID`
 - `WANGWANG_SERVER_URL`
 - `WANGWANG_SELLER_ACCOUNT_ID`
 - `WANGWANG_COLLECTOR_DEVICE_ID`
@@ -200,7 +184,7 @@ http://127.0.0.1:5173
 采集 token 隔离验证：
 
 ```bash
-curl http://127.0.0.1:5032/internal/v1/customers?orgId=org_internal \
+curl http://127.0.0.1:5032/internal/v1/customers \
   -H 'Authorization: Bearer dev-device-token'
 ```
 
@@ -261,8 +245,7 @@ DATABASE_URL=postgres://wait9yan:Weite123@127.0.0.1:5432/tradebridge
 密码: change-me-password
 ```
 
-普通账号登录只需要邮箱和密码，不需要填写工作空间 ID。需要切换后端地址时，点击登录页的“连接设置”填写 API 地址。
-初始化首个管理员时仍会显示 Org，本地开发填写 `org_internal`。
+普通账号登录只需要邮箱和密码。需要切换后端地址时，点击登录页的“连接设置”填写 API 地址。
 
 不要把采集端 token 填到 Web 工作台。
 

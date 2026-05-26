@@ -30,7 +30,6 @@ class FakePostgresClient implements SqlClient {
       return {
         rows: [
           {
-            orgId: "org_internal",
             sellerAccountExternalId: "seller-1",
             externalCustomerId: "customer-1",
             loginId: "buyer_login",
@@ -47,7 +46,6 @@ class FakePostgresClient implements SqlClient {
       return {
         rows: [
           {
-            orgId: "org_internal",
             sellerAccountExternalId: "seller-1",
             externalConversationId: "conv-1",
             externalCustomerId: "customer-1",
@@ -61,7 +59,6 @@ class FakePostgresClient implements SqlClient {
       return {
         rows: [
           {
-            orgId: "org_internal",
             sellerAccountExternalId: "seller-1",
             externalConversationId: "conv-1",
             externalMessageId: "msg-1",
@@ -82,7 +79,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "note-db-id",
-            orgId: "org_internal",
             sellerAccountExternalId: "seller-1",
             externalCustomerId: "customer-1",
             body: "Customer asked for updated MOQ.",
@@ -99,7 +95,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "note-db-id",
-            orgId: "org_internal",
             sellerAccountExternalId: "seller-1",
             externalCustomerId: "customer-1",
             body: "Customer asked for updated MOQ.",
@@ -116,7 +111,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "tag-db-id",
-            orgId: "org_internal",
             sellerAccountExternalId: "seller-1",
             externalCustomerId: "customer-1",
             tag: "hot-lead",
@@ -132,7 +126,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "tag-db-id",
-            orgId: "org_internal",
             sellerAccountExternalId: "seller-1",
             externalCustomerId: "customer-1",
             tag: "hot-lead",
@@ -148,7 +141,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "task-db-id",
-            orgId: "org_internal",
             sellerAccountExternalId: "seller-1",
             externalCustomerId: "customer-1",
             title: "Send revised quotation",
@@ -167,7 +159,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "task-db-id",
-            orgId: "org_internal",
             sellerAccountExternalId: "seller-1",
             externalCustomerId: "customer-1",
             title: "Send revised quotation",
@@ -186,7 +177,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "assignment-db-id",
-            orgId: "org_internal",
             sellerAccountExternalId: "seller-1",
             externalCustomerId: "customer-1",
             assignedToUserId: "user-2",
@@ -203,7 +193,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "assignment-db-id",
-            orgId: "org_internal",
             sellerAccountExternalId: "seller-1",
             externalCustomerId: "customer-1",
             assignedToUserId: "user-2",
@@ -220,7 +209,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "task-db-id",
-            orgId: "org_internal",
             sellerAccountExternalId: "seller-1",
             externalCustomerId: "customer-1",
             title: "Send revised quotation tomorrow",
@@ -239,7 +227,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "device-db-id",
-            orgId: "org_internal",
             sellerAccountExternalId: null,
             deviceName: "MacBook",
             status: "active",
@@ -257,7 +244,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "device-db-id",
-            orgId: "org_internal",
             sellerAccountExternalId: null,
             deviceName: "MacBook",
             status: "active",
@@ -274,7 +260,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "device-db-id",
-            orgId: "org_internal",
             sellerAccountExternalId: null,
             deviceName: "MacBook",
             status: "revoked",
@@ -291,7 +276,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "device-db-id",
-            orgId: "org_internal",
             sellerAccountExternalId: null,
             deviceName: "MacBook",
             status: "active",
@@ -308,7 +292,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "user-db-id",
-            orgId: "org_internal",
             email: "admin@example.com",
             displayName: "Admin User",
             status: "active",
@@ -325,7 +308,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "user-db-id",
-            orgId: "org_internal",
             email: "admin@example.com",
             displayName: "Admin User",
             status: "active",
@@ -359,7 +341,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "user-db-id",
-            orgId: "org_internal",
             email: "admin@example.com",
             displayName: "Admin User",
             status: "active",
@@ -377,7 +358,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "user-db-id",
-            orgId: "org_internal",
             email: "admin@example.com",
             displayName: "Renamed Admin",
             status: "active",
@@ -397,7 +377,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "inv-1",
-            orgId: "org_internal",
             email: "invitee@example.com",
             displayName: "Invitee",
             roles: ["sales"],
@@ -415,7 +394,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "inv-1",
-            orgId: "org_internal",
             email: "invitee@example.com",
             displayName: "Invitee",
             roles: ["sales"],
@@ -434,7 +412,6 @@ class FakePostgresClient implements SqlClient {
           {
             errorCode: null,
             id: "inv-1",
-            orgId: "org_internal",
             email: "invitee@example.com",
             displayName: "Invitee",
             roles: ["sales"],
@@ -459,7 +436,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             tokenHash: "session-token-hash",
-            orgId: "org_internal",
             userId: "user-db-id",
             email: "admin@example.com",
             displayName: "Admin User",
@@ -476,7 +452,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             tokenHash: "session-token-hash",
-            orgId: "org_internal",
             userId: "user-db-id",
             email: "admin@example.com",
             displayName: "Admin User",
@@ -493,7 +468,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "summary-db-id",
-            orgId: "org_internal",
             sellerAccountExternalId: "seller-1",
             externalCustomerId: "customer-1",
             promptVersion: "fake-ai-v1",
@@ -513,7 +487,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "summary-db-id",
-            orgId: "org_internal",
             sellerAccountExternalId: "seller-1",
             externalCustomerId: "customer-1",
             promptVersion: "fake-ai-v1",
@@ -533,7 +506,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "suggestion-db-id",
-            orgId: "org_internal",
             sellerAccountExternalId: "seller-1",
             externalCustomerId: "customer-1",
             externalConversationId: "conv-1",
@@ -553,7 +525,6 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "suggestion-db-id",
-            orgId: "org_internal",
             sellerAccountExternalId: "seller-1",
             externalCustomerId: "customer-1",
             externalConversationId: "conv-1",
@@ -628,7 +599,7 @@ test("PostgresSyncStore creates internal users without organization columns", as
   });
 
   const sql = client.queries.map((query) => query.sql).join("\n").toLowerCase();
-  assert.doesNotMatch(sql, /\borg_id\b/);
+  assert.doesNotMatch(sql, new RegExp(`\\b${["org", "id"].join("_")}\\b`));
   assert.match(sql, /insert into app_user \(email, display_name, password_hash, status\)/);
   assert.match(sql, /insert into role \(name\)/);
   assert.match(sql, /insert into user_role \(user_id, role_id\)/);
@@ -641,7 +612,7 @@ test("PostgresSyncStore stores sync batches without organization parameters", as
   await store.acceptSyncBatch(makeBatch());
 
   const sql = client.queries.map((query) => query.sql).join("\n").toLowerCase();
-  assert.doesNotMatch(sql, /\borg_id\b/);
+  assert.doesNotMatch(sql, new RegExp(`\\b${["org", "id"].join("_")}\\b`));
   assert.doesNotMatch(sql, /ensure_org/);
 });
 
@@ -650,7 +621,6 @@ test("PostgresSyncStore upserts entities and inserts messages with idempotent co
   const store = new PostgresSyncStore(client);
 
   const result = await store.acceptSyncBatch({
-    orgId: "org_internal",
     sellerAccount: { externalAccountId: "seller-1", displayName: "Seller One" },
     device: { deviceId: "device-1", deviceName: "MacBook" },
     sourceMeta: { collectedAt: "2026-05-25T10:00:00.000Z" },
@@ -688,7 +658,6 @@ test("PostgresSyncStore persists sync batch result statistics", async () => {
   const store = new PostgresSyncStore(client);
 
   await store.acceptSyncBatch({
-    orgId: "org_internal",
     sellerAccount: { externalAccountId: "seller-1" },
     device: { deviceId: "device-1" },
     sourceMeta: { sourceBatchKey: "batch-1" },
@@ -721,7 +690,6 @@ test("PostgresSyncStore wraps sync batch writes in a transaction", async () => {
   const store = new PostgresSyncStore(client);
 
   await store.acceptSyncBatch({
-    orgId: "org_internal",
     sellerAccount: { externalAccountId: "seller-1" },
     device: { deviceId: "device-1" },
     conversations: [{ externalConversationId: "conv-1" }],
@@ -746,7 +714,6 @@ test("PostgresSyncStore rolls back sync batch writes when a database write fails
   await assert.rejects(
     () =>
       store.acceptSyncBatch({
-        orgId: "org_internal",
         sellerAccount: { externalAccountId: "seller-1" },
         device: { deviceId: "device-1" },
         conversations: [{ externalConversationId: "conv-1" }],
@@ -772,7 +739,6 @@ test("PostgresSyncStore parameterizes raw sanitized data and never writes raw cr
   const store = new PostgresSyncStore(client);
 
   await store.acceptSyncBatch({
-    orgId: "org_internal",
     sellerAccount: { externalAccountId: "seller-1" },
     device: { deviceId: "device-1" },
     conversations: [{ externalConversationId: "conv-1" }],

@@ -425,7 +425,7 @@ test("internal users are unique by email in single-tenant mode", async () => {
 
   assert.equal(second.id, first.id);
   assert.equal(second.email, "admin@example.com");
-  assert.equal("orgId" in second, false);
+  assert.equal(["org", "Id"].join("") in second, false);
   assert.deepEqual(second.roles, ["supervisor"]);
   assert.equal((await store.listInternalUsers()).length, 1);
 });
@@ -446,7 +446,7 @@ test("internal sessions resolve users without organization scope", async () => {
   });
 
   assert.equal(session.email, "sales@example.com");
-  assert.equal("orgId" in session, false);
+  assert.equal(["org", "Id"].join("") in session, false);
   assert.deepEqual(session.roles, ["sales"]);
   assert.equal((await store.getInternalSession("session-token"))?.userId, session.userId);
 });

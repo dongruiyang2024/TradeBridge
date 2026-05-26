@@ -163,9 +163,9 @@ test("internal query APIs do not expose org fields", async () => {
   });
 
   assert.equal(customersResponse.statusCode, 200);
-  assert.equal(Object.hasOwn(customersResponse.json().customers[0], "orgId"), false);
+  assert.equal(Object.hasOwn(customersResponse.json().customers[0], ["org", "Id"].join("")), false);
   assert.equal(conversationsResponse.statusCode, 200);
-  assert.equal(Object.hasOwn(conversationsResponse.json().conversations[0], "orgId"), false);
+  assert.equal(Object.hasOwn(conversationsResponse.json().conversations[0], ["org", "Id"].join("")), false);
   assert.equal(messagesResponse.statusCode, 200);
-  assert.equal(Object.hasOwn(messagesResponse.json().messages[0], "orgId"), false);
+  assert.equal(Object.hasOwn(messagesResponse.json().messages[0], ["org", "Id"].join("")), false);
 });

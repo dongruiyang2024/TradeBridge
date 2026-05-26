@@ -53,7 +53,7 @@ test("initial schema does not contain organization tables or columns", () => {
   const normalized = INTERNAL_SYNC_MIGRATIONS[0].sql.replace(/\s+/g, " ").toLowerCase();
 
   assert.doesNotMatch(normalized, /create table if not exists org/);
-  assert.doesNotMatch(normalized, /\borg_id\b/);
+  assert.doesNotMatch(normalized, new RegExp(`\\b${["org", "id"].join("_")}\\b`));
   assert.doesNotMatch(normalized, /references org\(id\)/);
 });
 

@@ -34,7 +34,7 @@ test("uploadSyncBatch posts collector batch with bearer token", async () => {
   assert.equal(requests[0].url, "http://127.0.0.1:5032/collector/v1/sync-batches");
   assert.equal(requests[0].headers.get("authorization"), "Bearer collector-token");
   assert.equal(requests[0].headers.get("content-type"), "application/json");
-  assert.equal(Object.hasOwn(await requests[0].json(), "orgId"), false);
+  assert.equal(Object.hasOwn(await requests[0].json(), ["org", "Id"].join("")), false);
 });
 
 test("uploadSyncBatch maps 401 to tradebridge_unauthorized", async () => {

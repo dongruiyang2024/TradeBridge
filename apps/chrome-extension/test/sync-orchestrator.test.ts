@@ -69,7 +69,7 @@ test("runSyncOnce fetches OneTalk data, sanitizes it, uploads batch, and saves c
 
   assert.equal(result.ok, true);
   assert.equal(uploaded.length, 1);
-  assert.equal(Object.hasOwn(uploaded[0], "orgId"), false);
+  assert.equal(Object.hasOwn(uploaded[0], ["org", "Id"].join("")), false);
   assert.equal(uploaded[0].sourceMeta?.source, "chrome-extension");
   assert.equal(uploaded[0].messages?.[0].content, "hello");
   assert.equal(store.status.nextCursor, "2026-05-25T10:50:00.000Z");

@@ -14,13 +14,12 @@ import { createServer } from "../../apps/server/src/server.js";
 import { createInternalApiClient } from "../../apps/web/src/internal-api";
 import {
   addTagToSelectedCustomer,
-  createInitialWorkspaceState,
+  createInitialDashboardState,
   createNoteForSelectedCustomer,
   createTaskForSelectedCustomer,
   loadCustomerList
-} from "../../apps/web/src/workspace-state";
+} from "../../apps/web/src/dashboard-state";
 
-const ORG_ID = "org_internal";
 const SELLER_ACCOUNT_ID = "seller-trial";
 const COLLECTOR_TOKEN = "trial-collector-token";
 const SECRET_COOKIE = "one-talk-cookie-must-not-leave-collector";
@@ -28,7 +27,6 @@ const SECRET_COOKIE = "one-talk-cookie-must-not-leave-collector";
 test("internal trial flow uploads collector data and exercises the Web customer workflow", async () => {
   const store = new InMemorySyncStore();
   await store.createInternalUser({
-    orgId: ORG_ID,
     email: "trial-admin@example.com",
     displayName: "Trial Admin",
     passwordHash: await hashPassword("secret"),
@@ -43,7 +41,7 @@ test("internal trial flow uploads collector data and exercises the Web customer 
   const loginResponse = await app.inject({
     method: "POST",
     url: "/internal/v1/auth/login",
-    payload: { orgId: ORG_ID, email: "trial-admin@example.com", password: "secret" }
+    payload: { email: "trial-admin@example.com", password: "secret" }
   });
   assert.equal(loginResponse.statusCode, 200);
   const internalToken = loginResponse.json().token;
@@ -53,7 +51,6 @@ test("internal trial flow uploads collector data and exercises the Web customer 
   try {
     const state = new MemoryCollectorStateStore();
     const uploadResult = await collectOnce({
-      orgId: ORG_ID,
       sellerAccount: { externalAccountId: SELLER_ACCOUNT_ID, displayName: "Trial Seller" },
       device: { deviceId: "trial-device", deviceName: "Trial Mac" },
       state,
@@ -67,29 +64,29 @@ test("internal trial flow uploads collector data and exercises the Web customer 
     assert.equal(await state.getCursor(SELLER_ACCOUNT_ID), "2026-05-25T10:50:00.000Z");
 
     const client = createInternalApiClient({ baseUrl, token: internalToken, fetchImpl });
-    let workspace = await loadCustomerList(createInitialWorkspaceState({ orgId: ORG_ID }), client);
+    let dashboard = await loadCustomerList(createInitialDashboardState(), client);
 
-    assert.equal(workspace.customers.length, 1);
-    assert.equal(workspace.selectedCustomerId, "buyer-trial");
-    assert.equal(workspace.messages.length, 2);
+    assert.equal(dashboard.customers.length, 1);
+    assert.equal(dashboard.selectedCustomerId, "buyer-trial");
+    assert.equal(dashboard.messages.length, 2);
     assert.deepEqual(
-      workspace.messages.map((message) => [message.externalMessageId, message.direction, message.content]),
+      dashboard.messages.map((message) => [message.externalMessageId, message.direction, message.content]),
       [
         ["trial-msg-1", "received", "Can you confirm delivery?"],
         ["trial-msg-2", "sent", "Delivery is booked for tomorrow."]
       ]
     );
-    assert.doesNotMatch(JSON.stringify(workspace.messages), new RegExp(SECRET_COOKIE));
+    assert.doesNotMatch(JSON.stringify(dashboard.messages), new RegExp(SECRET_COOKIE));
 
-    workspace = await createNoteForSelectedCustomer(workspace, client, "Buyer asked for delivery confirmation.");
-    workspace = await addTagToSelectedCustomer(workspace, client, "priority");
-    workspace = await createTaskForSelectedCustomer(workspace, client, "Send tracking number");
+    dashboard = await createNoteForSelectedCustomer(dashboard, client, "Buyer asked for delivery confirmation.");
+    dashboard = await addTagToSelectedCustomer(dashboard, client, "priority");
+    dashboard = await createTaskForSelectedCustomer(dashboard, client, "Send tracking number");
 
-    assert.equal(workspace.notes.at(-1)?.body, "Buyer asked for delivery confirmation.");
-    assert.equal(workspace.tags.at(-1)?.tag, "priority");
-    assert.equal(workspace.tasks.at(-1)?.title, "Send tracking number");
+    assert.equal(dashboard.notes.at(-1)?.body, "Buyer asked for delivery confirmation.");
+    assert.equal(dashboard.tags.at(-1)?.tag, "priority");
+    assert.equal(dashboard.tasks.at(-1)?.title, "Send tracking number");
 
-    const forbidden = await fetchImpl(new URL(`/internal/v1/customers?orgId=${ORG_ID}`, baseUrl), {
+    const forbidden = await fetchImpl(new URL("/internal/v1/customers", baseUrl), {
       headers: { authorization: `Bearer ${COLLECTOR_TOKEN}` }
     });
     assert.equal(forbidden.status, 401);

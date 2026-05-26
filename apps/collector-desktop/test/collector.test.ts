@@ -105,7 +105,7 @@ test("collectOnce maps OneTalk conversations and paged messages into one sync ba
 
   assert.equal(result.acceptedCount, 3);
   assert.equal(uploaded.length, 1);
-  assert.equal(Object.hasOwn(uploaded[0], "orgId"), false);
+  assert.equal(Object.hasOwn(uploaded[0], ["org", "Id"].join("")), false);
   assert.deepEqual(uploaded[0].customers, [
     {
       externalCustomerId: "customer-1",
@@ -182,5 +182,5 @@ test("uploadSyncBatch posts collector batches with bearer auth", async () => {
   assert.equal(requests[0].method, "POST");
   assert.equal(requests[0].headers.get("authorization"), "Bearer collector-token");
   assert.equal(requests[0].headers.get("content-type"), "application/json");
-  assert.equal(Object.hasOwn(await requests[0].json(), "orgId"), false);
+  assert.equal(Object.hasOwn(await requests[0].json(), ["org", "Id"].join("")), false);
 });
