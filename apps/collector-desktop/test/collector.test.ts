@@ -87,7 +87,6 @@ test("collectOnce maps OneTalk conversations and paged messages into one sync ba
   };
 
   const result = await collectOnce({
-    orgId: "org_internal",
     sellerAccount: { externalAccountId: "seller-1", displayName: "Seller One" },
     device: { deviceId: "device-1", deviceName: "MacBook" },
     pageSize: 2,
@@ -106,7 +105,7 @@ test("collectOnce maps OneTalk conversations and paged messages into one sync ba
 
   assert.equal(result.acceptedCount, 3);
   assert.equal(uploaded.length, 1);
-  assert.equal(uploaded[0].orgId, "org_internal");
+  assert.equal(Object.hasOwn(uploaded[0], "orgId"), false);
   assert.deepEqual(uploaded[0].customers, [
     {
       externalCustomerId: "customer-1",
@@ -133,7 +132,6 @@ test("JsonLocalStateStore persists cursors, failed batches, and last errors", as
   const statePath = tempFile("state.json");
   const store = new JsonLocalStateStore(statePath);
   const batch = {
-    orgId: "org_internal",
     sellerAccount: { externalAccountId: "seller-1" },
     device: { deviceId: "device-1" }
   };
@@ -173,7 +171,6 @@ test("uploadSyncBatch posts collector batches with bearer auth", async () => {
     serverUrl: "http://127.0.0.1:5032/",
     token: "collector-token",
     batch: {
-      orgId: "org_internal",
       sellerAccount: { externalAccountId: "seller-1" },
       device: { deviceId: "device-1" }
     }
@@ -185,5 +182,5 @@ test("uploadSyncBatch posts collector batches with bearer auth", async () => {
   assert.equal(requests[0].method, "POST");
   assert.equal(requests[0].headers.get("authorization"), "Bearer collector-token");
   assert.equal(requests[0].headers.get("content-type"), "application/json");
-  assert.equal((await requests[0].json()).orgId, "org_internal");
+  assert.equal(Object.hasOwn(await requests[0].json(), "orgId"), false);
 });

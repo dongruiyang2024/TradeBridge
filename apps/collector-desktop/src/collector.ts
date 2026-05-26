@@ -27,7 +27,6 @@ export interface CollectorAdapter {
 }
 
 export interface CollectOnceOptions {
-  orgId: string;
   sellerAccount: SyncSellerAccountInput;
   device: SyncDeviceInput;
   state: CollectorStateStore;
@@ -64,7 +63,6 @@ export async function collectOnce(options: CollectOnceOptions): Promise<SyncBatc
     previousCursor,
     pageSize,
     maxPages,
-    orgId: options.orgId,
     sellerAccount: options.sellerAccount,
     device: options.device,
     collectedAt: options.collectedAt || new Date().toISOString()
@@ -92,7 +90,6 @@ interface MapBatchOptions {
   previousCursor: string | null;
   pageSize: number;
   maxPages: number;
-  orgId: string;
   sellerAccount: SyncSellerAccountInput;
   device: SyncDeviceInput;
   collectedAt: string;
@@ -144,7 +141,6 @@ async function mapWebliteToSyncBatch(options: MapBatchOptions): Promise<SyncBatc
   }
 
   return compact({
-    orgId: options.orgId,
     sellerAccount: options.sellerAccount,
     device: options.device,
     cursor: options.previousCursor ? { previousCursor: options.previousCursor } : undefined,

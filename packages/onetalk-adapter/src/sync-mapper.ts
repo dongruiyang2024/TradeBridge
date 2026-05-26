@@ -39,7 +39,6 @@ export interface BrowserSyncMessageInput {
 }
 
 export interface BrowserSyncBatch {
-  orgId: string;
   sellerAccount: BrowserSyncSellerAccountInput;
   device: BrowserSyncDeviceInput;
   cursor?: Record<string, unknown>;
@@ -50,7 +49,6 @@ export interface BrowserSyncBatch {
 }
 
 export interface MapWebliteToSyncBatchOptions {
-  orgId: string;
   sellerAccount: BrowserSyncSellerAccountInput;
   device: BrowserSyncDeviceInput;
   collectedAt: string;
@@ -102,7 +100,6 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
   }
 
   return compact({
-    orgId: options.orgId,
     sellerAccount: options.sellerAccount,
     device: options.device,
     cursor: options.previousCursor ? { previousCursor: options.previousCursor } : undefined,

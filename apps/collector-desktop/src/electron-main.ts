@@ -44,7 +44,6 @@ const controller = createCollectorShellController({
   },
   manualSync: async () =>
     collectOnce({
-      orgId: requiredEnv("WANGWANG_ORG_ID"),
       sellerAccount: {
         externalAccountId: requiredEnv("WANGWANG_SELLER_ACCOUNT_ID"),
         displayName: process.env.WANGWANG_SELLER_DISPLAY_NAME

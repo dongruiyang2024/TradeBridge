@@ -4,7 +4,6 @@ import { mapWebliteToSyncBatch } from "../src/browser.js";
 
 test("mapWebliteToSyncBatch maps conversations and messages into collector batch shape", () => {
   const batch = mapWebliteToSyncBatch({
-    orgId: "org_internal",
     sellerAccount: { externalAccountId: "seller-demo", displayName: "Seller Demo" },
     device: { deviceId: "chrome-extension-demo", deviceName: "Chrome Extension" },
     collectedAt: "2026-05-26T08:10:00.000Z",
@@ -42,6 +41,7 @@ test("mapWebliteToSyncBatch maps conversations and messages into collector batch
     }
   });
 
+  assert.equal(Object.hasOwn(batch, "orgId"), false);
   assert.equal(batch.sourceMeta?.source, "chrome-extension");
   assert.equal(batch.sourceMeta?.sourceBatchKey, "seller-demo:chrome-extension-demo:2026-05-26T08:10:00.000Z");
   assert.deepEqual(batch.customers, [
@@ -65,7 +65,6 @@ test("mapWebliteToSyncBatch maps conversations and messages into collector batch
 
 test("mapWebliteToSyncBatch filters messages at or before the previous cursor", () => {
   const batch = mapWebliteToSyncBatch({
-    orgId: "org_internal",
     sellerAccount: { externalAccountId: "seller-demo" },
     device: { deviceId: "chrome-extension-demo" },
     collectedAt: "2026-05-26T08:10:00.000Z",

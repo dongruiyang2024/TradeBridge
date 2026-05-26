@@ -13,7 +13,6 @@ form?.addEventListener("submit", async (event) => {
   const formData = new FormData(form);
   const config: ExtensionConfig = {
     serverUrl: required(formData, "serverUrl"),
-    orgId: required(formData, "orgId"),
     sellerAccountExternalId: required(formData, "sellerAccountExternalId"),
     deviceId: required(formData, "deviceId"),
     collectorToken: required(formData, "collectorToken")
@@ -26,7 +25,6 @@ async function hydrate(): Promise<void> {
   const config = await store.getConfig();
   if (!form || !config) return;
   setInput("serverUrl", config.serverUrl);
-  setInput("orgId", config.orgId);
   setInput("sellerAccountExternalId", config.sellerAccountExternalId);
   setInput("deviceId", config.deviceId);
   setInput("collectorToken", config.collectorToken);

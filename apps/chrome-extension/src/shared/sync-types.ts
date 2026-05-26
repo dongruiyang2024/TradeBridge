@@ -14,7 +14,6 @@ export interface SyncBatchResult {
 export interface ExtensionConfig {
   serverUrl: string;
   collectorToken: string;
-  orgId: string;
   sellerAccountExternalId: string;
   sellerAccountDisplayName?: string;
   deviceId: string;

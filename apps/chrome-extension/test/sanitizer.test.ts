@@ -4,7 +4,6 @@ import { assertNoSensitiveFields, sanitizeForUpload } from "../src/background/sa
 
 test("sanitizeForUpload removes sensitive keys recursively", () => {
   const sanitized = sanitizeForUpload({
-    orgId: "org_internal",
     cookie2: "secret-cookie",
     nested: {
       ctoken: "secret-ctoken",
@@ -14,7 +13,6 @@ test("sanitizeForUpload removes sensitive keys recursively", () => {
   });
 
   assert.deepEqual(sanitized, {
-    orgId: "org_internal",
     nested: {
       safe: "value",
       list: [{ content: "hello" }]

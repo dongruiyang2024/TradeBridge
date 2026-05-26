@@ -25,7 +25,6 @@ test("uploadSyncBatch posts collector batch with bearer token", async () => {
     serverUrl: "http://127.0.0.1:5032",
     collectorToken: "collector-token",
     batch: {
-      orgId: "org_internal",
       sellerAccount: { externalAccountId: "seller-demo" },
       device: { deviceId: "chrome-extension-demo" }
     }
@@ -35,6 +34,7 @@ test("uploadSyncBatch posts collector batch with bearer token", async () => {
   assert.equal(requests[0].url, "http://127.0.0.1:5032/collector/v1/sync-batches");
   assert.equal(requests[0].headers.get("authorization"), "Bearer collector-token");
   assert.equal(requests[0].headers.get("content-type"), "application/json");
+  assert.equal(Object.hasOwn(await requests[0].json(), "orgId"), false);
 });
 
 test("uploadSyncBatch maps 401 to tradebridge_unauthorized", async () => {
@@ -46,7 +46,6 @@ test("uploadSyncBatch maps 401 to tradebridge_unauthorized", async () => {
         serverUrl: "http://127.0.0.1:5032",
         collectorToken: "bad-token",
         batch: {
-          orgId: "org_internal",
           sellerAccount: { externalAccountId: "seller-demo" },
           device: { deviceId: "chrome-extension-demo" }
         }

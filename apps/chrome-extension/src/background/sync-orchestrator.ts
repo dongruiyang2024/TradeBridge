@@ -54,7 +54,6 @@ export async function runSyncOnce(options: RunSyncOnceOptions): Promise<RunSyncR
       maxPages
     });
     const mapped = mapWebliteToSyncBatch({
-      orgId: config.orgId,
       sellerAccount: {
         externalAccountId: config.sellerAccountExternalId,
         displayName: config.sellerAccountDisplayName

@@ -32,7 +32,7 @@ export class ExtensionStateStore {
 }
 
 export function validateConfig(config: ExtensionConfig | null): asserts config is ExtensionConfig {
-  if (!config?.serverUrl || !config.collectorToken || !config.orgId || !config.sellerAccountExternalId || !config.deviceId) {
+  if (!config?.serverUrl || !config.collectorToken || !config.sellerAccountExternalId || !config.deviceId) {
     throw new Error("config_required");
   }
 }
@@ -42,7 +42,6 @@ function isConfig(value: unknown): value is ExtensionConfig {
     isRecord(value) &&
     typeof value.serverUrl === "string" &&
     typeof value.collectorToken === "string" &&
-    typeof value.orgId === "string" &&
     typeof value.sellerAccountExternalId === "string" &&
     typeof value.deviceId === "string"
   );
