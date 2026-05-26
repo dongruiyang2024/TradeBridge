@@ -29,7 +29,6 @@ import {
   type InternalSession,
   type InternalUser,
   type InternalUserCredentials,
-  type InternalWorkspaceSummary,
   type IssueInternalSessionInput,
   type StoredConversation,
   type StoredAuditLog,
@@ -42,7 +41,6 @@ import {
   type StoredMessage,
   type StoredReplySuggestion,
   type StoredUserInvitation,
-  type SwitchInternalSessionOrgInput,
   type SqlClient,
   type SyncBatch,
   type SyncBatchResult,
@@ -76,9 +74,9 @@ export interface CreateServerFromEnvOptions {
 
 export interface SyncStore {
   acceptSyncBatch(batch: SyncBatch): Promise<SyncBatchResult>;
-  listCustomers(orgId: string): Promise<StoredCustomer[]> | StoredCustomer[];
-  listConversations(orgId: string): Promise<StoredConversation[]> | StoredConversation[];
-  listMessages(orgId: string, externalConversationId?: string): Promise<StoredMessage[]> | StoredMessage[];
+  listCustomers(): Promise<StoredCustomer[]> | StoredCustomer[];
+  listConversations(): Promise<StoredConversation[]> | StoredConversation[];
+  listMessages(externalConversationId?: string): Promise<StoredMessage[]> | StoredMessage[];
   createCustomerNote(input: CreateCustomerNoteInput): Promise<StoredCustomerNote> | StoredCustomerNote;
   listCustomerNotes(scope: CustomerScope): Promise<StoredCustomerNote[]> | StoredCustomerNote[];
   addCustomerTag(input: AddCustomerTagInput): Promise<StoredCustomerTag> | StoredCustomerTag;
@@ -94,20 +92,18 @@ export interface SyncStore {
   createReplySuggestion(input: CreateReplySuggestionInput): Promise<StoredReplySuggestion> | StoredReplySuggestion;
   listReplySuggestions(scope: ConversationCustomerScope): Promise<StoredReplySuggestion[]> | StoredReplySuggestion[];
   createInternalUser(input: CreateInternalUserInput): Promise<InternalUser> | InternalUser;
-  listInternalUsers(orgId: string): Promise<InternalUser[]> | InternalUser[];
+  listInternalUsers(): Promise<InternalUser[]> | InternalUser[];
   getInternalUserCredentials(input: GetInternalUserCredentialsInput): Promise<InternalUserCredentials | null> | InternalUserCredentials | null;
   getInternalUserCredentialsByEmail(input: GetInternalUserCredentialsByEmailInput): Promise<InternalUserCredentials[]> | InternalUserCredentials[];
-  listInternalUserWorkspacesByEmail(email: string): Promise<InternalWorkspaceSummary[]> | InternalWorkspaceSummary[];
   updateInternalUser(input: UpdateInternalUserInput): Promise<InternalUser> | InternalUser;
   issueInternalSession(input: IssueInternalSessionInput): Promise<InternalSession> | InternalSession;
   getInternalSession(token: string): Promise<InternalSession | null> | InternalSession | null;
-  switchInternalSessionOrg(input: SwitchInternalSessionOrgInput): Promise<InternalSession> | InternalSession;
   revokeInternalSession(input: RevokeInternalSessionInput): Promise<boolean> | boolean;
   createUserInvitation(input: CreateUserInvitationInput): Promise<StoredUserInvitation> | StoredUserInvitation;
   getUserInvitation(token: string): Promise<StoredUserInvitation | null> | StoredUserInvitation | null;
   acceptUserInvitation(input: AcceptUserInvitationInput): Promise<AcceptUserInvitationResult> | AcceptUserInvitationResult;
   registerCollectorDevice(input: RegisterCollectorDeviceInput): Promise<RegisteredCollectorDevice> | RegisteredCollectorDevice;
-  listCollectorDevices(orgId: string): Promise<CollectorDevice[]> | CollectorDevice[];
+  listCollectorDevices(): Promise<CollectorDevice[]> | CollectorDevice[];
   revokeCollectorDevice(input: RevokeCollectorDeviceInput): Promise<CollectorDevice> | CollectorDevice;
   authenticateCollectorDevice(token: string): Promise<CollectorDevice | null> | CollectorDevice | null;
 }
@@ -119,7 +115,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   const aiJobQueue = options.aiJobQueue || createSyncAiJobQueue();
   const internalAccessRoles: InternalRole[] = ["admin", "supervisor", "sales"];
   const adminRoles: InternalRole[] = ["admin"];
-  const setupOrgLocks = new Set<string>();
+  let setupInProgress = false;
   const app = Fastify({
     logger: options.logger ?? false
   });
@@ -148,56 +144,15 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.post("/internal/v1/auth/login", async (request, reply) => {
-    const orgId = bodyStringField(request.body, "orgId");
     const email = bodyStringField(request.body, "email");
     const password = bodyStringField(request.body, "password");
     if (!email || !password) {
       return reply.code(400).send({ ok: false, error: "invalid_login_request" });
     }
 
-    if (!orgId) {
-      const candidates = await store.getInternalUserCredentialsByEmail({ email });
-      const matchingCredentials: InternalUserCredentials[] = [];
-      for (const candidate of candidates) {
-        if (await verifyPassword(password, candidate.passwordHash)) {
-          matchingCredentials.push(candidate);
-        }
-      }
-
-      if (matchingCredentials.length === 0) {
-        await appendLoginFailedAuditLogsForCredentials(store, candidates, email);
-        return reply.code(401).send({ ok: false, error: "invalid_credentials" });
-      }
-
-      if (matchingCredentials.length > 1) {
-        const matchingOrgIds = new Set(matchingCredentials.map((item) => item.orgId));
-        const workspaces = (await store.listInternalUserWorkspacesByEmail(email)).filter((item) =>
-          matchingOrgIds.has(item.orgId)
-        );
-        return reply.code(409).send({
-          ok: false,
-          error: "workspace_selection_required",
-          workspaces: workspaces.map(publicWorkspaceSummary)
-        });
-      }
-
-      try {
-        return {
-          ok: true,
-          ...(await issueLoginSession(store, matchingCredentials[0]))
-        };
-      } catch (error) {
-        if (isInvalidCredentialsError(error)) {
-          await appendLoginFailedAuditLog(store, matchingCredentials[0].orgId, email);
-          return reply.code(401).send({ ok: false, error: "invalid_credentials" });
-        }
-        throw error;
-      }
-    }
-
-    const credentials = await store.getInternalUserCredentials({ orgId, email });
+    const credentials = await store.getInternalUserCredentials({ email });
     if (!credentials || !(await verifyPassword(password, credentials.passwordHash))) {
-      await appendLoginFailedAuditLog(store, orgId, email);
+      await appendLoginFailedAuditLog(store, email);
       return reply.code(401).send({ ok: false, error: "invalid_credentials" });
     }
 
@@ -208,7 +163,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       };
     } catch (error) {
       if (isInvalidCredentialsError(error)) {
-        await appendLoginFailedAuditLog(store, orgId, email);
+        await appendLoginFailedAuditLog(store, email);
         return reply.code(401).send({ ok: false, error: "invalid_credentials" });
       }
       throw error;
@@ -216,21 +171,20 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.post("/internal/v1/setup/admin", async (request, reply) => {
-    const orgId = bodyStringField(request.body, "orgId");
     const email = bodyStringField(request.body, "email");
     const displayName = bodyStringField(request.body, "displayName");
     const password = bodyStringField(request.body, "password");
-    if (!orgId || !email || !displayName || !password) {
+    if (!email || !displayName || !password) {
       return reply.code(400).send({ ok: false, error: "invalid_setup_request" });
     }
 
-    if (setupOrgLocks.has(orgId)) {
+    if (setupInProgress) {
       return reply.code(409).send({ ok: false, error: "setup_in_progress" });
     }
 
-    setupOrgLocks.add(orgId);
+    setupInProgress = true;
     try {
-      const existingUsers = await store.listInternalUsers(orgId);
+      const existingUsers = await store.listInternalUsers();
       const existingAdmins = existingUsers.filter((user) => user.roles.includes("admin"));
       if (existingAdmins.length > 0) {
         return reply.code(409).send({ ok: false, error: "admin_already_exists" });
@@ -240,7 +194,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       }
 
       const user = await store.createInternalUser({
-        orgId,
         email,
         displayName,
         passwordHash: await hashPassword(password),
@@ -249,7 +202,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       });
       return { ok: true, user };
     } finally {
-      setupOrgLocks.delete(orgId);
+      setupInProgress = false;
     }
   });
 
@@ -263,51 +216,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     };
   });
 
-  app.get("/internal/v1/workspaces", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store);
-    if (!auth) return;
-
-    const workspaces = await store.listInternalUserWorkspacesByEmail(auth.user.email);
-    return {
-      ok: true,
-      workspaces: workspaces.map(publicWorkspaceSummary)
-    };
-  });
-
-  app.patch("/internal/v1/workspaces/active", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store);
-    if (!auth) return;
-
-    const orgId = bodyStringField(request.body, "orgId");
-    if (!orgId) {
-      return reply.code(400).send({ ok: false, error: "org_id_required" });
-    }
-
-    const token = bearerToken(request.headers.authorization || "");
-    try {
-      const session = await store.switchInternalSessionOrg({ token, orgId });
-      await store.appendAuditLog({
-        orgId: session.orgId,
-        actorUserId: session.userId,
-        action: "auth.workspace.switched",
-        targetType: "org",
-        targetId: session.orgId
-      });
-      return {
-        ok: true,
-        user: publicUserFromSession(session)
-      };
-    } catch (error) {
-      if (isWorkspaceNotFoundError(error)) {
-        return reply.code(404).send({ ok: false, error: "workspace_not_found" });
-      }
-      if (isInvalidCredentialsError(error)) {
-        return reply.code(401).send({ ok: false, error: "internal_unauthorized" });
-      }
-      throw error;
-    }
-  });
-
   app.post("/internal/v1/auth/logout", async (request, reply) => {
     const auth = await requireInternalAuth(request, reply, store);
     if (!auth) return;
@@ -315,7 +223,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const token = bearerToken(request.headers.authorization || "");
     if (token) await store.revokeInternalSession({ token });
     await store.appendAuditLog({
-      orgId: auth.user.orgId,
       actorUserId: auth.user.id,
       action: "auth.logout",
       targetType: "app_user",
@@ -329,28 +236,22 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, adminRoles);
     if (!auth) return;
 
-    const orgId = requestedOrgIdOrSession(request.query, auth);
-    if (!requireOrgScope(auth, orgId, reply)) return;
-
-    return { ok: true, users: await store.listInternalUsers(orgId) };
+    return { ok: true, users: await store.listInternalUsers() };
   });
 
   app.post("/internal/v1/users", async (request, reply) => {
     const auth = await requireInternalAuth(request, reply, store, adminRoles);
     if (!auth) return;
 
-    const orgId = bodyStringField(request.body, "orgId");
     const email = bodyStringField(request.body, "email");
     const displayName = bodyStringField(request.body, "displayName");
     const password = bodyStringField(request.body, "password");
     const roles = bodyRolesField(request.body);
-    if (!orgId || !email || !displayName || !password || roles.length === 0) {
+    if (!email || !displayName || !password || roles.length === 0) {
       return reply.code(400).send({ ok: false, error: "invalid_user_request" });
     }
-    if (auth.user.orgId !== orgId) return reply.code(403).send({ ok: false, error: "forbidden" });
 
     const user = await store.createInternalUser({
-      orgId,
       email,
       displayName,
       passwordHash: await hashPassword(password),
@@ -364,13 +265,11 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, adminRoles);
     if (!auth) return;
 
-    const orgId = bodyStringField(request.body, "orgId");
     const userId = queryStringField(request.params, "userId");
-    if (!orgId || !userId) return reply.code(400).send({ ok: false, error: "invalid_user_request" });
-    if (auth.user.orgId !== orgId) return reply.code(403).send({ ok: false, error: "forbidden" });
+    if (!userId) return reply.code(400).send({ ok: false, error: "invalid_user_request" });
 
     try {
-      const user = await store.updateInternalUser({ orgId, userId, status: "disabled" });
+      const user = await store.updateInternalUser({ userId, status: "disabled" });
       return { ok: true, user };
     } catch (error) {
       if (isNotFoundError(error, "internal_user")) {
@@ -384,15 +283,12 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, adminRoles);
     if (!auth) return;
 
-    const orgId = bodyStringField(request.body, "orgId");
     const userId = queryStringField(request.params, "userId");
     const password = bodyStringField(request.body, "password");
-    if (!orgId || !userId || !password) return reply.code(400).send({ ok: false, error: "invalid_user_request" });
-    if (auth.user.orgId !== orgId) return reply.code(403).send({ ok: false, error: "forbidden" });
+    if (!userId || !password) return reply.code(400).send({ ok: false, error: "invalid_user_request" });
 
     try {
       const user = await store.updateInternalUser({
-        orgId,
         userId,
         passwordHash: await hashPassword(password),
         status: "active"
@@ -410,17 +306,14 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, adminRoles);
     if (!auth) return;
 
-    const orgId = bodyStringField(request.body, "orgId");
     const email = bodyStringField(request.body, "email");
     const displayName = bodyStringField(request.body, "displayName");
     const roles = bodyRolesField(request.body);
-    if (!orgId || !email || !displayName || roles.length === 0) {
+    if (!email || !displayName || roles.length === 0) {
       return reply.code(400).send({ ok: false, error: "invalid_invitation_request" });
     }
-    if (auth.user.orgId !== orgId) return reply.code(403).send({ ok: false, error: "forbidden" });
 
     const invitation = await store.createUserInvitation({
-      orgId,
       email,
       displayName,
       roles,
@@ -448,7 +341,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     try {
       const result = await store.acceptUserInvitation({ token, passwordHash });
       const session = await store.issueInternalSession({
-        orgId: result.user.orgId,
         email: result.user.email,
         passwordHash
       });
@@ -471,19 +363,11 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, adminRoles);
     if (!auth) return;
 
-    const orgId = bodyStringField(request.body, "orgId");
-    if (!orgId) {
-      return reply.code(400).send({ ok: false, error: "org_id_required" });
-    }
-    if (!requireOrgScope(auth, orgId, reply)) return;
-
     const registered = await store.registerCollectorDevice({
-      orgId,
       sellerAccountExternalId: bodyStringField(request.body, "sellerAccountExternalId") || undefined,
       deviceName: bodyStringField(request.body, "deviceName") || undefined
     });
     await store.appendAuditLog({
-      orgId,
       actorUserId: auth.user.id,
       action: "collector_device.registered",
       targetType: "collector_device",
@@ -505,12 +389,9 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, adminRoles);
     if (!auth) return;
 
-    const orgId = requestedOrgIdOrSession(request.query, auth);
-    if (!requireOrgScope(auth, orgId, reply)) return;
-
     return {
       ok: true,
-      devices: (await store.listCollectorDevices(orgId)).map(publicCollectorDevice)
+      devices: (await store.listCollectorDevices()).map(publicCollectorDevice)
     };
   });
 
@@ -518,17 +399,14 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, adminRoles);
     if (!auth) return;
 
-    const orgId = bodyStringField(request.body, "orgId");
     const deviceId = queryStringField(request.params, "deviceId");
-    if (!orgId || !deviceId) {
+    if (!deviceId) {
       return reply.code(400).send({ ok: false, error: "collector_device_scope_required" });
     }
-    if (!requireOrgScope(auth, orgId, reply)) return;
 
     try {
-      const device = await store.revokeCollectorDevice({ orgId, deviceId });
+      const device = await store.revokeCollectorDevice({ deviceId });
       await store.appendAuditLog({
-        orgId,
         actorUserId: auth.user.id,
         action: "collector_device.revoked",
         targetType: "collector_device",
@@ -554,12 +432,9 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const orgId = requestedOrgIdOrSession(request.query, auth);
-    if (!requireOrgScope(auth, orgId, reply)) return;
-
     return {
       ok: true,
-      customers: await store.listCustomers(orgId)
+      customers: await store.listCustomers()
     };
   });
 
@@ -567,12 +442,9 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const orgId = requestedOrgIdOrSession(request.query, auth);
-    if (!requireOrgScope(auth, orgId, reply)) return;
-
     return {
       ok: true,
-      conversations: await store.listConversations(orgId)
+      conversations: await store.listConversations()
     };
   });
 
@@ -580,13 +452,10 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const orgId = requestedOrgIdOrSession(request.query, auth);
-    if (!requireOrgScope(auth, orgId, reply)) return;
-
     const params = request.params as { externalConversationId?: string };
     return {
       ok: true,
-      messages: await store.listMessages(orgId, params.externalConversationId)
+      messages: await store.listMessages(params.externalConversationId)
     };
   });
 
@@ -598,7 +467,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
-    if (!requireOrgScope(auth, scope.orgId, reply)) return;
 
     const bundle = await loadCustomerMessageBundle(store, scope);
     if (!bundle.customer) {
@@ -638,7 +506,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
-    if (!requireOrgScope(auth, scope.orgId, reply)) return;
 
     return {
       ok: true,
@@ -650,19 +517,13 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const orgId = queryOrgId(request.query);
-    if (!orgId) {
-      return reply.code(400).send({ ok: false, error: "conversation_scope_required" });
-    }
-    if (!requireOrgScope(auth, orgId, reply)) return;
-
     const conversationScope = await resolveConversationScope(store, request.query, request.params);
     if (!conversationScope) {
       return reply.code(400).send({ ok: false, error: "conversation_scope_required" });
     }
 
     const { scope, conversation, customer } = conversationScope;
-    const messages = await store.listMessages(scope.orgId, scope.externalConversationId);
+    const messages = await store.listMessages(scope.externalConversationId);
     const job = await aiJobQueue.run("reply-suggestions", { scope }, async () => {
       const generated = await aiProvider.generateReplySuggestion({
         scope,
@@ -696,12 +557,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const orgId = queryOrgId(request.query);
-    if (!orgId) {
-      return reply.code(400).send({ ok: false, error: "conversation_scope_required" });
-    }
-    if (!requireOrgScope(auth, orgId, reply)) return;
-
     const conversationScope = await resolveConversationScope(store, request.query, request.params);
     if (!conversationScope) {
       return reply.code(400).send({ ok: false, error: "conversation_scope_required" });
@@ -721,7 +576,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
-    if (!requireOrgScope(auth, scope.orgId, reply)) return;
 
     const body = bodyStringField(request.body, "body");
     if (!body) {
@@ -742,7 +596,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
-    if (!requireOrgScope(auth, scope.orgId, reply)) return;
 
     return {
       ok: true,
@@ -758,7 +611,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
-    if (!requireOrgScope(auth, scope.orgId, reply)) return;
 
     const tag = bodyStringField(request.body, "tag");
     if (!tag) {
@@ -779,7 +631,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
-    if (!requireOrgScope(auth, scope.orgId, reply)) return;
 
     return {
       ok: true,
@@ -795,7 +646,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
-    if (!requireOrgScope(auth, scope.orgId, reply)) return;
 
     const assignedToUserId = bodyStringField(request.body, "assignedToUserId");
     if (!assignedToUserId) {
@@ -808,7 +658,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       assignedByUserId: auth.user.id
     });
     await store.appendAuditLog({
-      orgId: scope.orgId,
       actorUserId: auth.user.id,
       action: "customer.assignment.updated",
       targetType: "customer",
@@ -834,7 +683,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
-    if (!requireOrgScope(auth, scope.orgId, reply)) return;
 
     return {
       ok: true,
@@ -850,7 +698,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
-    if (!requireOrgScope(auth, scope.orgId, reply)) return;
 
     const title = bodyStringField(request.body, "title");
     if (!title) {
@@ -877,7 +724,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
-    if (!requireOrgScope(auth, scope.orgId, reply)) return;
 
     return {
       ok: true,
@@ -890,11 +736,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!auth) return;
 
     const taskId = queryStringField(request.params, "taskId");
-    const orgId = bodyStringField(request.body, "orgId") || queryOrgId(request.query);
-    if (!orgId) {
-      return reply.code(400).send({ ok: false, error: "org_id_required" });
-    }
-    if (!requireOrgScope(auth, orgId, reply)) return;
     if (!taskId) {
       return reply.code(400).send({ ok: false, error: "follow_up_task_required" });
     }
@@ -911,12 +752,10 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
 
     try {
       const task = await store.updateFollowUpTask({
-        orgId,
         taskId,
         ...update
       });
       await store.appendAuditLog({
-        orgId,
         actorUserId: auth.user.id,
         action: "follow_up_task.updated",
         targetType: "follow_up_task",
@@ -998,15 +837,8 @@ async function isCollectorAuthorized(authorization: string, store: SyncStore, fa
 
 interface PublicInternalUser {
   id: string;
-  orgId: string;
   email: string;
   displayName: string;
-  roles: InternalRole[];
-}
-
-interface PublicInternalWorkspace {
-  orgId: string;
-  name: string;
   roles: InternalRole[];
 }
 
@@ -1045,12 +877,6 @@ function requireRole(auth: InternalAuthContext, allowedRoles: InternalRole[]): b
   return allowedRoles.some((role) => auth.roles.includes(role));
 }
 
-function requireOrgScope(auth: InternalAuthContext, orgId: string, reply: FastifyReply): boolean {
-  if (auth.user.orgId === orgId) return true;
-  reply.code(403).send({ ok: false, error: "forbidden" });
-  return false;
-}
-
 async function sessionAuthContext(store: SyncStore, token: string): Promise<InternalAuthContext | null> {
   const session = await store.getInternalSession(token);
   if (!session) return null;
@@ -1067,12 +893,10 @@ async function issueLoginSession(store: SyncStore, credentials: InternalUserCred
   user: PublicInternalUser;
 }> {
   const session = await store.issueInternalSession({
-    orgId: credentials.orgId,
     email: credentials.email,
     passwordHash: credentials.passwordHash
   });
   await store.appendAuditLog({
-    orgId: session.orgId,
     actorUserId: session.userId,
     action: "auth.login.succeeded",
     targetType: "app_user",
@@ -1088,25 +912,15 @@ async function issueLoginSession(store: SyncStore, credentials: InternalUserCred
 function publicUserFromSession(session: InternalSession): PublicInternalUser {
   return {
     id: session.userId,
-    orgId: session.orgId,
     email: session.email,
     displayName: session.displayName,
     roles: session.roles
   };
 }
 
-function publicWorkspaceSummary(workspace: InternalWorkspaceSummary): PublicInternalWorkspace {
-  return {
-    orgId: workspace.orgId,
-    name: workspace.name,
-    roles: workspace.roles
-  };
-}
-
 function publicCollectorDevice(device: CollectorDevice | RegisteredCollectorDevice): CollectorDevice {
   return {
     id: device.id,
-    orgId: device.orgId,
     sellerAccountExternalId: device.sellerAccountExternalId,
     deviceName: device.deviceName,
     status: device.status,
@@ -1122,8 +936,8 @@ async function loadCustomerMessageBundle(store: SyncStore, scope: CustomerScope)
   messages: StoredMessage[];
 }> {
   const [customers, conversations] = await Promise.all([
-    store.listCustomers(scope.orgId),
-    store.listConversations(scope.orgId)
+    store.listCustomers(),
+    store.listConversations()
   ]);
   const customer =
     customers.find(
@@ -1137,7 +951,7 @@ async function loadCustomerMessageBundle(store: SyncStore, scope: CustomerScope)
       item.externalCustomerId === scope.externalCustomerId
   );
   const messageGroups = await Promise.all(
-    scopedConversations.map((conversation) => store.listMessages(scope.orgId, conversation.externalConversationId))
+    scopedConversations.map((conversation) => store.listMessages(conversation.externalConversationId))
   );
   return {
     customer,
@@ -1155,12 +969,11 @@ async function resolveConversationScope(
   conversation: StoredConversation;
   customer: StoredCustomer | null;
 } | null> {
-  const orgId = queryOrgId(query);
   const sellerAccountExternalId = queryStringField(query, "sellerAccountExternalId");
   const externalConversationId = queryStringField(params, "externalConversationId");
-  if (!orgId || !sellerAccountExternalId || !externalConversationId) return null;
+  if (!sellerAccountExternalId || !externalConversationId) return null;
 
-  const conversations = await store.listConversations(orgId);
+  const conversations = await store.listConversations();
   const conversation = conversations.find(
     (item) =>
       item.sellerAccountExternalId === sellerAccountExternalId &&
@@ -1169,7 +982,7 @@ async function resolveConversationScope(
   );
   if (!conversation?.externalCustomerId) return null;
 
-  const customers = await store.listCustomers(orgId);
+  const customers = await store.listCustomers();
   const customer =
     customers.find(
       (item) =>
@@ -1179,7 +992,6 @@ async function resolveConversationScope(
 
   return {
     scope: {
-      orgId,
       sellerAccountExternalId,
       externalCustomerId: conversation.externalCustomerId,
       externalConversationId
@@ -1225,10 +1037,9 @@ function bearerToken(authorization: string): string {
   return authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
 }
 
-async function appendLoginFailedAuditLog(store: SyncStore, orgId: string, email: string): Promise<void> {
+async function appendLoginFailedAuditLog(store: SyncStore, email: string): Promise<void> {
   try {
     await store.appendAuditLog({
-      orgId,
       action: "auth.login.failed",
       targetType: "app_user",
       metadata: { email }
@@ -1238,22 +1049,9 @@ async function appendLoginFailedAuditLog(store: SyncStore, orgId: string, email:
   }
 }
 
-async function appendLoginFailedAuditLogsForCredentials(
-  store: SyncStore,
-  credentials: InternalUserCredentials[],
-  email: string
-): Promise<void> {
-  await Promise.all(credentials.map((item) => appendLoginFailedAuditLog(store, item.orgId, email)));
-}
-
 function isInvalidCredentialsError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return message === "invalid_credentials" || message === "internal_session_not_found";
-}
-
-function isWorkspaceNotFoundError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message === "workspace_not_found";
 }
 
 function isNotFoundError(error: unknown, source: string): boolean {
@@ -1269,26 +1067,16 @@ function invitationErrorResponse(error: unknown): { statusCode: number; error: s
   return null;
 }
 
-function queryOrgId(query: unknown): string | null {
-  const value = (query as { orgId?: unknown }).orgId;
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function requestedOrgIdOrSession(query: unknown, auth: InternalAuthContext): string {
-  return queryOrgId(query) || auth.user.orgId;
-}
-
 function customerScopeFromQueryOrSession(
   query: unknown,
   params: unknown,
-  auth: InternalAuthContext
+  _auth: InternalAuthContext
 ): CustomerScope | null {
   const sellerAccountExternalId = queryStringField(query, "sellerAccountExternalId");
   const externalCustomerId = queryStringField(params, "externalCustomerId");
   if (!sellerAccountExternalId || !externalCustomerId) return null;
 
   return {
-    orgId: requestedOrgIdOrSession(query, auth),
     sellerAccountExternalId,
     externalCustomerId
   };
@@ -1318,7 +1106,6 @@ function bodyRolesField(source: unknown): InternalRole[] {
 function isValidSyncBatch(value: unknown): value is SyncBatch {
   const batch = value as Partial<SyncBatch> | null | undefined;
   if (!batch || typeof batch !== "object") return false;
-  if (!isNonEmptyString(batch.orgId)) return false;
   if (!batch.sellerAccount || !isNonEmptyString(batch.sellerAccount.externalAccountId)) return false;
   if (!batch.device || !isNonEmptyString(batch.device.deviceId)) return false;
 

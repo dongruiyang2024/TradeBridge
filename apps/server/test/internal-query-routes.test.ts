@@ -5,7 +5,6 @@ import { hashPassword } from "../src/auth.js";
 import { createServer } from "../src/server.js";
 
 const syncPayload = {
-  orgId: "org_internal",
   sellerAccount: { externalAccountId: "seller-1", displayName: "Seller One" },
   device: { deviceId: "device-1", deviceName: "MacBook" },
   customers: [
@@ -40,7 +39,6 @@ const syncPayload = {
 async function createSeededApp() {
   const store = new InMemorySyncStore();
   await store.createInternalUser({
-    orgId: "org_internal",
     email: "admin@example.com",
     displayName: "Admin User",
     passwordHash: await hashPassword("secret"),
@@ -66,7 +64,6 @@ async function createInternalAuthHeaders(app: Awaited<ReturnType<typeof createSe
     method: "POST",
     url: "/internal/v1/auth/login",
     payload: {
-      orgId: "org_internal",
       email: "admin@example.com",
       password: "secret"
     }
@@ -79,7 +76,7 @@ test("GET /internal/v1/customers returns customers for an authorized internal to
   const app = await createSeededApp();
   const response = await app.inject({
     method: "GET",
-    url: "/internal/v1/customers?orgId=org_internal",
+    url: "/internal/v1/customers",
     headers: await createInternalAuthHeaders(app)
   });
 
@@ -87,7 +84,6 @@ test("GET /internal/v1/customers returns customers for an authorized internal to
   assert.equal(response.json().ok, true);
   assert.deepEqual(response.json().customers, [
     {
-      orgId: "org_internal",
       sellerAccountExternalId: "seller-1",
       externalCustomerId: "customer-1",
       loginId: "buyer_login",
@@ -102,7 +98,7 @@ test("GET /internal/v1/conversations returns conversations for an authorized int
   const app = await createSeededApp();
   const response = await app.inject({
     method: "GET",
-    url: "/internal/v1/conversations?orgId=org_internal",
+    url: "/internal/v1/conversations",
     headers: await createInternalAuthHeaders(app)
   });
 
@@ -110,7 +106,6 @@ test("GET /internal/v1/conversations returns conversations for an authorized int
   assert.equal(response.json().ok, true);
   assert.deepEqual(response.json().conversations, [
     {
-      orgId: "org_internal",
       sellerAccountExternalId: "seller-1",
       externalConversationId: "conv-1",
       externalCustomerId: "customer-1",
@@ -123,7 +118,7 @@ test("GET /internal/v1/conversations/:id/messages returns conversation messages"
   const app = await createSeededApp();
   const response = await app.inject({
     method: "GET",
-    url: "/internal/v1/conversations/conv-1/messages?orgId=org_internal",
+    url: "/internal/v1/conversations/conv-1/messages",
     headers: await createInternalAuthHeaders(app)
   });
 
@@ -135,27 +130,11 @@ test("GET /internal/v1/conversations/:id/messages returns conversation messages"
   assert.equal(response.json().messages[0].content, "hello");
 });
 
-test("internal query APIs reject orgId outside the authenticated user's org", async () => {
-  const app = await createSeededApp();
-  const authHeaders = await createInternalAuthHeaders(app);
-  const requests = [
-    { method: "GET", url: "/internal/v1/customers?orgId=org_other", headers: authHeaders },
-    { method: "GET", url: "/internal/v1/conversations?orgId=org_other", headers: authHeaders },
-    { method: "GET", url: "/internal/v1/conversations/conv-1/messages?orgId=org_other", headers: authHeaders }
-  ] as const;
-
-  for (const request of requests) {
-    const response = await app.inject(request);
-    assert.equal(response.statusCode, 403);
-    assert.deepEqual(response.json(), { ok: false, error: "forbidden" });
-  }
-});
-
 test("collector device tokens cannot read internal query APIs", async () => {
   const app = await createSeededApp();
   const response = await app.inject({
     method: "GET",
-    url: "/internal/v1/customers?orgId=org_internal",
+    url: "/internal/v1/customers",
     headers: { authorization: "Bearer device-token" }
   });
 
@@ -163,7 +142,7 @@ test("collector device tokens cannot read internal query APIs", async () => {
   assert.deepEqual(response.json(), { ok: false, error: "internal_unauthorized" });
 });
 
-test("internal query APIs use the authenticated session org when orgId is omitted", async () => {
+test("internal query APIs do not expose org fields", async () => {
   const app = await createSeededApp();
   const authHeaders = await createInternalAuthHeaders(app);
 
@@ -184,9 +163,9 @@ test("internal query APIs use the authenticated session org when orgId is omitte
   });
 
   assert.equal(customersResponse.statusCode, 200);
-  assert.equal(customersResponse.json().customers[0].orgId, "org_internal");
+  assert.equal(Object.hasOwn(customersResponse.json().customers[0], "orgId"), false);
   assert.equal(conversationsResponse.statusCode, 200);
-  assert.equal(conversationsResponse.json().conversations[0].orgId, "org_internal");
+  assert.equal(Object.hasOwn(conversationsResponse.json().conversations[0], "orgId"), false);
   assert.equal(messagesResponse.statusCode, 200);
-  assert.equal(messagesResponse.json().messages[0].orgId, "org_internal");
+  assert.equal(Object.hasOwn(messagesResponse.json().messages[0], "orgId"), false);
 });

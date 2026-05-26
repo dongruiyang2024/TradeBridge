@@ -5,14 +5,13 @@ import { hashPassword } from "../src/auth.js";
 import { createServer } from "../src/server.js";
 
 const customerSummaryPath =
-  "/internal/v1/customers/customer-1/ai-summary?orgId=org_internal&sellerAccountExternalId=seller-1";
+  "/internal/v1/customers/customer-1/ai-summary?sellerAccountExternalId=seller-1";
 const replySuggestionPath =
-  "/internal/v1/conversations/conv-1/reply-suggestions?orgId=org_internal&sellerAccountExternalId=seller-1";
+  "/internal/v1/conversations/conv-1/reply-suggestions?sellerAccountExternalId=seller-1";
 
 async function createSeededApp(aiProvider = createFakeAiProvider(), aiJobQueue?: unknown) {
   const store = new InMemorySyncStore();
   await store.createInternalUser({
-    orgId: "org_internal",
     email: "admin@example.com",
     displayName: "Admin User",
     passwordHash: await hashPassword("secret"),
@@ -30,7 +29,6 @@ async function createSeededApp(aiProvider = createFakeAiProvider(), aiJobQueue?:
     url: "/collector/v1/sync-batches",
     headers: { authorization: "Bearer device-token" },
     payload: {
-      orgId: "org_internal",
       sellerAccount: { externalAccountId: "seller-1", displayName: "Seller One" },
       device: { deviceId: "device-1" },
       customers: [{ externalCustomerId: "customer-1", loginId: "buyer_login", displayName: "Buyer One" }],
@@ -64,7 +62,6 @@ async function createInternalAuthHeaders(app: Awaited<ReturnType<typeof createSe
     method: "POST",
     url: "/internal/v1/auth/login",
     payload: {
-      orgId: "org_internal",
       email: "admin@example.com",
       password: "secret"
     }
@@ -136,27 +133,6 @@ test("POST and GET conversation reply suggestions use provider output and persis
   assert.deepEqual(queuedJobs, ["reply-suggestions"]);
   assert.equal(getResponse.statusCode, 200);
   assert.deepEqual(getResponse.json().suggestions, createResponse.json().suggestions);
-});
-
-test("AI routes reject orgId outside the authenticated user's org", async () => {
-  const app = await createSeededApp();
-  const authHeaders = await createInternalAuthHeaders(app);
-  const customerSummaryPath =
-    "/internal/v1/customers/customer-1/ai-summary?orgId=org_other&sellerAccountExternalId=seller-1";
-  const replySuggestionsPath =
-    "/internal/v1/conversations/conv-1/reply-suggestions?orgId=org_other&sellerAccountExternalId=seller-1";
-  const requests = [
-    { method: "POST", url: customerSummaryPath, headers: authHeaders },
-    { method: "GET", url: customerSummaryPath, headers: authHeaders },
-    { method: "POST", url: replySuggestionsPath, headers: authHeaders, payload: { tone: "concise" } },
-    { method: "GET", url: replySuggestionsPath, headers: authHeaders }
-  ] as const;
-
-  for (const request of requests) {
-    const response = await app.inject(request);
-    assert.equal(response.statusCode, 403);
-    assert.deepEqual(response.json(), { ok: false, error: "forbidden" });
-  }
 });
 
 test("AI routes reject collector tokens", async () => {

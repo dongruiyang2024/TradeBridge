@@ -20,7 +20,6 @@ class BootstrapSqlClient implements SqlClient {
 }
 
 const syncPayload = {
-  orgId: "org_internal",
   sellerAccount: { externalAccountId: "seller-1" },
   device: { deviceId: "device-1" },
   conversations: [{ externalConversationId: "conv-1" }],
@@ -68,6 +67,7 @@ test("createServerFromEnv runs migrations and uses PostgresSyncStore when DATABA
   assert.equal(response.statusCode, 200);
   assert.equal(response.json().acceptedCount, 1);
   assert.equal(client.queries.some((query) => /CREATE TABLE IF NOT EXISTS schema_migration/i.test(query.sql)), true);
-  assert.equal(client.queries.some((query) => /CREATE TABLE IF NOT EXISTS org/i.test(query.sql)), true);
+  assert.equal(client.queries.some((query) => /CREATE TABLE IF NOT EXISTS seller_account/i.test(query.sql)), true);
+  assert.equal(client.queries.some((query) => /CREATE TABLE IF NOT EXISTS org/i.test(query.sql)), false);
   assert.equal(client.queries.some((query) => /insert_message/i.test(query.sql)), true);
 });

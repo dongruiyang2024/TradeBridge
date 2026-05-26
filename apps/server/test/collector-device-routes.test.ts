@@ -5,7 +5,6 @@ import { hashPassword } from "../src/auth.js";
 import { createServer } from "../src/server.js";
 
 const syncPayload = {
-  orgId: "org_internal",
   sellerAccount: { externalAccountId: "seller-1", displayName: "Seller One" },
   device: { deviceId: "device-1", deviceName: "MacBook" },
   customers: [{ externalCustomerId: "customer-1", displayName: "Buyer One" }]
@@ -14,14 +13,12 @@ const syncPayload = {
 async function createDeviceAdminApp() {
   const store = new InMemorySyncStore();
   const admin = await store.createInternalUser({
-    orgId: "org_internal",
     email: "admin@example.com",
     displayName: "Admin User",
     passwordHash: await hashPassword("secret"),
     roles: ["admin"]
   });
   await store.createInternalUser({
-    orgId: "org_internal",
     email: "sales@example.com",
     displayName: "Sales User",
     passwordHash: await hashPassword("secret"),
@@ -42,7 +39,6 @@ async function registerDevice(app: Awaited<ReturnType<typeof createServer>>) {
     url: "/internal/v1/collector-devices",
     headers: await createInternalAuthHeaders(app),
     payload: {
-      orgId: "org_internal",
       deviceName: "MacBook"
     }
   });
@@ -53,7 +49,6 @@ async function createInternalAuthHeaders(app: Awaited<ReturnType<typeof createSe
     method: "POST",
     url: "/internal/v1/auth/login",
     payload: {
-      orgId: "org_internal",
       email: "admin@example.com",
       password: "secret"
     }
@@ -71,7 +66,7 @@ test("admin users can register, list, and revoke collector devices without expos
   const created = createResponse.json();
   assert.equal(created.ok, true);
   assert.equal(typeof created.token, "string");
-  assert.equal(created.device.orgId, "org_internal");
+  assert.equal(Object.hasOwn(created.device, "orgId"), false);
   assert.equal(created.device.deviceName, "MacBook");
   assert.equal(created.device.status, "active");
   assert.equal("token" in created.device, false);
@@ -79,7 +74,7 @@ test("admin users can register, list, and revoke collector devices without expos
 
   const listResponse = await app.inject({
     method: "GET",
-    url: "/internal/v1/collector-devices?orgId=org_internal",
+    url: "/internal/v1/collector-devices",
     headers: authHeaders
   });
   assert.equal(listResponse.statusCode, 200);
@@ -88,13 +83,12 @@ test("admin users can register, list, and revoke collector devices without expos
   const revokeResponse = await app.inject({
     method: "POST",
     url: `/internal/v1/collector-devices/${created.device.id}/revoke`,
-    headers: authHeaders,
-    payload: { orgId: "org_internal" }
+    headers: authHeaders
   });
   assert.equal(revokeResponse.statusCode, 200);
   assert.equal(revokeResponse.json().device.status, "revoked");
 
-  const auditLogs = await store.listAuditLogs("org_internal");
+  const auditLogs = await store.listAuditLogs();
   const collectorDeviceAuditLogs = auditLogs.filter((log) => log.targetType === "collector_device");
   assert.equal(collectorDeviceAuditLogs.length, 2);
   assert.equal(collectorDeviceAuditLogs[0].action, "collector_device.registered");
@@ -122,8 +116,7 @@ test("registered collector device tokens can upload sync batches until revoked",
   await app.inject({
     method: "POST",
     url: `/internal/v1/collector-devices/${deviceId}/revoke`,
-    headers: await createInternalAuthHeaders(app),
-    payload: { orgId: "org_internal" }
+    headers: await createInternalAuthHeaders(app)
   });
   const rejectedResponse = await app.inject({
     method: "POST",
@@ -149,50 +142,12 @@ test("static collector device tokens remain available as a development fallback"
   assert.equal(response.json().ok, true);
 });
 
-test("collector device routes reject orgId outside the authenticated user's org", async () => {
-  const { app, store } = await createDeviceAdminApp();
-  const authHeaders = await createInternalAuthHeaders(app);
-  const otherDevice = await store.registerCollectorDevice({
-    orgId: "org_other",
-    deviceName: "Other Org Device"
-  });
-  const requests = [
-    {
-      method: "POST",
-      url: "/internal/v1/collector-devices",
-      headers: authHeaders,
-      payload: {
-        orgId: "org_other",
-        deviceName: "MacBook"
-      }
-    },
-    {
-      method: "GET",
-      url: "/internal/v1/collector-devices?orgId=org_other",
-      headers: authHeaders
-    },
-    {
-      method: "POST",
-      url: `/internal/v1/collector-devices/${otherDevice.id}/revoke`,
-      headers: authHeaders,
-      payload: { orgId: "org_other" }
-    }
-  ] as const;
-
-  for (const request of requests) {
-    const response = await app.inject(request);
-    assert.equal(response.statusCode, 403);
-    assert.deepEqual(response.json(), { ok: false, error: "forbidden" });
-  }
-});
-
 test("sales users cannot manage collector devices", async () => {
   const { app } = await createDeviceAdminApp();
   const loginResponse = await app.inject({
     method: "POST",
     url: "/internal/v1/auth/login",
     payload: {
-      orgId: "org_internal",
       email: "sales@example.com",
       password: "secret"
     }
@@ -203,7 +158,6 @@ test("sales users cannot manage collector devices", async () => {
     url: "/internal/v1/collector-devices",
     headers: { authorization: `Bearer ${loginResponse.json().token}` },
     payload: {
-      orgId: "org_internal",
       deviceName: "MacBook"
     }
   });

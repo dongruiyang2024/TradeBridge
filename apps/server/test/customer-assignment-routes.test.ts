@@ -5,12 +5,11 @@ import { hashPassword } from "../src/auth.js";
 import { createServer } from "../src/server.js";
 
 const customerPath = "/internal/v1/customers/customer-1";
-const customerQuery = "orgId=org_internal&sellerAccountExternalId=seller-1";
+const customerQuery = "sellerAccountExternalId=seller-1";
 
 async function createSeededApp() {
   const store = new InMemorySyncStore();
   const admin = await store.createInternalUser({
-    orgId: "org_internal",
     email: "admin@example.com",
     displayName: "Admin User",
     passwordHash: await hashPassword("secret"),
@@ -26,7 +25,6 @@ async function createSeededApp() {
     url: "/collector/v1/sync-batches",
     headers: { authorization: "Bearer device-token" },
     payload: {
-      orgId: "org_internal",
       sellerAccount: { externalAccountId: "seller-1" },
       device: { deviceId: "device-1" },
       customers: [{ externalCustomerId: "customer-1", displayName: "Buyer One" }],
@@ -42,7 +40,6 @@ async function createInternalAuthHeaders(app: Awaited<ReturnType<typeof createSe
     method: "POST",
     url: "/internal/v1/auth/login",
     payload: {
-      orgId: "org_internal",
       email: "admin@example.com",
       password: "secret"
     }
@@ -73,7 +70,7 @@ test("POST and GET customer assignment are scoped and audited", async () => {
   assert.equal(getResponse.statusCode, 200);
   assert.deepEqual(getResponse.json().assignment, createResponse.json().assignment);
 
-  const auditLogs = await store.listAuditLogs("org_internal");
+  const auditLogs = await store.listAuditLogs();
   const assignmentAuditLog = auditLogs.find((log) => log.action === "customer.assignment.updated");
   assert.equal(assignmentAuditLog?.actorUserId, admin.id);
   assert.equal(assignmentAuditLog?.targetType, "customer");
@@ -102,7 +99,6 @@ test("PATCH /internal/v1/follow-up-tasks/:id updates mutable fields and writes a
     url: `/internal/v1/follow-up-tasks/${taskId}`,
     headers: authHeaders,
     payload: {
-      orgId: "org_internal",
       status: "done",
       title: "Send revised quotation tomorrow",
       assignedToUserId: "user-2",
@@ -117,7 +113,7 @@ test("PATCH /internal/v1/follow-up-tasks/:id updates mutable fields and writes a
   assert.equal(updateResponse.json().task.assignedToUserId, "user-2");
   assert.equal(updateResponse.json().task.dueAt, "2026-05-27T09:00:00.000Z");
 
-  const auditLogs = await store.listAuditLogs("org_internal");
+  const auditLogs = await store.listAuditLogs();
   const followUpAuditLog = auditLogs.find((log) => log.action === "follow_up_task.updated");
   assert.equal(followUpAuditLog?.actorUserId, admin.id);
   assert.equal(followUpAuditLog?.targetType, "follow_up_task");
@@ -130,56 +126,12 @@ test("PATCH /internal/v1/follow-up-tasks/:id updates mutable fields and writes a
   });
 });
 
-test("PATCH /internal/v1/follow-up-tasks/:id rejects orgId outside the authenticated user's org", async () => {
-  const { app } = await createSeededApp();
-  const authHeaders = await createInternalAuthHeaders(app);
-  const createTaskResponse = await app.inject({
-    method: "POST",
-    url: `${customerPath}/follow-up-tasks?${customerQuery}`,
-    headers: authHeaders,
-    payload: { title: "Send revised quotation" }
-  });
-  const response = await app.inject({
-    method: "PATCH",
-    url: `/internal/v1/follow-up-tasks/${createTaskResponse.json().task.id}`,
-    headers: authHeaders,
-    payload: {
-      orgId: "org_other",
-      status: "done"
-    }
-  });
-
-  assert.equal(response.statusCode, 403);
-  assert.deepEqual(response.json(), { ok: false, error: "forbidden" });
-});
-
-test("customer assignment routes reject orgId outside the authenticated user's org", async () => {
-  const { app } = await createSeededApp();
-  const authHeaders = await createInternalAuthHeaders(app);
-  const crossOrgQuery = "orgId=org_other&sellerAccountExternalId=seller-1";
-  const requests = [
-    {
-      method: "POST",
-      url: `${customerPath}/assignment?${crossOrgQuery}`,
-      headers: authHeaders,
-      payload: { assignedToUserId: "user-2" }
-    },
-    { method: "GET", url: `${customerPath}/assignment?${crossOrgQuery}`, headers: authHeaders }
-  ] as const;
-
-  for (const request of requests) {
-    const response = await app.inject(request);
-    assert.equal(response.statusCode, 403);
-    assert.deepEqual(response.json(), { ok: false, error: "forbidden" });
-  }
-});
-
 test("assignment and follow-up update routes reject invalid scopes", async () => {
   const { app } = await createSeededApp();
   const authHeaders = await createInternalAuthHeaders(app);
   const assignmentResponse = await app.inject({
     method: "POST",
-    url: `${customerPath}/assignment?orgId=org_internal`,
+    url: `${customerPath}/assignment`,
     headers: authHeaders,
     payload: { assignedToUserId: "user-2" }
   });
@@ -192,6 +144,6 @@ test("assignment and follow-up update routes reject invalid scopes", async () =>
 
   assert.equal(assignmentResponse.statusCode, 400);
   assert.deepEqual(assignmentResponse.json(), { ok: false, error: "customer_scope_required" });
-  assert.equal(updateResponse.statusCode, 400);
-  assert.deepEqual(updateResponse.json(), { ok: false, error: "org_id_required" });
+  assert.equal(updateResponse.statusCode, 404);
+  assert.deepEqual(updateResponse.json(), { ok: false, error: "follow_up_task_not_found" });
 });

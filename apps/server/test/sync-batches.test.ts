@@ -19,7 +19,6 @@ test("POST /collector/v1/sync-batches accepts a valid batch", async () => {
     url: "/collector/v1/sync-batches",
     headers: { authorization: "Bearer device-token" },
     payload: {
-      orgId: "org_internal",
       sellerAccount: { externalAccountId: "seller-1" },
       device: { deviceId: "device-1" },
       conversations: [{ externalConversationId: "conv-1" }],
@@ -41,18 +40,16 @@ test("POST /collector/v1/sync-batches accepts a valid batch", async () => {
   assert.equal(body.acceptedCount, 1);
   assert.equal(body.rejectedCount, 0);
   assert.equal(body.nextCursor, "2026-05-25T09:00:00.000Z");
-  assert.equal(store.listMessages("org_internal").length, 1);
+  assert.equal(store.listMessages().length, 1);
 });
 
 test("POST /collector/v1/sync-batches rejects invalid batch shapes before writing", async () => {
   const store = new InMemorySyncStore();
   const app = await createServer({ store, deviceTokens: ["device-token"] });
   const invalidPayloads = [
-    { sellerAccount: { externalAccountId: "seller-1" }, device: { deviceId: "device-1" } },
-    { orgId: "org_internal", sellerAccount: {}, device: { deviceId: "device-1" } },
-    { orgId: "org_internal", sellerAccount: { externalAccountId: "seller-1" }, device: {} },
+    { sellerAccount: {}, device: { deviceId: "device-1" } },
+    { sellerAccount: { externalAccountId: "seller-1" }, device: {} },
     {
-      orgId: "org_internal",
       sellerAccount: { externalAccountId: "seller-1" },
       device: { deviceId: "device-1" },
       conversations: [{ externalConversationId: "conv-1" }],
@@ -72,14 +69,13 @@ test("POST /collector/v1/sync-batches rejects invalid batch shapes before writin
     assert.deepEqual(response.json(), { ok: false, error: "invalid_sync_batch" });
   }
 
-  assert.equal(store.listMessages("org_internal").length, 0);
+  assert.equal(store.listMessages().length, 0);
 });
 
 test("POST /collector/v1/sync-batches returns idempotent counts for duplicate messages", async () => {
   const store = new InMemorySyncStore();
   const app = await createServer({ store, deviceTokens: ["device-token"] });
   const payload = {
-    orgId: "org_internal",
     sellerAccount: { externalAccountId: "seller-1" },
     device: { deviceId: "device-1" },
     conversations: [{ externalConversationId: "conv-1" }],
@@ -110,7 +106,7 @@ test("POST /collector/v1/sync-batches returns idempotent counts for duplicate me
   assert.equal(duplicate.statusCode, 200);
   assert.equal(duplicate.json().acceptedCount, 0);
   assert.equal(duplicate.json().rejectedCount, 1);
-  assert.equal(store.listMessages("org_internal").length, 1);
+  assert.equal(store.listMessages().length, 1);
 });
 
 test("GET /health returns internal server status", async () => {
