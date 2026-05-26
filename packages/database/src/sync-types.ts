@@ -37,7 +37,6 @@ export interface SyncMessageInput {
 }
 
 export interface SyncBatch {
-  orgId: string;
   sellerAccount: SyncSellerAccountInput;
   device: SyncDeviceInput;
   cursor?: Record<string, unknown>;
@@ -55,29 +54,24 @@ export interface SyncBatchResult {
 }
 
 export interface StoredSellerAccount extends SyncSellerAccountInput {
-  orgId: string;
   lastSeenAt: string;
 }
 
 export interface StoredCustomer extends SyncCustomerInput {
-  orgId: string;
   sellerAccountExternalId: string;
 }
 
 export interface StoredConversation extends SyncConversationInput {
-  orgId: string;
   sellerAccountExternalId: string;
 }
 
 export interface StoredMessage extends SyncMessageInput {
-  orgId: string;
   sellerAccountExternalId: string;
   contentHash: string;
   uniqueKey: string;
 }
 
 export interface CustomerScope {
-  orgId: string;
   sellerAccountExternalId: string;
   externalCustomerId: string;
 }
@@ -115,7 +109,6 @@ export interface CreateFollowUpTaskInput extends CustomerScope {
 }
 
 export interface UpdateFollowUpTaskInput {
-  orgId: string;
   taskId: string;
   title?: string;
   assignedToUserId?: string;
@@ -147,7 +140,6 @@ export interface StoredCustomerAssignment extends CustomerScope {
 }
 
 export interface CreateAuditLogInput {
-  orgId: string;
   actorUserId?: string;
   action: string;
   targetType: string;
@@ -196,7 +188,6 @@ export type InternalRole = "admin" | "supervisor" | "sales";
 
 export interface InternalUser {
   id: string;
-  orgId: string;
   email: string;
   displayName: string;
   status: string;
@@ -206,7 +197,6 @@ export interface InternalUser {
 }
 
 export interface CreateInternalUserInput {
-  orgId: string;
   email: string;
   displayName: string;
   passwordHash: string;
@@ -219,7 +209,6 @@ export interface InternalUserCredentials extends InternalUser {
 }
 
 export interface GetInternalUserCredentialsInput {
-  orgId: string;
   email: string;
 }
 
@@ -227,17 +216,7 @@ export interface GetInternalUserCredentialsByEmailInput {
   email: string;
 }
 
-export interface InternalWorkspaceSummary {
-  orgId: string;
-  name: string;
-  userId: string;
-  email: string;
-  displayName: string;
-  roles: InternalRole[];
-}
-
 export interface UpdateInternalUserInput {
-  orgId: string;
   userId: string;
   displayName?: string;
   passwordHash?: string;
@@ -249,13 +228,7 @@ export interface RevokeInternalSessionInput {
   token: string;
 }
 
-export interface SwitchInternalSessionOrgInput {
-  token: string;
-  orgId: string;
-}
-
 export interface CreateUserInvitationInput {
-  orgId: string;
   email: string;
   displayName: string;
   roles: InternalRole[];
@@ -266,7 +239,6 @@ export interface CreateUserInvitationInput {
 
 export interface StoredUserInvitation {
   id: string;
-  orgId: string;
   email: string;
   displayName: string;
   roles: InternalRole[];
@@ -288,7 +260,6 @@ export interface AcceptUserInvitationResult {
 }
 
 export interface IssueInternalSessionInput {
-  orgId: string;
   email: string;
   passwordHash: string;
   token?: string;
@@ -298,7 +269,6 @@ export interface IssueInternalSessionInput {
 export interface InternalSession {
   token: string;
   tokenHash: string;
-  orgId: string;
   userId: string;
   email: string;
   displayName: string;
@@ -309,7 +279,6 @@ export interface InternalSession {
 
 export interface CollectorDevice {
   id: string;
-  orgId: string;
   sellerAccountExternalId?: string;
   deviceName?: string;
   status: string;
@@ -324,7 +293,6 @@ export interface RegisteredCollectorDevice extends CollectorDevice {
 }
 
 export interface RegisterCollectorDeviceInput {
-  orgId: string;
   sellerAccountExternalId?: string;
   deviceName?: string;
   token?: string;
@@ -332,6 +300,5 @@ export interface RegisterCollectorDeviceInput {
 }
 
 export interface RevokeCollectorDeviceInput {
-  orgId: string;
   deviceId: string;
 }

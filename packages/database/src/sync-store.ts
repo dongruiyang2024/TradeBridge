@@ -19,7 +19,6 @@ import type {
   InternalSession,
   InternalUser,
   InternalUserCredentials,
-  InternalWorkspaceSummary,
   IssueInternalSessionInput,
   RegisteredCollectorDevice,
   RegisterCollectorDeviceInput,
@@ -37,7 +36,6 @@ import type {
   StoredReplySuggestion,
   StoredSellerAccount,
   StoredUserInvitation,
-  SwitchInternalSessionOrgInput,
   SyncBatch,
   SyncBatchResult,
   SyncConversationInput,
@@ -63,7 +61,6 @@ export class InMemorySyncStore {
   private readonly internalSessions = new Map<string, InternalSession>();
   private readonly userInvitations = new Map<string, StoredUserInvitation & { tokenHash: string }>();
   private readonly collectorDevices = new Map<string, CollectorDevice & { tokenHash: string }>();
-  private readonly orgs = new Map<string, { id: string; name: string }>();
   private collaborationSequence = 0;
   private internalUserSequence = 0;
   private collectorDeviceSequence = 0;
@@ -71,21 +68,18 @@ export class InMemorySyncStore {
   private aiSequence = 0;
 
   async acceptSyncBatch(batch: SyncBatch): Promise<SyncBatchResult> {
-    this.ensureOrg(batch.orgId);
     const warnings: string[] = [];
     let acceptedCount = 0;
     let rejectedCount = 0;
 
-    const sellerKey = sellerAccountKey(batch.orgId, batch.sellerAccount.externalAccountId);
+    const sellerKey = sellerAccountKey(batch.sellerAccount.externalAccountId);
     this.sellerAccounts.set(sellerKey, {
-      orgId: batch.orgId,
       ...batch.sellerAccount,
       lastSeenAt: sourceTime(batch)
     });
 
     for (const customer of batch.customers || []) {
-      this.customers.set(customerKey(batch.orgId, batch.sellerAccount.externalAccountId, customer.externalCustomerId), {
-        orgId: batch.orgId,
+      this.customers.set(customerKey(batch.sellerAccount.externalAccountId, customer.externalCustomerId), {
         sellerAccountExternalId: batch.sellerAccount.externalAccountId,
         ...customer
       });
@@ -93,9 +87,8 @@ export class InMemorySyncStore {
 
     for (const conversation of batch.conversations || []) {
       this.conversations.set(
-        conversationKey(batch.orgId, batch.sellerAccount.externalAccountId, conversation.externalConversationId),
+        conversationKey(batch.sellerAccount.externalAccountId, conversation.externalConversationId),
         {
-          orgId: batch.orgId,
           sellerAccountExternalId: batch.sellerAccount.externalAccountId,
           ...conversation
         }
@@ -104,7 +97,7 @@ export class InMemorySyncStore {
 
     let nextCursor: string | null = null;
     for (const message of batch.messages || []) {
-      const convKey = conversationKey(batch.orgId, batch.sellerAccount.externalAccountId, message.externalConversationId);
+      const convKey = conversationKey(batch.sellerAccount.externalAccountId, message.externalConversationId);
       if (!this.conversations.has(convKey)) {
         rejectedCount += 1;
         warnings.push(
@@ -121,7 +114,6 @@ export class InMemorySyncStore {
       }
 
       this.messages.set(uniqueKey, {
-        orgId: batch.orgId,
         sellerAccountExternalId: batch.sellerAccount.externalAccountId,
         ...message,
         contentHash,
@@ -139,21 +131,21 @@ export class InMemorySyncStore {
     };
   }
 
-  listSellerAccounts(orgId: string): StoredSellerAccount[] {
-    return Array.from(this.sellerAccounts.values()).filter((item) => item.orgId === orgId);
+  listSellerAccounts(): StoredSellerAccount[] {
+    return Array.from(this.sellerAccounts.values());
   }
 
-  listCustomers(orgId: string): StoredCustomer[] {
-    return Array.from(this.customers.values()).filter((item) => item.orgId === orgId);
+  listCustomers(): StoredCustomer[] {
+    return Array.from(this.customers.values());
   }
 
-  listConversations(orgId: string): StoredConversation[] {
-    return Array.from(this.conversations.values()).filter((item) => item.orgId === orgId);
+  listConversations(): StoredConversation[] {
+    return Array.from(this.conversations.values());
   }
 
-  listMessages(orgId: string, externalConversationId?: string): StoredMessage[] {
+  listMessages(externalConversationId?: string): StoredMessage[] {
     return Array.from(this.messages.values()).filter(
-      (item) => item.orgId === orgId && (!externalConversationId || item.externalConversationId === externalConversationId)
+      (item) => !externalConversationId || item.externalConversationId === externalConversationId
     );
   }
 
@@ -209,7 +201,7 @@ export class InMemorySyncStore {
 
   async assignCustomer(input: AssignCustomerInput): Promise<StoredCustomerAssignment> {
     const now = new Date().toISOString();
-    const key = customerKey(input.orgId, input.sellerAccountExternalId, input.externalCustomerId);
+    const key = customerKey(input.sellerAccountExternalId, input.externalCustomerId);
     const existing = this.customerAssignments.get(key);
     const assignment: StoredCustomerAssignment = {
       ...input,
@@ -222,12 +214,12 @@ export class InMemorySyncStore {
   }
 
   async getCustomerAssignment(scope: CustomerScope): Promise<StoredCustomerAssignment | null> {
-    return this.customerAssignments.get(customerKey(scope.orgId, scope.sellerAccountExternalId, scope.externalCustomerId)) || null;
+    return this.customerAssignments.get(customerKey(scope.sellerAccountExternalId, scope.externalCustomerId)) || null;
   }
 
   async updateFollowUpTask(input: UpdateFollowUpTaskInput): Promise<StoredFollowUpTask> {
     const existing = this.followUpTasks.get(input.taskId);
-    if (!existing || existing.orgId !== input.orgId) {
+    if (!existing) {
       throw new Error("follow_up_task_not_found");
     }
 
@@ -253,8 +245,8 @@ export class InMemorySyncStore {
     return log;
   }
 
-  async listAuditLogs(orgId: string): Promise<StoredAuditLog[]> {
-    return this.auditLogs.filter((log) => log.orgId === orgId);
+  async listAuditLogs(): Promise<StoredAuditLog[]> {
+    return [...this.auditLogs];
   }
 
   async createAiSummary(input: CreateAiSummaryInput): Promise<StoredAiSummary> {
@@ -295,14 +287,12 @@ export class InMemorySyncStore {
   }
 
   async createInternalUser(input: CreateInternalUserInput): Promise<InternalUser> {
-    this.ensureOrg(input.orgId);
     const now = new Date().toISOString();
     const normalizedEmail = input.email.trim().toLowerCase();
-    const key = internalUserKey(input.orgId, normalizedEmail);
+    const key = internalUserKey(normalizedEmail);
     const existing = this.internalUsers.get(key);
     const user: InternalUser & { passwordHash: string } = {
       id: existing?.id || this.nextInternalUserId(),
-      orgId: input.orgId,
       email: normalizedEmail,
       displayName: input.displayName,
       status: input.status || "active",
@@ -315,15 +305,14 @@ export class InMemorySyncStore {
     return toPublicInternalUser(user);
   }
 
-  async listInternalUsers(orgId: string): Promise<InternalUser[]> {
+  async listInternalUsers(): Promise<InternalUser[]> {
     return Array.from(this.internalUsers.values())
-      .filter((user) => user.orgId === orgId)
       .map(toPublicInternalUser)
       .sort((left, right) => left.email.localeCompare(right.email));
   }
 
   async getInternalUserCredentials(input: GetInternalUserCredentialsInput): Promise<InternalUserCredentials | null> {
-    const user = this.internalUsers.get(internalUserKey(input.orgId, input.email.trim().toLowerCase()));
+    const user = this.internalUsers.get(internalUserKey(input.email.trim().toLowerCase()));
     return user ? { ...toPublicInternalUser(user), passwordHash: user.passwordHash } : null;
   }
 
@@ -333,29 +322,11 @@ export class InMemorySyncStore {
     const normalizedEmail = input.email.trim().toLowerCase();
     return Array.from(this.internalUsers.values())
       .filter((user) => user.email === normalizedEmail && user.status === "active")
-      .map((user) => ({ ...toPublicInternalUser(user), passwordHash: user.passwordHash }))
-      .sort((left, right) => left.orgId.localeCompare(right.orgId));
-  }
-
-  async listInternalUserWorkspacesByEmail(email: string): Promise<InternalWorkspaceSummary[]> {
-    const normalizedEmail = email.trim().toLowerCase();
-    return Array.from(this.internalUsers.values())
-      .filter((user) => user.email === normalizedEmail && user.status === "active")
-      .map((user) => ({
-        orgId: user.orgId,
-        name: this.orgs.get(user.orgId)?.name || user.orgId,
-        userId: user.id,
-        email: user.email,
-        displayName: user.displayName,
-        roles: user.roles
-      }))
-      .sort((left, right) => left.name.localeCompare(right.name));
+      .map((user) => ({ ...toPublicInternalUser(user), passwordHash: user.passwordHash }));
   }
 
   async updateInternalUser(input: UpdateInternalUserInput): Promise<InternalUser> {
-    const existing = Array.from(this.internalUsers.values()).find(
-      (user) => user.orgId === input.orgId && user.id === input.userId
-    );
+    const existing = Array.from(this.internalUsers.values()).find((user) => user.id === input.userId);
     if (!existing) throw new Error("internal_user_not_found");
 
     const updated: InternalUser & { passwordHash: string } = {
@@ -366,12 +337,12 @@ export class InMemorySyncStore {
       status: input.status ?? existing.status,
       updatedAt: new Date().toISOString()
     };
-    this.internalUsers.set(internalUserKey(updated.orgId, updated.email), updated);
+    this.internalUsers.set(internalUserKey(updated.email), updated);
     return toPublicInternalUser(updated);
   }
 
   async issueInternalSession(input: IssueInternalSessionInput): Promise<InternalSession> {
-    const user = this.internalUsers.get(internalUserKey(input.orgId, input.email.trim().toLowerCase()));
+    const user = this.internalUsers.get(internalUserKey(input.email.trim().toLowerCase()));
     if (!user || user.status !== "active" || user.passwordHash !== input.passwordHash) {
       throw new Error("invalid_credentials");
     }
@@ -380,7 +351,6 @@ export class InMemorySyncStore {
     const session: InternalSession = {
       token,
       tokenHash: hashContent(token),
-      orgId: user.orgId,
       userId: user.id,
       email: user.email,
       displayName: user.displayName,
@@ -396,33 +366,11 @@ export class InMemorySyncStore {
     return this.internalSessions.delete(hashContent(input.token));
   }
 
-  async switchInternalSessionOrg(input: SwitchInternalSessionOrgInput): Promise<InternalSession> {
-    const tokenHash = hashContent(input.token);
-    const existingSession = this.internalSessions.get(tokenHash);
-    if (!existingSession) throw new Error("internal_session_not_found");
-
-    const targetUser = this.internalUsers.get(internalUserKey(input.orgId, existingSession.email));
-    if (!targetUser || targetUser.status !== "active") {
-      throw new Error("workspace_not_found");
-    }
-
-    const switched: InternalSession = {
-      ...existingSession,
-      orgId: targetUser.orgId,
-      userId: targetUser.id,
-      displayName: targetUser.displayName,
-      roles: targetUser.roles
-    };
-    this.internalSessions.set(tokenHash, switched);
-    return switched;
-  }
-
   async createUserInvitation(input: CreateUserInvitationInput): Promise<StoredUserInvitation> {
     const now = new Date().toISOString();
     const token = input.token || crypto.randomBytes(32).toString("hex");
     const invitation: StoredUserInvitation & { tokenHash: string } = {
       id: this.nextInternalUserId().replace("user_", "inv_"),
-      orgId: input.orgId,
       email: input.email.trim().toLowerCase(),
       displayName: input.displayName,
       roles: input.roles,
@@ -452,7 +400,6 @@ export class InMemorySyncStore {
     if (Date.parse(invitation.expiresAt) <= Date.now()) throw new Error("invitation_expired");
 
     const user = await this.createInternalUser({
-      orgId: invitation.orgId,
       email: invitation.email,
       displayName: invitation.displayName,
       passwordHash: input.passwordHash,
@@ -468,9 +415,7 @@ export class InMemorySyncStore {
     const session = this.internalSessions.get(hashContent(token));
     if (!session) return null;
     if (Date.parse(session.expiresAt) <= Date.now()) return null;
-    const user = Array.from(this.internalUsers.values()).find(
-      (item) => item.orgId === session.orgId && item.id === session.userId
-    );
+    const user = Array.from(this.internalUsers.values()).find((item) => item.id === session.userId);
     if (!user || user.status !== "active") return null;
     return session;
   }
@@ -481,7 +426,6 @@ export class InMemorySyncStore {
     const tokenHash = hashContent(token);
     const device: CollectorDevice & { tokenHash: string } = {
       id: this.nextCollectorDeviceId(),
-      orgId: input.orgId,
       sellerAccountExternalId: input.sellerAccountExternalId,
       deviceName: input.deviceName,
       status: input.status || "active",
@@ -497,15 +441,13 @@ export class InMemorySyncStore {
     };
   }
 
-  listCollectorDevices(orgId: string): CollectorDevice[] {
-    return Array.from(this.collectorDevices.values())
-      .filter((device) => device.orgId === orgId)
-      .map(toPublicCollectorDevice);
+  listCollectorDevices(): CollectorDevice[] {
+    return Array.from(this.collectorDevices.values()).map(toPublicCollectorDevice);
   }
 
   async revokeCollectorDevice(input: RevokeCollectorDeviceInput): Promise<CollectorDevice> {
     const existing = this.collectorDevices.get(input.deviceId);
-    if (!existing || existing.orgId !== input.orgId) {
+    if (!existing) {
       throw new Error("collector_device_not_found");
     }
 
@@ -531,12 +473,6 @@ export class InMemorySyncStore {
     return `user_${this.internalUserSequence}`;
   }
 
-  private ensureOrg(orgId: string): void {
-    if (!this.orgs.has(orgId)) {
-      this.orgs.set(orgId, { id: orgId, name: orgId });
-    }
-  }
-
   private nextCollectorDeviceId(): string {
     this.collectorDeviceSequence += 1;
     return `collector_device_${this.collectorDeviceSequence}`;
@@ -553,20 +489,20 @@ export class InMemorySyncStore {
   }
 }
 
-function sellerAccountKey(orgId: string, sellerAccountExternalId: string): string {
-  return [orgId, sellerAccountExternalId].join(":");
+function sellerAccountKey(sellerAccountExternalId: string): string {
+  return sellerAccountExternalId;
 }
 
-function customerKey(orgId: string, sellerAccountExternalId: string, externalCustomerId: string): string {
-  return [orgId, sellerAccountExternalId, externalCustomerId].join(":");
+function customerKey(sellerAccountExternalId: string, externalCustomerId: string): string {
+  return [sellerAccountExternalId, externalCustomerId].join(":");
 }
 
-function conversationKey(orgId: string, sellerAccountExternalId: string, externalConversationId: string): string {
-  return [orgId, sellerAccountExternalId, externalConversationId].join(":");
+function conversationKey(sellerAccountExternalId: string, externalConversationId: string): string {
+  return [sellerAccountExternalId, externalConversationId].join(":");
 }
 
 function messageUniqueKey(batch: SyncBatch, message: SyncMessageInput, contentHash: string): string {
-  const prefix = conversationKey(batch.orgId, batch.sellerAccount.externalAccountId, message.externalConversationId);
+  const prefix = conversationKey(batch.sellerAccount.externalAccountId, message.externalConversationId);
   if (message.externalMessageId) {
     return [prefix, message.externalMessageId].join(":");
   }
@@ -590,7 +526,6 @@ function sourceTime(batch: SyncBatch): string {
 
 function isSameCustomerScope(left: CustomerScope, right: CustomerScope): boolean {
   return (
-    left.orgId === right.orgId &&
     left.sellerAccountExternalId === right.sellerAccountExternalId &&
     left.externalCustomerId === right.externalCustomerId
   );
@@ -600,14 +535,13 @@ function isSameConversationCustomerScope(left: ConversationCustomerScope, right:
   return isSameCustomerScope(left, right) && left.externalConversationId === right.externalConversationId;
 }
 
-function internalUserKey(orgId: string, email: string): string {
-  return [orgId, email.toLowerCase()].join(":");
+function internalUserKey(email: string): string {
+  return email.toLowerCase();
 }
 
 function toPublicInternalUser(user: InternalUser & { passwordHash: string }): InternalUser {
   return {
     id: user.id,
-    orgId: user.orgId,
     email: user.email,
     displayName: user.displayName,
     status: user.status,
@@ -620,7 +554,6 @@ function toPublicInternalUser(user: InternalUser & { passwordHash: string }): In
 function toPublicCollectorDevice(device: CollectorDevice & { tokenHash: string }): CollectorDevice {
   return {
     id: device.id,
-    orgId: device.orgId,
     sellerAccountExternalId: device.sellerAccountExternalId,
     deviceName: device.deviceName,
     status: device.status,

@@ -48,22 +48,20 @@ class AuditFakeClient implements SqlClient {
   }
 }
 
-test("InMemorySyncStore appends and lists audit logs by org", async () => {
+test("InMemorySyncStore appends and lists audit logs without organization scope", async () => {
   const store = new InMemorySyncStore();
   const log = await store.appendAuditLog({
-    orgId: "org_internal",
-    actorUserId: "manager-1",
-    action: "customer.assignment.updated",
+    actorUserId: "user-1",
+    action: "auth.login",
     targetType: "customer",
-    targetId: "assignment-1",
-    metadata: { assignedToUserId: "user-2" }
+    targetId: "user-1",
+    metadata: { email: "admin@example.com" }
   });
 
-  assert.equal(log.orgId, "org_internal");
-  assert.equal(log.actorUserId, "manager-1");
-  assert.equal(log.action, "customer.assignment.updated");
-  assert.deepEqual(await store.listAuditLogs("org_internal"), [log]);
-  assert.deepEqual(await store.listAuditLogs("other_org"), []);
+  assert.equal(log.actorUserId, "user-1");
+  assert.equal(log.action, "auth.login");
+  assert.equal("orgId" in log, false);
+  assert.deepEqual(await store.listAuditLogs(), [log]);
 });
 
 test("PostgresSyncStore appends audit logs with parameterized metadata", async () => {

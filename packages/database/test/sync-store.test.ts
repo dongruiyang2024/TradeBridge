@@ -5,7 +5,6 @@ import { InMemorySyncStore } from "../src/index.js";
 test("acceptSyncBatch stores seller account, customer, conversation, and messages", async () => {
   const store = new InMemorySyncStore();
   const result = await store.acceptSyncBatch({
-    orgId: "org_internal",
     sellerAccount: { externalAccountId: "seller-1", displayName: "Seller One" },
     device: { deviceId: "device-1", deviceName: "MacBook" },
     cursor: { since: "2026-05-01T00:00:00.000Z" },
@@ -33,16 +32,15 @@ test("acceptSyncBatch stores seller account, customer, conversation, and message
   assert.equal(result.rejectedCount, 0);
   assert.deepEqual(result.warnings, []);
   assert.equal(result.nextCursor, "2026-05-25T09:00:00.000Z");
-  assert.equal(store.listSellerAccounts("org_internal").length, 1);
-  assert.equal(store.listCustomers("org_internal").length, 1);
-  assert.equal(store.listConversations("org_internal").length, 1);
-  assert.equal(store.listMessages("org_internal").length, 1);
+  assert.equal(store.listSellerAccounts().length, 1);
+  assert.equal(store.listCustomers().length, 1);
+  assert.equal(store.listConversations().length, 1);
+  assert.equal(store.listMessages().length, 1);
 });
 
 test("acceptSyncBatch is idempotent by external message id", async () => {
   const store = new InMemorySyncStore();
   const batch = {
-    orgId: "org_internal",
     sellerAccount: { externalAccountId: "seller-1" },
     device: { deviceId: "device-1" },
     conversations: [{ externalConversationId: "conv-1" }],
@@ -71,13 +69,12 @@ test("acceptSyncBatch is idempotent by external message id", async () => {
   assert.equal(first.rejectedCount, 1);
   assert.equal(second.acceptedCount, 0);
   assert.equal(second.rejectedCount, 2);
-  assert.equal(store.listMessages("org_internal").length, 1);
+  assert.equal(store.listMessages().length, 1);
 });
 
 test("acceptSyncBatch deduplicates messages without upstream ids by content hash", async () => {
   const store = new InMemorySyncStore();
   await store.acceptSyncBatch({
-    orgId: "org_internal",
     sellerAccount: { externalAccountId: "seller-1" },
     device: { deviceId: "device-1" },
     conversations: [{ externalConversationId: "conv-1" }],
@@ -97,14 +94,13 @@ test("acceptSyncBatch deduplicates messages without upstream ids by content hash
     ]
   });
 
-  assert.equal(store.listMessages("org_internal").length, 1);
-  assert.equal(store.listMessages("org_internal")[0].contentHash.length, 64);
+  assert.equal(store.listMessages().length, 1);
+  assert.equal(store.listMessages()[0].contentHash.length, 64);
 });
 
 test("acceptSyncBatch rejects messages for unknown conversations", async () => {
   const store = new InMemorySyncStore();
   const result = await store.acceptSyncBatch({
-    orgId: "org_internal",
     sellerAccount: { externalAccountId: "seller-1" },
     device: { deviceId: "device-1" },
     conversations: [],
@@ -122,18 +118,16 @@ test("acceptSyncBatch rejects messages for unknown conversations", async () => {
   assert.equal(result.acceptedCount, 0);
   assert.equal(result.rejectedCount, 1);
   assert.deepEqual(result.warnings, ["message msg-1 references unknown conversation missing-conv"]);
-  assert.equal(store.listMessages("org_internal").length, 0);
+  assert.equal(store.listMessages().length, 0);
 });
 
 test("customer collaboration records are scoped by seller account and customer", async () => {
   const store = new InMemorySyncStore();
   const scope = {
-    orgId: "org_internal",
     sellerAccountExternalId: "seller-1",
     externalCustomerId: "customer-1"
   };
   const otherScope = {
-    orgId: "org_internal",
     sellerAccountExternalId: "seller-2",
     externalCustomerId: "customer-1"
   };
@@ -169,10 +163,9 @@ test("customer collaboration records are scoped by seller account and customer",
   assert.equal(store.listCustomerNotes(otherScope).length, 1);
 });
 
-test("customer assignments, follow-up updates, and audit logs are stored by organization scope", async () => {
+test("customer assignments, follow-up updates, and audit logs are stored without organization scope", async () => {
   const store = new InMemorySyncStore();
   const scope = {
-    orgId: "org_internal",
     sellerAccountExternalId: "seller-1",
     externalCustomerId: "customer-1"
   };
@@ -188,7 +181,6 @@ test("customer assignments, follow-up updates, and audit logs are stored by orga
     assignedByUserId: "manager-1"
   });
   const updatedTask = await store.updateFollowUpTask({
-    orgId: "org_internal",
     taskId: task.id,
     status: "done",
     title: "Send revised quotation tomorrow",
@@ -196,7 +188,6 @@ test("customer assignments, follow-up updates, and audit logs are stored by orga
     dueAt: "2026-05-27T09:00:00.000Z"
   });
   const audit = await store.appendAuditLog({
-    orgId: "org_internal",
     actorUserId: "manager-1",
     action: "customer.assignment.updated",
     targetType: "customer",
@@ -211,14 +202,12 @@ test("customer assignments, follow-up updates, and audit logs are stored by orga
   assert.equal(updatedTask.title, "Send revised quotation tomorrow");
   assert.equal(updatedTask.assignedToUserId, "user-2");
   assert.equal(updatedTask.dueAt, "2026-05-27T09:00:00.000Z");
-  assert.deepEqual(await store.listAuditLogs("org_internal"), [audit]);
-  assert.deepEqual(await store.listAuditLogs("other_org"), []);
+  assert.deepEqual(await store.listAuditLogs(), [audit]);
 });
 
 test("AI summaries and reply suggestions are scoped and retrievable", async () => {
   const store = new InMemorySyncStore();
   const scope = {
-    orgId: "org_internal",
     sellerAccountExternalId: "seller-1",
     externalCustomerId: "customer-1"
   };
@@ -252,7 +241,6 @@ test("AI summaries and reply suggestions are scoped and retrievable", async () =
   assert.deepEqual(await store.listReplySuggestions(conversationScope), [suggestion]);
   assert.equal(
     await store.getLatestAiSummary({
-      orgId: "org_internal",
       sellerAccountExternalId: "seller-2",
       externalCustomerId: "customer-1"
     }),
@@ -263,7 +251,6 @@ test("AI summaries and reply suggestions are scoped and retrievable", async () =
 test("internal user invitations can be created, inspected, and accepted once", async () => {
   const store = new InMemorySyncStore();
   const invitation = await store.createUserInvitation({
-    orgId: "org_internal",
     email: "Invitee@Example.com",
     displayName: "Invitee",
     roles: ["sales"],
@@ -298,7 +285,6 @@ test("internal users can issue and resolve sessions", async () => {
   const store = new InMemorySyncStore();
   const futureExpiresAt = new Date(Date.now() + 60_000).toISOString();
   const user = await store.createInternalUser({
-    orgId: "org_internal",
     email: "admin@example.com",
     displayName: "Admin User",
     passwordHash: "password-hash",
@@ -306,7 +292,6 @@ test("internal users can issue and resolve sessions", async () => {
   });
 
   const session = await store.issueInternalSession({
-    orgId: "org_internal",
     email: "admin@example.com",
     passwordHash: "password-hash",
     token: "session-token",
@@ -323,7 +308,6 @@ test("internal users can issue and resolve sessions", async () => {
   await assert.rejects(
     () =>
       store.issueInternalSession({
-        orgId: "org_internal",
         email: "admin@example.com",
         passwordHash: "wrong"
       }),
@@ -334,7 +318,6 @@ test("internal users can issue and resolve sessions", async () => {
 test("internal users can be listed, updated, disabled, reset, and resolved for credential checks", async () => {
   const store = new InMemorySyncStore();
   const created = await store.createInternalUser({
-    orgId: "org_internal",
     email: "Admin@Example.com",
     displayName: "Admin User",
     passwordHash: "scrypt$hash-1",
@@ -344,18 +327,16 @@ test("internal users can be listed, updated, disabled, reset, and resolved for c
   assert.equal(created.email, "admin@example.com");
 
   const credentials = await store.getInternalUserCredentials({
-    orgId: "org_internal",
     email: "ADMIN@example.com"
   });
   assert.equal(credentials?.passwordHash, "scrypt$hash-1");
 
-  const users = await store.listInternalUsers("org_internal");
+  const users = await store.listInternalUsers();
   assert.equal(users.length, 1);
   assert.equal(users[0].email, "admin@example.com");
   assert.equal("passwordHash" in users[0], false);
 
   const disabled = await store.updateInternalUser({
-    orgId: "org_internal",
     userId: created.id,
     status: "disabled"
   });
@@ -364,7 +345,6 @@ test("internal users can be listed, updated, disabled, reset, and resolved for c
   await assert.rejects(
     () =>
       store.issueInternalSession({
-        orgId: "org_internal",
         email: "admin@example.com",
         passwordHash: "scrypt$hash-1"
       }),
@@ -372,7 +352,6 @@ test("internal users can be listed, updated, disabled, reset, and resolved for c
   );
 
   const reset = await store.updateInternalUser({
-    orgId: "org_internal",
     userId: created.id,
     passwordHash: "scrypt$hash-2",
     status: "active",
@@ -380,19 +359,17 @@ test("internal users can be listed, updated, disabled, reset, and resolved for c
   });
   assert.deepEqual(reset.roles, ["supervisor", "sales"]);
   assert.equal(
-    (await store.getInternalUserCredentials({ orgId: "org_internal", email: "admin@example.com" }))?.passwordHash,
+    (await store.getInternalUserCredentials({ email: "admin@example.com" }))?.passwordHash,
     "scrypt$hash-2"
   );
 
   const session = await store.issueInternalSession({
-    orgId: "org_internal",
     email: " ADMIN@example.com ",
     passwordHash: "scrypt$hash-2",
     token: "session-token"
   });
   assert.equal(session.token, "session-token");
   await store.updateInternalUser({
-    orgId: "org_internal",
     userId: created.id,
     status: "disabled"
   });
@@ -405,18 +382,16 @@ test("internal users can be listed, updated, disabled, reset, and resolved for c
 test("collector devices authenticate by one-time tokens and can be revoked", async () => {
   const store = new InMemorySyncStore();
   const registered = await store.registerCollectorDevice({
-    orgId: "org_internal",
     deviceName: "MacBook",
     token: "collector-token"
   });
 
-  assert.equal(registered.orgId, "org_internal");
   assert.equal(registered.deviceName, "MacBook");
   assert.equal(registered.status, "active");
   assert.equal(registered.token, "collector-token");
   assert.notEqual(registered.tokenHash, "collector-token");
 
-  const devices = await store.listCollectorDevices("org_internal");
+  const devices = await store.listCollectorDevices();
   assert.equal(devices.length, 1);
   assert.equal(devices[0].id, registered.id);
   assert.equal("token" in devices[0], false);
@@ -427,83 +402,51 @@ test("collector devices authenticate by one-time tokens and can be revoked", asy
   assert.equal(await store.authenticateCollectorDevice("wrong-token"), null);
 
   const revoked = await store.revokeCollectorDevice({
-    orgId: "org_internal",
     deviceId: registered.id
   });
   assert.equal(revoked.status, "revoked");
   assert.equal(await store.authenticateCollectorDevice("collector-token"), null);
 });
 
-test("internal workspace lookup lists active memberships for an email", async () => {
+test("internal users are unique by email in single-tenant mode", async () => {
   const store = new InMemorySyncStore();
-  await store.createInternalUser({
-    orgId: "org_internal",
-    email: "sales@example.com",
-    displayName: "Sales Internal",
+  const first = await store.createInternalUser({
+    email: " Admin@Example.com ",
+    displayName: "Admin",
     passwordHash: "hash-1",
-    roles: ["sales"]
+    roles: ["admin"]
   });
-  await store.createInternalUser({
-    orgId: "org_other",
-    email: "sales@example.com",
-    displayName: "Sales Other",
+  const second = await store.createInternalUser({
+    email: "admin@example.com",
+    displayName: "Admin Updated",
     passwordHash: "hash-2",
     roles: ["supervisor"]
   });
-  await store.createInternalUser({
-    orgId: "org_disabled",
-    email: "sales@example.com",
-    displayName: "Disabled",
-    passwordHash: "hash-3",
-    roles: ["sales"],
-    status: "disabled"
-  });
 
-  const memberships = await store.listInternalUserWorkspacesByEmail(" Sales@Example.COM ");
-
-  assert.deepEqual(
-    memberships.map((item) => ({
-      orgId: item.orgId,
-      name: item.name,
-      roles: item.roles
-    })),
-    [
-      { orgId: "org_internal", name: "org_internal", roles: ["sales"] },
-      { orgId: "org_other", name: "org_other", roles: ["supervisor"] }
-    ]
-  );
+  assert.equal(second.id, first.id);
+  assert.equal(second.email, "admin@example.com");
+  assert.equal("orgId" in second, false);
+  assert.deepEqual(second.roles, ["supervisor"]);
+  assert.equal((await store.listInternalUsers()).length, 1);
 });
 
-test("internal session can switch to another workspace for the same email", async () => {
+test("internal sessions resolve users without organization scope", async () => {
   const store = new InMemorySyncStore();
   await store.createInternalUser({
-    orgId: "org_internal",
     email: "sales@example.com",
-    displayName: "Sales Internal",
-    passwordHash: "hash-1",
+    displayName: "Sales",
+    passwordHash: "hash",
     roles: ["sales"]
   });
-  await store.createInternalUser({
-    orgId: "org_other",
-    email: "sales@example.com",
-    displayName: "Sales Other",
-    passwordHash: "hash-2",
-    roles: ["supervisor"]
-  });
+
   const session = await store.issueInternalSession({
-    orgId: "org_internal",
     email: "sales@example.com",
-    passwordHash: "hash-1",
+    passwordHash: "hash",
     token: "session-token"
   });
 
-  const switched = await store.switchInternalSessionOrg({
-    token: session.token,
-    orgId: "org_other"
-  });
-
-  assert.equal(switched.orgId, "org_other");
-  assert.equal(switched.displayName, "Sales Other");
-  assert.deepEqual(switched.roles, ["supervisor"]);
-  assert.equal((await store.getInternalSession("session-token"))?.orgId, "org_other");
+  assert.equal(session.email, "sales@example.com");
+  assert.equal("orgId" in session, false);
+  assert.deepEqual(session.roles, ["sales"]);
+  assert.equal((await store.getInternalSession("session-token"))?.userId, session.userId);
 });
