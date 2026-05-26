@@ -118,12 +118,10 @@ export function createInternalApiClient(options: CreateInternalApiClientOptions)
       return requireField(data.user, "user");
     },
     async setupAdmin(input) {
-      const { setupToken, ...body } = input;
       const data = await request<InternalUser>("/internal/v1/setup/admin", {
         method: "POST",
         auth: false,
-        bearerToken: setupToken,
-        body
+        body: input
       });
       return requireField(data.user, "user");
     },

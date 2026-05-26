@@ -61,7 +61,6 @@ import { hashPassword, verifyPassword } from "./auth.js";
 export interface CreateServerOptions {
   store?: SyncStore;
   deviceTokens?: string[];
-  setupToken?: string;
   aiProvider?: AiProvider;
   aiJobQueue?: AiJobQueue;
   logger?: boolean;
@@ -70,7 +69,6 @@ export interface CreateServerOptions {
 export interface CreateServerFromEnvOptions {
   env?: Record<string, string | undefined>;
   deviceTokens?: string[];
-  setupToken?: string;
   logger?: boolean;
   sqlClientFactory?: (databaseUrl: string) => Promise<SqlClient> | SqlClient;
   aiJobQueueFactory?: (env: Record<string, string | undefined>) => Promise<AiJobQueue | undefined> | AiJobQueue | undefined;
@@ -218,11 +216,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.post("/internal/v1/setup/admin", async (request, reply) => {
-    const setupToken = options.setupToken || "";
-    if (!setupToken || bearerToken(request.headers.authorization || "") !== setupToken) {
-      return reply.code(401).send({ ok: false, error: "setup_unauthorized" });
-    }
-
     const orgId = bodyStringField(request.body, "orgId");
     const email = bodyStringField(request.body, "email");
     const displayName = bodyStringField(request.body, "displayName");
@@ -959,7 +952,6 @@ export async function createServerFromEnv(options: CreateServerFromEnvOptions = 
   return createServer({
     store,
     deviceTokens: options.deviceTokens || envDeviceTokens(env),
-    setupToken: options.setupToken || env.WANGWANG_SETUP_TOKEN,
     aiJobQueue,
     logger: options.logger
   });

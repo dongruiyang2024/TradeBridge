@@ -99,7 +99,6 @@ test("setup admin view renders initialization fields", () => {
     <SetupAdminView
       orgId="org_internal"
       serverBaseUrl=""
-      setupToken=""
       email="admin@example.com"
       displayName="Admin User"
       password=""
@@ -107,7 +106,6 @@ test("setup admin view renders initialization fields", () => {
       error=""
       onOrgIdChange={() => undefined}
       onServerBaseUrlChange={() => undefined}
-      onSetupTokenChange={() => undefined}
       onEmailChange={() => undefined}
       onDisplayNameChange={() => undefined}
       onPasswordChange={() => undefined}
@@ -117,9 +115,9 @@ test("setup admin view renders initialization fields", () => {
   );
 
   assert.match(html, /初始化首个管理员/);
-  assert.match(html, /初始化 Token/);
   assert.match(html, /显示名称/);
   assert.match(html, /创建管理员/);
+  assert.doesNotMatch(html, /初始化 Token/);
   assert.doesNotMatch(html, /开发 Token/);
 });
 

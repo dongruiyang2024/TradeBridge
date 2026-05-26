@@ -303,14 +303,13 @@ test("authenticated users without a permitted role cannot access internal APIs",
   assert.deepEqual(response.json(), { ok: false, error: "forbidden" });
 });
 
-test("POST /internal/v1/setup/admin creates the first admin when setup token matches", async () => {
+test("POST /internal/v1/setup/admin creates the first admin without a setup token", async () => {
   const store = new InMemorySyncStore();
-  const app = await createServer({ store, setupToken: "setup-token" });
+  const app = await createServer({ store });
 
   const response = await app.inject({
     method: "POST",
     url: "/internal/v1/setup/admin",
-    headers: { authorization: "Bearer setup-token" },
     payload: {
       orgId: "org_internal",
       email: "owner@example.com",
@@ -324,26 +323,6 @@ test("POST /internal/v1/setup/admin creates the first admin when setup token mat
   assert.deepEqual(response.json().user.roles, ["admin"]);
 });
 
-test("POST /internal/v1/setup/admin rejects invalid setup tokens", async () => {
-  const store = new InMemorySyncStore();
-  const app = await createServer({ store, setupToken: "setup-token" });
-
-  const response = await app.inject({
-    method: "POST",
-    url: "/internal/v1/setup/admin",
-    headers: { authorization: "Bearer wrong-token" },
-    payload: {
-      orgId: "org_internal",
-      email: "owner@example.com",
-      displayName: "Owner",
-      password: "secret-password"
-    }
-  });
-
-  assert.equal(response.statusCode, 401);
-  assert.deepEqual(response.json(), { ok: false, error: "setup_unauthorized" });
-});
-
 test("POST /internal/v1/setup/admin rejects setup when an admin already exists", async () => {
   const store = new InMemorySyncStore();
   await store.createInternalUser({
@@ -353,12 +332,11 @@ test("POST /internal/v1/setup/admin rejects setup when an admin already exists",
     passwordHash: await hashPassword("secret"),
     roles: ["admin"]
   });
-  const app = await createServer({ store, setupToken: "setup-token" });
+  const app = await createServer({ store });
 
   const response = await app.inject({
     method: "POST",
     url: "/internal/v1/setup/admin",
-    headers: { authorization: "Bearer setup-token" },
     payload: {
       orgId: "org_internal",
       email: "owner@example.com",
@@ -380,12 +358,11 @@ test("POST /internal/v1/setup/admin rejects existing emails without promoting us
     passwordHash: await hashPassword("secret"),
     roles: ["sales"]
   });
-  const app = await createServer({ store, setupToken: "setup-token" });
+  const app = await createServer({ store });
 
   const response = await app.inject({
     method: "POST",
     url: "/internal/v1/setup/admin",
-    headers: { authorization: "Bearer setup-token" },
     payload: {
       orgId: "org_internal",
       email: "sales@example.com",

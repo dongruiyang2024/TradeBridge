@@ -63,7 +63,6 @@ export function App() {
     readSessionStorage({ orgId: initialOrgId, serverBaseUrl: initialServerBaseUrl })
   );
   const [setupMode, setSetupMode] = useState(false);
-  const [setupToken, setSetupToken] = useState("");
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
@@ -187,7 +186,7 @@ export function App() {
   }
 
   function handleSetupAdmin() {
-    if (!setupToken.trim() || !email.trim() || !displayName.trim() || !password.trim()) {
+    if (!email.trim() || !displayName.trim() || !password.trim()) {
       setAuthError("setup_admin_fields_required");
       return;
     }
@@ -200,8 +199,7 @@ export function App() {
           orgId,
           email: email.trim(),
           displayName: displayName.trim(),
-          password,
-          setupToken: setupToken.trim()
+          password
         });
       } catch (error) {
         setAuthError(errorMessage(error));
@@ -294,7 +292,6 @@ export function App() {
         <SetupAdminView
           orgId={orgId}
           serverBaseUrl={serverBaseUrl}
-          setupToken={setupToken}
           email={email}
           displayName={displayName}
           password={password}
@@ -302,7 +299,6 @@ export function App() {
           error={authError}
           onOrgIdChange={handleOrgIdChange}
           onServerBaseUrlChange={handleServerBaseUrlChange}
-          onSetupTokenChange={setSetupToken}
           onEmailChange={setEmail}
           onDisplayNameChange={setDisplayName}
           onPasswordChange={setPassword}
@@ -479,7 +475,6 @@ export function LoginView(props: LoginViewProps) {
 interface SetupAdminViewProps {
   orgId: string;
   serverBaseUrl: string;
-  setupToken: string;
   email: string;
   displayName: string;
   password: string;
@@ -487,7 +482,6 @@ interface SetupAdminViewProps {
   error: string;
   onOrgIdChange(value: string): void;
   onServerBaseUrlChange(value: string): void;
-  onSetupTokenChange(value: string): void;
   onEmailChange(value: string): void;
   onDisplayNameChange(value: string): void;
   onPasswordChange(value: string): void;
@@ -524,14 +518,6 @@ export function SetupAdminView(props: SetupAdminViewProps) {
               placeholder="/internal 代理"
               value={props.serverBaseUrl}
               onChange={(event) => props.onServerBaseUrlChange(event.target.value)}
-            />
-          </label>
-          <label>
-            初始化 Token
-            <input
-              type="password"
-              value={props.setupToken}
-              onChange={(event) => props.onSetupTokenChange(event.target.value)}
             />
           </label>
           <label>

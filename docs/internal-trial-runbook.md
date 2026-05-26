@@ -23,7 +23,6 @@ Node 启动入口会自动读取项目根目录下的 `.env.local` 和 `.env`，
 ```bash
 WANGWANG_SERVER_HOST=127.0.0.1
 WANGWANG_SERVER_PORT=5032
-WANGWANG_SETUP_TOKEN=change-me-setup-token
 WANGWANG_DEVICE_TOKENS=dev-device-token
 WANGWANG_ORG_ID=org_internal
 WANGWANG_SERVER_URL=http://127.0.0.1:5032
@@ -83,17 +82,10 @@ curl http://127.0.0.1:5032/health
 
 ## 5. 初始化管理员和内部登录
 
-首次启动新环境时，在 `.env.local` 设置一次性初始化 token：
-
-```bash
-WANGWANG_SETUP_TOKEN=change-me-setup-token
-```
-
 可以在 Web 工作台切换到初始化模式创建首个管理员，也可以直接调用初始化接口：
 
 ```bash
 curl -X POST http://127.0.0.1:5032/internal/v1/setup/admin \
-  -H 'Authorization: Bearer change-me-setup-token' \
   -H 'Content-Type: application/json' \
   -d '{
     "orgId": "org_internal",
@@ -131,8 +123,7 @@ curl -X POST http://127.0.0.1:5032/internal/v1/auth/login \
 说明：
 
 - 内部工作台只支持邮箱密码登录。
-- 初始化 token 只用于创建首个管理员。
-- 首个管理员创建完成后，请从 `.env.local` 删除 `WANGWANG_SETUP_TOKEN` 或将它置空。
+- 初始化接口只允许在当前空间尚无管理员时创建首个管理员。
 - 后续管理员和普通内部用户由已登录管理员在工作台中创建。
 
 ## 6. 注册采集设备

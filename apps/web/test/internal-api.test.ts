@@ -114,8 +114,7 @@ test("internal API client sends setup, user management, and invitation requests"
     orgId: "org_internal",
     email: "owner@example.com",
     displayName: "Owner",
-    password: "setup-secret",
-    setupToken: "setup-token"
+    password: "setup-secret"
   });
   await client.listInternalUsers("org_internal");
   await client.createInternalUser({
@@ -181,7 +180,7 @@ test("internal API client sends setup, user management, and invitation requests"
   });
   assert.deepEqual(JSON.parse(String(calls[7].init.body)), { password: "accepted-secret" });
 
-  assert.equal((calls[0].init.headers as Record<string, string>).authorization, "Bearer setup-token");
+  assert.equal((calls[0].init.headers as Record<string, string>).authorization, undefined);
   for (const index of [1, 2, 3, 4, 5]) {
     assert.equal((calls[index].init.headers as Record<string, string>).authorization, "Bearer session-token");
   }

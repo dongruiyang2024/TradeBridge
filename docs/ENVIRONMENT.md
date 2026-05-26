@@ -17,7 +17,6 @@ cp .env.example .env.local
 
 已提交的 `.env.example` 记录了项目支持的环境变量。当前工作区里的 `.env.local` 已加入 `.gitignore`，用于本机开发：
 
-- 首次初始化设置 token：`change-me-setup-token`
 - 采集端兜底 token：`dev-device-token`
 - 组织 ID：`org_internal`
 - 内部服务端：`http://127.0.0.1:5032`
@@ -25,13 +24,9 @@ cp .env.example .env.local
 
 ## 内部工作台登录
 
-内部工作台只支持邮箱密码登录。新环境首次启动时，在 `.env.local` 设置：
+内部工作台只支持邮箱密码登录。新环境首次启动时，使用 Web 工作台的初始化入口创建首个管理员账号。
 
-```bash
-WANGWANG_SETUP_TOKEN=change-me-setup-token
-```
-
-使用 Web 工作台的初始化入口创建首个管理员账号。首个管理员创建完成后，请从 `.env.local` 删除 `WANGWANG_SETUP_TOKEN` 或将它置空，后续管理员和普通内部用户由已登录管理员在工作台中创建。
+初始化接口只允许在当前空间尚无管理员时创建首个管理员。首个管理员创建完成后，后续管理员和普通内部用户由已登录管理员在工作台中创建。
 
 ## 常用启动方式
 
@@ -87,7 +82,6 @@ REDIS_URL=redis://127.0.0.1:6379/0
 
 不要提交真实值：
 
-- `WANGWANG_SETUP_TOKEN`
 - `WANGWANG_DEVICE_TOKENS`
 - `WANGWANG_COLLECTOR_TOKEN`
 - `DATABASE_URL`

@@ -115,7 +115,6 @@ export interface SetupAdminInput {
   email: string;
   displayName: string;
   password: string;
-  setupToken: string;
 }
 
 export interface CreateInternalUserInput {
