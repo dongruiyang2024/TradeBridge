@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { createInternalApiClient } from "../src/internal-api.ts";
+import { createInternalApiClient, WorkspaceSelectionRequiredError } from "../src/internal-api.ts";
 
 const originalFetch = globalThis.fetch;
 
@@ -187,6 +187,85 @@ test("internal API client sends setup, user management, and invitation requests"
   }
   assert.equal((calls[6].init.headers as Record<string, string>).authorization, undefined);
   assert.equal((calls[7].init.headers as Record<string, string>).authorization, undefined);
+});
+
+test("login can omit orgId and workspace selection errors expose workspace choices", async () => {
+  const calls: Array<{ url: URL; init: RequestInit }> = [];
+  const client = createInternalApiClient({
+    baseUrl: "",
+    token: "",
+    fetchImpl: async (input, init = {}) => {
+      calls.push({ url: new URL(String(input), "http://local.test"), init });
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: "workspace_selection_required",
+          workspaces: [
+            { orgId: "org_internal", name: "org_internal", roles: ["admin"] },
+            { orgId: "org_other", name: "org_other", roles: ["sales"] }
+          ]
+        }),
+        { status: 409, headers: { "content-type": "application/json" } }
+      );
+    }
+  });
+
+  await assert.rejects(
+    () => client.login({ email: "admin@example.com", password: "secret" }),
+    (error: unknown) => {
+      assert.equal(error instanceof WorkspaceSelectionRequiredError, true);
+      assert.deepEqual((error as WorkspaceSelectionRequiredError).workspaces.map((item) => item.orgId), [
+        "org_internal",
+        "org_other"
+      ]);
+      return true;
+    }
+  );
+
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), {
+    email: "admin@example.com",
+    password: "secret"
+  });
+});
+
+test("workspace client methods call internal workspace routes", async () => {
+  const calls: Array<{ url: URL; init: RequestInit }> = [];
+  const client = createInternalApiClient({
+    baseUrl: "/base",
+    token: "session-token",
+    fetchImpl: async (input, init = {}) => {
+      calls.push({ url: new URL(String(input), "http://local.test"), init });
+      if (String(input).endsWith("/workspaces")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            workspaces: [{ orgId: "org_internal", name: "org_internal", roles: ["admin"] }]
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          user: {
+            id: "u1",
+            orgId: "org_other",
+            email: "admin@example.com",
+            displayName: "Admin",
+            status: "active",
+            roles: ["admin"]
+          }
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+  });
+
+  assert.equal((await client.listWorkspaces())[0].orgId, "org_internal");
+  assert.equal((await client.switchWorkspace("org_other")).orgId, "org_other");
+  assert.equal(calls[0].url.pathname, "/base/internal/v1/workspaces");
+  assert.equal(calls[1].url.pathname, "/base/internal/v1/workspaces/active");
+  assert.deepEqual(JSON.parse(String(calls[1].init.body)), { orgId: "org_other" });
 });
 
 function responseFor(pathname: string, method: string): unknown {

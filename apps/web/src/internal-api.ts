@@ -4,6 +4,7 @@ import type {
   InternalApiClient,
   InternalInvitation,
   InternalUser,
+  InternalWorkspaceSummary,
   StoredConversation,
   StoredCustomer,
   StoredCustomerAssignment,
@@ -36,8 +37,19 @@ interface ApiEnvelope<T> {
   token?: string;
   expiresAt?: string;
   user?: LoginResult["user"];
+  workspaces?: InternalWorkspaceSummary[];
   users?: InternalUser[];
   invitation?: InternalInvitation;
+}
+
+export class WorkspaceSelectionRequiredError extends Error {
+  readonly workspaces: InternalWorkspaceSummary[];
+
+  constructor(workspaces: InternalWorkspaceSummary[]) {
+    super("workspace_selection_required");
+    this.name = "WorkspaceSelectionRequiredError";
+    this.workspaces = workspaces;
+  }
 }
 
 export function createInternalApiClient(options: CreateInternalApiClientOptions): InternalApiClient {
@@ -70,6 +82,9 @@ export function createInternalApiClient(options: CreateInternalApiClientOptions)
     const text = await response.text();
     const data = text ? (JSON.parse(text) as ApiEnvelope<T>) : ({ ok: response.ok } as ApiEnvelope<T>);
     if (!response.ok || data.ok === false) {
+      if (response.status === 409 && data.error === "workspace_selection_required") {
+        throw new WorkspaceSelectionRequiredError(data.workspaces || []);
+      }
       throw new Error(data.error || response.statusText || "internal_api_error");
     }
     return data;
@@ -90,6 +105,17 @@ export function createInternalApiClient(options: CreateInternalApiClientOptions)
     },
     async logout() {
       await request<void>("/internal/v1/auth/logout", { method: "POST" });
+    },
+    async listWorkspaces() {
+      const data = await request<InternalWorkspaceSummary[]>("/internal/v1/workspaces");
+      return data.workspaces || [];
+    },
+    async switchWorkspace(orgId) {
+      const data = await request<InternalUser>("/internal/v1/workspaces/active", {
+        method: "PATCH",
+        body: { orgId }
+      });
+      return requireField(data.user, "user");
     },
     async setupAdmin(input) {
       const { setupToken, ...body } = input;
