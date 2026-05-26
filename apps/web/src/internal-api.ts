@@ -4,7 +4,6 @@ import type {
   InternalApiClient,
   InternalInvitation,
   InternalUser,
-  InternalWorkspaceSummary,
   StoredConversation,
   StoredCustomer,
   StoredCustomerAssignment,
@@ -37,19 +36,8 @@ interface ApiEnvelope<T> {
   token?: string;
   expiresAt?: string;
   user?: LoginResult["user"];
-  workspaces?: InternalWorkspaceSummary[];
   users?: InternalUser[];
   invitation?: InternalInvitation;
-}
-
-export class WorkspaceSelectionRequiredError extends Error {
-  readonly workspaces: InternalWorkspaceSummary[];
-
-  constructor(workspaces: InternalWorkspaceSummary[]) {
-    super("workspace_selection_required");
-    this.name = "WorkspaceSelectionRequiredError";
-    this.workspaces = workspaces;
-  }
 }
 
 export function createInternalApiClient(options: CreateInternalApiClientOptions): InternalApiClient {
@@ -82,9 +70,6 @@ export function createInternalApiClient(options: CreateInternalApiClientOptions)
     const text = await response.text();
     const data = text ? (JSON.parse(text) as ApiEnvelope<T>) : ({ ok: response.ok } as ApiEnvelope<T>);
     if (!response.ok || data.ok === false) {
-      if (response.status === 409 && data.error === "workspace_selection_required") {
-        throw new WorkspaceSelectionRequiredError(data.workspaces || []);
-      }
       throw new Error(data.error || response.statusText || "internal_api_error");
     }
     return data;
@@ -106,17 +91,6 @@ export function createInternalApiClient(options: CreateInternalApiClientOptions)
     async logout() {
       await request<void>("/internal/v1/auth/logout", { method: "POST" });
     },
-    async listWorkspaces() {
-      const data = await request<InternalWorkspaceSummary[]>("/internal/v1/workspaces");
-      return data.workspaces || [];
-    },
-    async switchWorkspace(orgId) {
-      const data = await request<InternalUser>("/internal/v1/workspaces/active", {
-        method: "PATCH",
-        body: { orgId }
-      });
-      return requireField(data.user, "user");
-    },
     async setupAdmin(input) {
       const data = await request<InternalUser>("/internal/v1/setup/admin", {
         method: "POST",
@@ -125,8 +99,8 @@ export function createInternalApiClient(options: CreateInternalApiClientOptions)
       });
       return requireField(data.user, "user");
     },
-    async listInternalUsers(orgId) {
-      const data = await request<InternalUser[]>("/internal/v1/users", { query: { orgId } });
+    async listInternalUsers() {
+      const data = await request<InternalUser[]>("/internal/v1/users");
       return data.users || [];
     },
     async createInternalUser(input) {
@@ -138,8 +112,7 @@ export function createInternalApiClient(options: CreateInternalApiClientOptions)
     },
     async disableInternalUser(input) {
       const data = await request<InternalUser>(`/internal/v1/users/${encodeURIComponent(input.userId)}/disable`, {
-        method: "POST",
-        body: { orgId: input.orgId }
+        method: "POST"
       });
       return requireField(data.user, "user");
     },
@@ -148,7 +121,7 @@ export function createInternalApiClient(options: CreateInternalApiClientOptions)
         `/internal/v1/users/${encodeURIComponent(input.userId)}/reset-password`,
         {
           method: "POST",
-          body: { orgId: input.orgId, password: input.password }
+          body: { password: input.password }
         }
       );
       return requireField(data.user, "user");
@@ -182,18 +155,17 @@ export function createInternalApiClient(options: CreateInternalApiClientOptions)
         user: requireField(data.user, "user")
       };
     },
-    async listCustomers(orgId) {
-      const data = await request<StoredCustomer[]>("/internal/v1/customers", { query: { orgId } });
+    async listCustomers() {
+      const data = await request<StoredCustomer[]>("/internal/v1/customers");
       return data.customers || [];
     },
-    async listConversations(orgId) {
-      const data = await request<StoredConversation[]>("/internal/v1/conversations", { query: { orgId } });
+    async listConversations() {
+      const data = await request<StoredConversation[]>("/internal/v1/conversations");
       return data.conversations || [];
     },
-    async listMessages(orgId, externalConversationId) {
+    async listMessages(externalConversationId) {
       const data = await request<StoredMessage[]>(
-        `/internal/v1/conversations/${encodeURIComponent(externalConversationId)}/messages`,
-        { query: { orgId } }
+        `/internal/v1/conversations/${encodeURIComponent(externalConversationId)}/messages`
       );
       return data.messages || [];
     },
@@ -250,7 +222,6 @@ function customerPath(scope: CustomerScope, child: string): string {
 
 function scopeQuery(scope: CustomerScope): Record<string, string> {
   return {
-    orgId: scope.orgId,
     sellerAccountExternalId: scope.sellerAccountExternalId
   };
 }

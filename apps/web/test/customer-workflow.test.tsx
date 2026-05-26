@@ -2,16 +2,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import React from "react";
 import { renderToString } from "react-dom/server";
-import { isSessionForConfig, LoginView, SetupAdminView, UserManagementView, WorkspaceView } from "../src/App.tsx";
+import { DashboardView, isSessionForConfig, LoginView, SetupAdminView, UserManagementView } from "../src/App.tsx";
 import {
   addTagToSelectedCustomer,
-  createInitialWorkspaceState,
+  createInitialDashboardState,
   createNoteForSelectedCustomer,
   createTaskForSelectedCustomer,
   loadCustomerList,
   selectCustomer
-} from "../src/workspace-state.ts";
-import type { InternalApiClient, WorkspaceState } from "../src/types.ts";
+} from "../src/dashboard-state.ts";
+import type { DashboardState, InternalApiClient } from "../src/types.ts";
 
 test("login view renders account login without developer token fallback", () => {
   const html = renderToString(
@@ -22,13 +22,11 @@ test("login view renders account login without developer token fallback", () => 
       loading={false}
       error=""
       advancedOpen={false}
-      workspaceChoices={[]}
       onAdvancedOpenChange={() => undefined}
       onServerBaseUrlChange={() => undefined}
       onEmailChange={() => undefined}
       onPasswordChange={() => undefined}
       onPasswordLogin={() => undefined}
-      onWorkspaceLogin={() => undefined}
       onSetupMode={() => undefined}
     />
   );
@@ -49,13 +47,11 @@ test("login view hides raw org input and keeps API in advanced connection settin
       loading={false}
       error=""
       advancedOpen={false}
-      workspaceChoices={[]}
       onAdvancedOpenChange={() => undefined}
       onServerBaseUrlChange={() => undefined}
       onEmailChange={() => undefined}
       onPasswordChange={() => undefined}
       onPasswordLogin={() => undefined}
-      onWorkspaceLogin={() => undefined}
       onSetupMode={() => undefined}
     />
   );
@@ -65,46 +61,15 @@ test("login view hides raw org input and keeps API in advanced connection settin
   assert.match(html, /连接设置/);
 });
 
-test("login view renders workspace choices returned by the server", () => {
-  const html = renderToString(
-    <LoginView
-      serverBaseUrl=""
-      email="admin@example.com"
-      password="secret"
-      loading={false}
-      error="请选择要进入的工作空间。"
-      advancedOpen={false}
-      workspaceChoices={[
-        { orgId: "org_internal", name: "内部空间", roles: ["admin"] },
-        { orgId: "org_other", name: "其他空间", roles: ["sales"] }
-      ]}
-      onAdvancedOpenChange={() => undefined}
-      onServerBaseUrlChange={() => undefined}
-      onEmailChange={() => undefined}
-      onPasswordChange={() => undefined}
-      onPasswordLogin={() => undefined}
-      onWorkspaceLogin={() => undefined}
-      onSetupMode={() => undefined}
-    />
-  );
-
-  assert.match(html, /内部空间/);
-  assert.match(html, /其他空间/);
-  assert.match(html, /admin/);
-  assert.match(html, /sales/);
-});
-
 test("setup admin view renders initialization fields", () => {
   const html = renderToString(
     <SetupAdminView
-      orgId="org_internal"
       serverBaseUrl=""
       email="admin@example.com"
       displayName="Admin User"
       password=""
       loading={false}
       error=""
-      onOrgIdChange={() => undefined}
       onServerBaseUrlChange={() => undefined}
       onEmailChange={() => undefined}
       onDisplayNameChange={() => undefined}
@@ -117,6 +82,7 @@ test("setup admin view renders initialization fields", () => {
   assert.match(html, /初始化首个管理员/);
   assert.match(html, /显示名称/);
   assert.match(html, /创建管理员/);
+  assert.doesNotMatch(html, /Org/);
   assert.doesNotMatch(html, /初始化 Token/);
   assert.doesNotMatch(html, /开发 Token/);
 });
@@ -124,11 +90,9 @@ test("setup admin view renders initialization fields", () => {
 test("user management view renders internal user list and actions", () => {
   const html = renderToString(
     <UserManagementView
-      orgId="org_internal"
       users={[
         {
           id: "user-admin",
-          orgId: "org_internal",
           email: "admin@example.com",
           displayName: "Admin User",
           roles: ["admin"],
@@ -136,7 +100,6 @@ test("user management view renders internal user list and actions", () => {
         },
         {
           id: "user-sales",
-          orgId: "org_internal",
           email: "sales@example.com",
           displayName: "Sales User",
           roles: ["sales"],
@@ -161,20 +124,17 @@ test("user management view renders internal user list and actions", () => {
   assert.match(html, /重置密码/);
 });
 
-test("workspace renders customer list, selected timeline, and collaboration panel", () => {
-  const state = sampleWorkspaceState();
+test("dashboard renders customer list, selected timeline, and collaboration panel", () => {
+  const state = sampleDashboardState();
 
   const html = renderToString(
-    <WorkspaceView
+    <DashboardView
       state={state}
       serverBaseUrl=""
-      orgId="org_internal"
       loading={false}
       onServerBaseUrlChange={() => undefined}
-      onOrgIdChange={() => undefined}
       currentUser={{
         id: "user-1",
-        orgId: "org_internal",
         email: "admin@example.com",
         displayName: "Admin User",
         roles: ["admin"],
@@ -202,18 +162,15 @@ test("workspace renders customer list, selected timeline, and collaboration pane
   assert.match(html, /manager-user-7/);
 });
 
-test("workspace hides user management entry for non-admin users", () => {
+test("dashboard hides user management entry for non-admin users", () => {
   const html = renderToString(
-    <WorkspaceView
-      state={sampleWorkspaceState()}
+    <DashboardView
+      state={sampleDashboardState()}
       serverBaseUrl=""
-      orgId="org_internal"
       loading={false}
       onServerBaseUrlChange={() => undefined}
-      onOrgIdChange={() => undefined}
       currentUser={{
         id: "user-sales",
-        orgId: "org_internal",
         email: "sales@example.com",
         displayName: "Sales User",
         roles: ["sales"],
@@ -231,14 +188,12 @@ test("workspace hides user management entry for non-admin users", () => {
   assert.doesNotMatch(html, />用户</);
 });
 
-test("session snapshots are only valid for the current org, API, and user org", () => {
+test("session snapshots are only valid for the current API", () => {
   const session = {
     token: "session-token",
-    orgId: "org_internal",
     serverBaseUrl: "/api",
     user: {
       id: "user-admin",
-      orgId: "org_internal",
       email: "admin@example.com",
       displayName: "Admin User",
       roles: ["admin" as const],
@@ -246,21 +201,13 @@ test("session snapshots are only valid for the current org, API, and user org", 
     }
   };
 
-  assert.equal(isSessionForConfig(session, { orgId: "org_internal", serverBaseUrl: "/api" }), true);
-  assert.equal(isSessionForConfig(session, { orgId: "org_other", serverBaseUrl: "/api" }), false);
-  assert.equal(isSessionForConfig(session, { orgId: "org_internal", serverBaseUrl: "/other" }), false);
-  assert.equal(
-    isSessionForConfig(
-      { ...session, user: { ...session.user, orgId: "org_other" } },
-      { orgId: "org_internal", serverBaseUrl: "/api" }
-    ),
-    false
-  );
+  assert.equal(isSessionForConfig(session, { serverBaseUrl: "/api" }), true);
+  assert.equal(isSessionForConfig(session, { serverBaseUrl: "/other" }), false);
 });
 
 test("customer workflow loads selected customer conversations and updates collaboration state", async () => {
   const client = createFakeClient();
-  let state = createInitialWorkspaceState({ orgId: "org_internal" });
+  let state = createInitialDashboardState();
 
   state = await loadCustomerList(state, client);
   assert.deepEqual(
@@ -289,13 +236,11 @@ test("customer workflow loads selected customer conversations and updates collab
   assert.equal(state.tasks.at(-1)?.title, "Send PI tomorrow");
 });
 
-function sampleWorkspaceState(): WorkspaceState {
+function sampleDashboardState(): DashboardState {
   return {
-    orgId: "org_internal",
     status: "已加载",
     customers: [
       {
-        orgId: "org_internal",
         sellerAccountExternalId: "seller-1",
         externalCustomerId: "customer-1",
         displayName: "Buyer One",
@@ -306,7 +251,6 @@ function sampleWorkspaceState(): WorkspaceState {
     selectedCustomerId: "customer-1",
     conversations: [
       {
-        orgId: "org_internal",
         sellerAccountExternalId: "seller-1",
         externalConversationId: "conv-1",
         externalCustomerId: "customer-1",
@@ -316,7 +260,6 @@ function sampleWorkspaceState(): WorkspaceState {
     selectedConversationId: "conv-1",
     assignment: {
       id: "assignment-1",
-      orgId: "org_internal",
       sellerAccountExternalId: "seller-1",
       externalCustomerId: "customer-1",
       assignedToUserId: "sales-user-42",
@@ -326,7 +269,6 @@ function sampleWorkspaceState(): WorkspaceState {
     },
     messages: [
       {
-        orgId: "org_internal",
         sellerAccountExternalId: "seller-1",
         externalConversationId: "conv-1",
         direction: "received",
@@ -339,7 +281,6 @@ function sampleWorkspaceState(): WorkspaceState {
     notes: [
       {
         id: "note-1",
-        orgId: "org_internal",
         sellerAccountExternalId: "seller-1",
         externalCustomerId: "customer-1",
         body: "Customer asked for updated MOQ.",
@@ -350,7 +291,6 @@ function sampleWorkspaceState(): WorkspaceState {
     tags: [
       {
         id: "tag-1",
-        orgId: "org_internal",
         sellerAccountExternalId: "seller-1",
         externalCustomerId: "customer-1",
         tag: "hot-lead",
@@ -360,7 +300,6 @@ function sampleWorkspaceState(): WorkspaceState {
     tasks: [
       {
         id: "task-1",
-        orgId: "org_internal",
         sellerAccountExternalId: "seller-1",
         externalCustomerId: "customer-1",
         title: "Send revised quotation",
@@ -379,7 +318,6 @@ function createFakeClient(): InternalApiClient {
         token: "internal-token",
         user: {
           id: "user-1",
-          orgId: "org_internal",
           email: "admin@example.com",
           displayName: "Admin User",
           status: "active",
@@ -393,7 +331,6 @@ function createFakeClient(): InternalApiClient {
     async setupAdmin() {
       return {
         id: "user-1",
-        orgId: "org_internal",
         email: "admin@example.com",
         displayName: "Admin User",
         status: "active",
@@ -406,7 +343,6 @@ function createFakeClient(): InternalApiClient {
     async createInternalUser(input) {
       return {
         id: "user-created",
-        orgId: input.orgId,
         email: input.email,
         displayName: input.displayName,
         status: "active",
@@ -416,7 +352,6 @@ function createFakeClient(): InternalApiClient {
     async disableInternalUser(input) {
       return {
         id: input.userId,
-        orgId: input.orgId,
         email: "disabled@example.com",
         displayName: "Disabled User",
         status: "disabled",
@@ -426,7 +361,6 @@ function createFakeClient(): InternalApiClient {
     async resetInternalUserPassword(input) {
       return {
         id: input.userId,
-        orgId: input.orgId,
         email: "reset@example.com",
         displayName: "Reset User",
         status: "active",
@@ -436,7 +370,6 @@ function createFakeClient(): InternalApiClient {
     async createInvitation(input) {
       return {
         id: "invitation-1",
-        orgId: input.orgId,
         email: input.email,
         displayName: input.displayName,
         roles: input.roles,
@@ -447,7 +380,6 @@ function createFakeClient(): InternalApiClient {
     async getInvitation(token) {
       return {
         id: "invitation-1",
-        orgId: "org_internal",
         email: "invited@example.com",
         displayName: "Invited User",
         roles: ["sales"],
@@ -461,7 +393,6 @@ function createFakeClient(): InternalApiClient {
         token: "accepted-token",
         user: {
           id: "user-invited",
-          orgId: "org_internal",
           email: "invited@example.com",
           displayName: "Invited User",
           status: "active",
@@ -469,7 +400,6 @@ function createFakeClient(): InternalApiClient {
         },
         invitation: {
           id: "invitation-1",
-          orgId: "org_internal",
           email: "invited@example.com",
           displayName: "Invited User",
           roles: ["sales"],
@@ -483,13 +413,11 @@ function createFakeClient(): InternalApiClient {
     async listCustomers() {
       return [
         {
-          orgId: "org_internal",
           sellerAccountExternalId: "seller-1",
           externalCustomerId: "customer-1",
           displayName: "Buyer One"
         },
         {
-          orgId: "org_internal",
           sellerAccountExternalId: "seller-1",
           externalCustomerId: "customer-2",
           displayName: "Buyer Two"
@@ -499,23 +427,20 @@ function createFakeClient(): InternalApiClient {
     async listConversations() {
       return [
         {
-          orgId: "org_internal",
           sellerAccountExternalId: "seller-1",
           externalConversationId: "conv-1",
           externalCustomerId: "customer-1"
         },
         {
-          orgId: "org_internal",
           sellerAccountExternalId: "seller-1",
           externalConversationId: "conv-2",
           externalCustomerId: "customer-2"
         }
       ];
     },
-    async listMessages(_orgId, externalConversationId) {
+    async listMessages(externalConversationId) {
       return [
         {
-          orgId: "org_internal",
           sellerAccountExternalId: "seller-1",
           externalConversationId,
           direction: "received",

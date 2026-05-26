@@ -150,38 +150,6 @@ button {
   font-size: 13px;
 }
 
-.workspace-choice-list {
-  display: grid;
-  gap: 8px;
-
-  button {
-    display: grid;
-    gap: 3px;
-    padding: 10px 12px;
-    border: 1px solid var(--line-strong);
-    border-radius: 7px;
-    background: #fbfcfe;
-    color: var(--ink);
-    cursor: pointer;
-    text-align: left;
-
-    &:hover {
-      border-color: #8fb2eb;
-      background: var(--blue-soft);
-    }
-  }
-
-  span {
-    font-size: 14px;
-    font-weight: 700;
-  }
-
-  small {
-    color: var(--muted);
-    font-size: 12px;
-  }
-}
-
 .text-button {
   display: inline-flex;
   min-height: 36px;

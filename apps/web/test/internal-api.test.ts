@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { createInternalApiClient, WorkspaceSelectionRequiredError } from "../src/internal-api.ts";
+import { createInternalApiClient } from "../src/internal-api.ts";
 
 const originalFetch = globalThis.fetch;
 
@@ -25,15 +25,14 @@ test("internal API client sends bearer-scoped customer workflow requests", async
     token: "internal-token"
   });
   const scope = {
-    orgId: "org_internal",
     sellerAccountExternalId: "seller-1",
     externalCustomerId: "customer-1"
   };
 
-  await client.listCustomers("org_internal");
-  await client.listConversations("org_internal");
-  await client.listMessages("org_internal", "conv-1");
-  await client.login({ orgId: "org_internal", email: "admin@example.com", password: "secret" });
+  await client.listCustomers();
+  await client.listConversations();
+  await client.listMessages("conv-1");
+  await client.login({ email: "admin@example.com", password: "secret" });
   await client.logout();
   await client.listCustomerNotes(scope);
   await client.getCustomerAssignment(scope);
@@ -56,18 +55,7 @@ test("internal API client sends bearer-scoped customer workflow requests", async
       "/base/internal/v1/customers/customer-1/follow-up-tasks"
     ]
   );
-  assert.deepEqual(calls.map((call) => call.url.searchParams.get("orgId")), [
-    "org_internal",
-    "org_internal",
-    "org_internal",
-    null,
-    null,
-    "org_internal",
-    "org_internal",
-    "org_internal",
-    "org_internal",
-    "org_internal"
-  ]);
+  assert.deepEqual(calls.map((call) => call.url.searchParams.get("orgId")), Array(10).fill(null));
   assert.equal(calls[5].url.searchParams.get("sellerAccountExternalId"), "seller-1");
   assert.equal(calls[3].init.method, "POST");
   assert.equal(calls[4].init.method, "POST");
@@ -75,7 +63,6 @@ test("internal API client sends bearer-scoped customer workflow requests", async
   assert.equal(calls[8].init.method, "POST");
   assert.equal(calls[9].init.method, "POST");
   assert.deepEqual(JSON.parse(String(calls[3].init.body)), {
-    orgId: "org_internal",
     email: "admin@example.com",
     password: "secret"
   });
@@ -111,23 +98,20 @@ test("internal API client sends setup, user management, and invitation requests"
   });
 
   await client.setupAdmin({
-    orgId: "org_internal",
     email: "owner@example.com",
     displayName: "Owner",
     password: "setup-secret"
   });
-  await client.listInternalUsers("org_internal");
+  await client.listInternalUsers();
   await client.createInternalUser({
-    orgId: "org_internal",
     email: "sales@example.com",
     displayName: "Sales",
     password: "sales-secret",
     roles: ["sales"]
   });
-  await client.disableInternalUser({ orgId: "org_internal", userId: "user/id 1" });
-  await client.resetInternalUserPassword({ orgId: "org_internal", userId: "user/id 1", password: "reset-secret" });
+  await client.disableInternalUser({ userId: "user/id 1" });
+  await client.resetInternalUserPassword({ userId: "user/id 1", password: "reset-secret" });
   await client.createInvitation({
-    orgId: "org_internal",
     email: "invitee@example.com",
     displayName: "Invitee",
     roles: ["supervisor"]
@@ -148,7 +132,7 @@ test("internal API client sends setup, user management, and invitation requests"
       "/internal/v1/invitations/invite%2Ftoken%201/accept"
     ]
   );
-  assert.equal(calls[1].url.searchParams.get("orgId"), "org_internal");
+  assert.equal(calls[1].url.searchParams.get("orgId"), null);
   assert.equal(calls[0].init.method, "POST");
   assert.equal(calls[1].init.method, undefined);
   assert.equal(calls[2].init.method, "POST");
@@ -158,22 +142,19 @@ test("internal API client sends setup, user management, and invitation requests"
   assert.equal(calls[6].init.method, undefined);
   assert.equal(calls[7].init.method, "POST");
   assert.deepEqual(JSON.parse(String(calls[0].init.body)), {
-    orgId: "org_internal",
     email: "owner@example.com",
     displayName: "Owner",
     password: "setup-secret"
   });
   assert.deepEqual(JSON.parse(String(calls[2].init.body)), {
-    orgId: "org_internal",
     email: "sales@example.com",
     displayName: "Sales",
     password: "sales-secret",
     roles: ["sales"]
   });
-  assert.deepEqual(JSON.parse(String(calls[3].init.body)), { orgId: "org_internal" });
-  assert.deepEqual(JSON.parse(String(calls[4].init.body)), { orgId: "org_internal", password: "reset-secret" });
+  assert.equal(calls[3].init.body, undefined);
+  assert.deepEqual(JSON.parse(String(calls[4].init.body)), { password: "reset-secret" });
   assert.deepEqual(JSON.parse(String(calls[5].init.body)), {
-    orgId: "org_internal",
     email: "invitee@example.com",
     displayName: "Invitee",
     roles: ["supervisor"]
@@ -188,7 +169,7 @@ test("internal API client sends setup, user management, and invitation requests"
   assert.equal((calls[7].init.headers as Record<string, string>).authorization, undefined);
 });
 
-test("login can omit orgId and workspace selection errors expose workspace choices", async () => {
+test("login sends email credentials without org scope", async () => {
   const calls: Array<{ url: URL; init: RequestInit }> = [];
   const client = createInternalApiClient({
     baseUrl: "",
@@ -197,74 +178,22 @@ test("login can omit orgId and workspace selection errors expose workspace choic
       calls.push({ url: new URL(String(input), "http://local.test"), init });
       return new Response(
         JSON.stringify({
-          ok: false,
-          error: "workspace_selection_required",
-          workspaces: [
-            { orgId: "org_internal", name: "org_internal", roles: ["admin"] },
-            { orgId: "org_other", name: "org_other", roles: ["sales"] }
-          ]
-        }),
-        { status: 409, headers: { "content-type": "application/json" } }
-      );
-    }
-  });
-
-  await assert.rejects(
-    () => client.login({ email: "admin@example.com", password: "secret" }),
-    (error: unknown) => {
-      assert.equal(error instanceof WorkspaceSelectionRequiredError, true);
-      assert.deepEqual((error as WorkspaceSelectionRequiredError).workspaces.map((item) => item.orgId), [
-        "org_internal",
-        "org_other"
-      ]);
-      return true;
-    }
-  );
-
-  assert.deepEqual(JSON.parse(String(calls[0].init.body)), {
-    email: "admin@example.com",
-    password: "secret"
-  });
-});
-
-test("workspace client methods call internal workspace routes", async () => {
-  const calls: Array<{ url: URL; init: RequestInit }> = [];
-  const client = createInternalApiClient({
-    baseUrl: "/base",
-    token: "session-token",
-    fetchImpl: async (input, init = {}) => {
-      calls.push({ url: new URL(String(input), "http://local.test"), init });
-      if (String(input).endsWith("/workspaces")) {
-        return new Response(
-          JSON.stringify({
-            ok: true,
-            workspaces: [{ orgId: "org_internal", name: "org_internal", roles: ["admin"] }]
-          }),
-          { status: 200, headers: { "content-type": "application/json" } }
-        );
-      }
-      return new Response(
-        JSON.stringify({
           ok: true,
-          user: {
-            id: "u1",
-            orgId: "org_other",
-            email: "admin@example.com",
-            displayName: "Admin",
-            status: "active",
-            roles: ["admin"]
-          }
+          token: "session-token",
+          user: { id: "user-1", email: "admin@example.com", displayName: "Admin", status: "active", roles: ["admin"] }
         }),
         { status: 200, headers: { "content-type": "application/json" } }
       );
     }
   });
 
-  assert.equal((await client.listWorkspaces())[0].orgId, "org_internal");
-  assert.equal((await client.switchWorkspace("org_other")).orgId, "org_other");
-  assert.equal(calls[0].url.pathname, "/base/internal/v1/workspaces");
-  assert.equal(calls[1].url.pathname, "/base/internal/v1/workspaces/active");
-  assert.deepEqual(JSON.parse(String(calls[1].init.body)), { orgId: "org_other" });
+  const result = await client.login({ email: "admin@example.com", password: "secret" });
+
+  assert.equal(result.token, "session-token");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), {
+    email: "admin@example.com",
+    password: "secret"
+  });
 });
 
 function responseFor(pathname: string, method: string): unknown {

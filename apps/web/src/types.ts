@@ -1,7 +1,6 @@
 export type MessageDirection = "received" | "sent" | "unknown";
 
 export interface StoredCustomer {
-  orgId: string;
   sellerAccountExternalId: string;
   externalCustomerId: string;
   loginId?: string;
@@ -12,7 +11,6 @@ export interface StoredCustomer {
 }
 
 export interface StoredConversation {
-  orgId: string;
   sellerAccountExternalId: string;
   externalConversationId: string;
   externalCustomerId?: string;
@@ -20,7 +18,6 @@ export interface StoredConversation {
 }
 
 export interface StoredMessage {
-  orgId: string;
   sellerAccountExternalId: string;
   externalConversationId: string;
   externalMessageId?: string;
@@ -34,7 +31,6 @@ export interface StoredMessage {
 }
 
 export interface CustomerScope {
-  orgId: string;
   sellerAccountExternalId: string;
   externalCustomerId: string;
 }
@@ -74,15 +70,8 @@ export interface StoredCustomerAssignment extends CustomerScope {
 
 export type InternalRole = "admin" | "supervisor" | "sales";
 
-export interface InternalWorkspaceSummary {
-  orgId: string;
-  name: string;
-  roles: InternalRole[];
-}
-
 export interface InternalUser {
   id: string;
-  orgId: string;
   email: string;
   displayName: string;
   status: string;
@@ -93,7 +82,6 @@ export interface InternalUser {
 
 export interface InternalInvitation {
   id: string;
-  orgId: string;
   email: string;
   displayName: string;
   roles: InternalRole[];
@@ -111,14 +99,12 @@ export interface LoginResult {
 }
 
 export interface SetupAdminInput {
-  orgId: string;
   email: string;
   displayName: string;
   password: string;
 }
 
 export interface CreateInternalUserInput {
-  orgId: string;
   email: string;
   displayName: string;
   password: string;
@@ -126,18 +112,15 @@ export interface CreateInternalUserInput {
 }
 
 export interface DisableInternalUserInput {
-  orgId: string;
   userId: string;
 }
 
 export interface ResetInternalUserPasswordInput {
-  orgId: string;
   userId: string;
   password: string;
 }
 
 export interface CreateInvitationInput {
-  orgId: string;
   email: string;
   displayName: string;
   roles: InternalRole[];
@@ -153,21 +136,19 @@ export interface AcceptInvitationResult extends LoginResult {
 }
 
 export interface InternalApiClient {
-  login(input: { orgId?: string; email: string; password: string }): Promise<LoginResult>;
+  login(input: { email: string; password: string }): Promise<LoginResult>;
   logout(): Promise<void>;
   setupAdmin(input: SetupAdminInput): Promise<InternalUser>;
-  listWorkspaces(): Promise<InternalWorkspaceSummary[]>;
-  switchWorkspace(orgId: string): Promise<InternalUser>;
-  listInternalUsers(orgId: string): Promise<InternalUser[]>;
+  listInternalUsers(): Promise<InternalUser[]>;
   createInternalUser(input: CreateInternalUserInput): Promise<InternalUser>;
   disableInternalUser(input: DisableInternalUserInput): Promise<InternalUser>;
   resetInternalUserPassword(input: ResetInternalUserPasswordInput): Promise<InternalUser>;
   createInvitation(input: CreateInvitationInput): Promise<InternalInvitation>;
   getInvitation(token: string): Promise<InternalInvitation>;
   acceptInvitation(input: AcceptInvitationInput): Promise<AcceptInvitationResult>;
-  listCustomers(orgId?: string): Promise<StoredCustomer[]>;
-  listConversations(orgId?: string): Promise<StoredConversation[]>;
-  listMessages(orgId: string | undefined, externalConversationId: string): Promise<StoredMessage[]>;
+  listCustomers(): Promise<StoredCustomer[]>;
+  listConversations(): Promise<StoredConversation[]>;
+  listMessages(externalConversationId: string): Promise<StoredMessage[]>;
   getCustomerAssignment(scope: CustomerScope): Promise<StoredCustomerAssignment | null>;
   listCustomerNotes(scope: CustomerScope): Promise<StoredCustomerNote[]>;
   createCustomerNote(scope: CustomerScope, input: { body: string }): Promise<StoredCustomerNote>;
@@ -180,8 +161,7 @@ export interface InternalApiClient {
   ): Promise<StoredFollowUpTask>;
 }
 
-export interface WorkspaceState {
-  orgId: string;
+export interface DashboardState {
   status: string;
   error?: string;
   customers: StoredCustomer[];

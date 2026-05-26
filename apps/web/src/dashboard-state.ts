@@ -3,12 +3,11 @@ import type {
   InternalApiClient,
   StoredConversation,
   StoredCustomer,
-  WorkspaceState
+  DashboardState
 } from "./types";
 
-export function createInitialWorkspaceState(input: { orgId: string }): WorkspaceState {
+export function createInitialDashboardState(): DashboardState {
   return {
-    orgId: input.orgId,
     status: "等待连接",
     customers: [],
     conversations: [],
@@ -20,12 +19,12 @@ export function createInitialWorkspaceState(input: { orgId: string }): Workspace
   };
 }
 
-export async function loadCustomerList(state: WorkspaceState, client: InternalApiClient): Promise<WorkspaceState> {
-  const customers = sortCustomers(await client.listCustomers(state.orgId));
+export async function loadCustomerList(state: DashboardState, client: InternalApiClient): Promise<DashboardState> {
+  const customers = sortCustomers(await client.listCustomers());
   const nextCustomerId = selectedCustomerExists(customers, state.selectedCustomerId)
     ? state.selectedCustomerId
     : customers[0]?.externalCustomerId;
-  const nextState: WorkspaceState = {
+  const nextState: DashboardState = {
     ...state,
     customers,
     selectedCustomerId: nextCustomerId,
@@ -36,10 +35,10 @@ export async function loadCustomerList(state: WorkspaceState, client: InternalAp
 }
 
 export async function selectCustomer(
-  state: WorkspaceState,
+  state: DashboardState,
   client: InternalApiClient,
   externalCustomerId: string
-): Promise<WorkspaceState> {
+): Promise<DashboardState> {
   const selectedCustomer = state.customers.find((customer) => customer.externalCustomerId === externalCustomerId);
   if (!selectedCustomer) {
     return {
@@ -56,14 +55,14 @@ export async function selectCustomer(
     };
   }
 
-  const scope = customerScope(state.orgId, selectedCustomer);
-  const allConversations = await client.listConversations(state.orgId);
+  const scope = customerScope(selectedCustomer);
+  const allConversations = await client.listConversations();
   const conversations = sortConversations(
     allConversations.filter((conversation) => conversation.externalCustomerId === externalCustomerId)
   );
   const selectedConversationId = conversations[0]?.externalConversationId;
   const [messages, assignment, notes, tags, tasks] = await Promise.all([
-    selectedConversationId ? client.listMessages(state.orgId, selectedConversationId) : Promise.resolve([]),
+    selectedConversationId ? client.listMessages(selectedConversationId) : Promise.resolve([]),
     client.getCustomerAssignment(scope),
     client.listCustomerNotes(scope),
     client.listCustomerTags(scope),
@@ -86,11 +85,11 @@ export async function selectCustomer(
 }
 
 export async function selectConversation(
-  state: WorkspaceState,
+  state: DashboardState,
   client: InternalApiClient,
   externalConversationId: string
-): Promise<WorkspaceState> {
-  const messages = await client.listMessages(state.orgId, externalConversationId);
+): Promise<DashboardState> {
+  const messages = await client.listMessages(externalConversationId);
   return {
     ...state,
     selectedConversationId: externalConversationId,
@@ -101,10 +100,10 @@ export async function selectConversation(
 }
 
 export async function createNoteForSelectedCustomer(
-  state: WorkspaceState,
+  state: DashboardState,
   client: InternalApiClient,
   body: string
-): Promise<WorkspaceState> {
+): Promise<DashboardState> {
   const scope = selectedCustomerScope(state);
   const trimmed = body.trim();
   if (!scope || !trimmed) return state;
@@ -118,10 +117,10 @@ export async function createNoteForSelectedCustomer(
 }
 
 export async function addTagToSelectedCustomer(
-  state: WorkspaceState,
+  state: DashboardState,
   client: InternalApiClient,
   tag: string
-): Promise<WorkspaceState> {
+): Promise<DashboardState> {
   const scope = selectedCustomerScope(state);
   const trimmed = tag.trim();
   if (!scope || !trimmed) return state;
@@ -138,10 +137,10 @@ export async function addTagToSelectedCustomer(
 }
 
 export async function createTaskForSelectedCustomer(
-  state: WorkspaceState,
+  state: DashboardState,
   client: InternalApiClient,
   title: string
-): Promise<WorkspaceState> {
+): Promise<DashboardState> {
   const scope = selectedCustomerScope(state);
   const trimmed = title.trim();
   if (!scope || !trimmed) return state;
@@ -154,14 +153,13 @@ export async function createTaskForSelectedCustomer(
   };
 }
 
-function selectedCustomerScope(state: WorkspaceState): CustomerScope | null {
+function selectedCustomerScope(state: DashboardState): CustomerScope | null {
   const customer = state.customers.find((item) => item.externalCustomerId === state.selectedCustomerId);
-  return customer ? customerScope(state.orgId, customer) : null;
+  return customer ? customerScope(customer) : null;
 }
 
-function customerScope(orgId: string, customer: StoredCustomer): CustomerScope {
+function customerScope(customer: StoredCustomer): CustomerScope {
   return {
-    orgId,
     sellerAccountExternalId: customer.sellerAccountExternalId,
     externalCustomerId: customer.externalCustomerId
   };
@@ -171,7 +169,7 @@ function selectedCustomerExists(customers: StoredCustomer[], selectedCustomerId?
   return Boolean(selectedCustomerId && customers.some((customer) => customer.externalCustomerId === selectedCustomerId));
 }
 
-function clearSelection(state: WorkspaceState): WorkspaceState {
+function clearSelection(state: DashboardState): DashboardState {
   return {
     ...state,
     selectedCustomerId: undefined,

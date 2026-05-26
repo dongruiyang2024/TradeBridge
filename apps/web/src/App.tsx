@@ -16,32 +16,27 @@ import {
   UserRound
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { createInternalApiClient, WorkspaceSelectionRequiredError } from "./api";
+import { createInternalApiClient } from "./api";
 import type {
   CreateInternalUserInput,
+  DashboardState,
   InternalRole,
-  InternalUser,
-  InternalWorkspaceSummary,
-  WorkspaceState
+  InternalUser
 } from "./types";
 import {
   addTagToSelectedCustomer,
-  createInitialWorkspaceState,
+  createInitialDashboardState,
   createNoteForSelectedCustomer,
   createTaskForSelectedCustomer,
   loadCustomerList,
   selectConversation,
   selectCustomer
-} from "./workspace-state";
+} from "./dashboard-state";
 
-const DEFAULT_ORG_ID =
-  (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_TRADEBRIDGE_ORG_ID ||
-  "org_internal";
 const STORAGE_KEYS = {
   session: "wangwang.internalSession",
   legacyToken: "wangwang.internalToken",
   legacyCurrentUser: "wangwang.currentUser",
-  orgId: "wangwang.orgId",
   serverBaseUrl: "wangwang.serverBaseUrl"
 };
 
@@ -50,25 +45,21 @@ const ROLE_OPTIONS: InternalRole[] = ["admin", "supervisor", "sales"];
 interface LoginSessionSnapshot {
   token: string;
   user: InternalUser;
-  orgId: string;
   serverBaseUrl: string;
 }
 
 export function App() {
   const initialServerBaseUrl = readStorage(STORAGE_KEYS.serverBaseUrl, "");
-  const initialOrgId = readStorage(STORAGE_KEYS.orgId, DEFAULT_ORG_ID);
   const [serverBaseUrl, setServerBaseUrl] = useState(initialServerBaseUrl);
-  const [orgId, setOrgId] = useState(initialOrgId);
   const [session, setSession] = useState<LoginSessionSnapshot | null>(() =>
-    readSessionStorage({ orgId: initialOrgId, serverBaseUrl: initialServerBaseUrl })
+    readSessionStorage({ serverBaseUrl: initialServerBaseUrl })
   );
   const [setupMode, setSetupMode] = useState(false);
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
   const [advancedConnectionOpen, setAdvancedConnectionOpen] = useState(false);
-  const [workspaceChoices, setWorkspaceChoices] = useState<InternalWorkspaceSummary[]>([]);
-  const [state, setState] = useState<WorkspaceState>(() => createInitialWorkspaceState({ orgId }));
+  const [state, setState] = useState<DashboardState>(() => createInitialDashboardState());
   const [users, setUsers] = useState<InternalUser[]>([]);
   const [userManagementMode, setUserManagementMode] = useState(false);
   const [userManagementError, setUserManagementError] = useState("");
@@ -76,7 +67,7 @@ export function App() {
   const [authError, setAuthError] = useState("");
   const token = session?.token || "";
   const currentUser = session?.user || null;
-  const isCurrentAdmin = Boolean(currentUser?.orgId === orgId && currentUser.roles.includes("admin"));
+  const isCurrentAdmin = Boolean(currentUser?.roles.includes("admin"));
 
   const apiClient = useMemo(
     () => createInternalApiClient({ baseUrl: serverBaseUrl, token }),
@@ -92,17 +83,10 @@ export function App() {
   }, [session]);
 
   useEffect(() => {
-    writeStorage(STORAGE_KEYS.orgId, orgId);
-    setState(createInitialWorkspaceState({ orgId }));
-    setUsers([]);
-    setUserManagementMode(false);
-  }, [orgId]);
-
-  useEffect(() => {
     if (!token.trim()) return;
     let cancelled = false;
     setLoading(true);
-    void loadCustomerList(createInitialWorkspaceState({ orgId }), createInternalApiClient({ baseUrl: serverBaseUrl, token }))
+    void loadCustomerList(createInitialDashboardState(), createInternalApiClient({ baseUrl: serverBaseUrl, token }))
       .then((nextState) => {
         if (!cancelled) setState(nextState);
       })
@@ -117,9 +101,9 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [orgId, serverBaseUrl, token]);
+  }, [serverBaseUrl, token]);
 
-  async function runWorkflow(workflow: (current: WorkspaceState) => Promise<WorkspaceState>) {
+  async function runWorkflow(workflow: (current: DashboardState) => Promise<DashboardState>) {
     if (!token.trim()) {
       setState((current) => ({ ...current, status: "等待登录", error: "internal_token_required" }));
       return;
@@ -138,21 +122,13 @@ export function App() {
   async function runLogin(login: () => Promise<{ token: string; user: InternalUser }>) {
     setLoading(true);
     setAuthError("");
-    setWorkspaceChoices([]);
     try {
       const result = await login();
-      const nextOrgId = result.user.orgId || orgId;
-      setOrgId(nextOrgId);
-      setSession({ token: result.token, user: result.user, orgId: nextOrgId, serverBaseUrl });
+      setSession({ token: result.token, user: result.user, serverBaseUrl });
       setSetupMode(false);
       setUserManagementMode(false);
     } catch (error) {
-      if (error instanceof WorkspaceSelectionRequiredError) {
-        setWorkspaceChoices(error.workspaces);
-        setAuthError("请选择要进入的工作空间。");
-      } else {
-        setAuthError(errorMessage(error));
-      }
+      setAuthError(errorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -172,19 +148,6 @@ export function App() {
     });
   }
 
-  function handleWorkspaceLogin(nextOrgId: string) {
-    setOrgId(nextOrgId);
-    setWorkspaceChoices([]);
-    void runLogin(async () => {
-      const result = await createInternalApiClient({ baseUrl: serverBaseUrl, token: "" }).login({
-        orgId: nextOrgId,
-        email: email.trim(),
-        password
-      });
-      return { token: result.token, user: result.user };
-    });
-  }
-
   function handleSetupAdmin() {
     if (!email.trim() || !displayName.trim() || !password.trim()) {
       setAuthError("setup_admin_fields_required");
@@ -196,7 +159,6 @@ export function App() {
       const client = createInternalApiClient({ baseUrl: serverBaseUrl, token: "" });
       try {
         await client.setupAdmin({
-          orgId,
           email: email.trim(),
           displayName: displayName.trim(),
           password
@@ -208,8 +170,8 @@ export function App() {
       }
 
       try {
-        const result = await client.login({ orgId, email: email.trim(), password });
-        setSession({ token: result.token, user: result.user, orgId, serverBaseUrl });
+        const result = await client.login({ email: email.trim(), password });
+        setSession({ token: result.token, user: result.user, serverBaseUrl });
         setSetupMode(false);
         setUserManagementMode(false);
       } catch (error) {
@@ -223,29 +185,21 @@ export function App() {
 
   function handleLogout() {
     if (token.trim()) void apiClient.logout().catch(() => undefined);
-    clearLocalSession(orgId);
+    clearLocalSession();
   }
 
-  function clearLocalSession(nextOrgId: string) {
+  function clearLocalSession() {
     setSession(null);
     setUserManagementMode(false);
     setUsers([]);
     setUserManagementError("");
-    setState(createInitialWorkspaceState({ orgId: nextOrgId }));
-  }
-
-  function handleOrgIdChange(value: string) {
-    setOrgId(value);
-    setAuthError("");
-    setWorkspaceChoices([]);
-    clearLocalSession(value);
+    setState(createInitialDashboardState());
   }
 
   function handleServerBaseUrlChange(value: string) {
     setServerBaseUrl(value);
     setAuthError("");
-    setWorkspaceChoices([]);
-    clearLocalSession(orgId);
+    clearLocalSession();
   }
 
   async function runUserManagement(action: () => Promise<void>): Promise<boolean> {
@@ -253,7 +207,7 @@ export function App() {
     setUserManagementError("");
     try {
       await action();
-      setUsers(await apiClient.listInternalUsers(orgId));
+      setUsers(await apiClient.listInternalUsers());
       return true;
     } catch (error) {
       setUserManagementError(errorMessage(error));
@@ -268,21 +222,21 @@ export function App() {
     void runUserManagement(async () => undefined);
   }
 
-  function handleCreateUser(input: Omit<CreateInternalUserInput, "orgId">): Promise<boolean> {
+  function handleCreateUser(input: CreateInternalUserInput): Promise<boolean> {
     return runUserManagement(async () => {
-      await apiClient.createInternalUser({ orgId, ...input });
+      await apiClient.createInternalUser(input);
     });
   }
 
   function handleDisableUser(userId: string) {
     void runUserManagement(async () => {
-      await apiClient.disableInternalUser({ orgId, userId });
+      await apiClient.disableInternalUser({ userId });
     });
   }
 
   function handleResetUserPassword(userId: string, password: string): Promise<boolean> {
     return runUserManagement(async () => {
-      await apiClient.resetInternalUserPassword({ orgId, userId, password });
+      await apiClient.resetInternalUserPassword({ userId, password });
     });
   }
 
@@ -290,14 +244,12 @@ export function App() {
     if (setupMode) {
       return (
         <SetupAdminView
-          orgId={orgId}
           serverBaseUrl={serverBaseUrl}
           email={email}
           displayName={displayName}
           password={password}
           loading={loading}
           error={authError}
-          onOrgIdChange={handleOrgIdChange}
           onServerBaseUrlChange={handleServerBaseUrlChange}
           onEmailChange={setEmail}
           onDisplayNameChange={setDisplayName}
@@ -319,16 +271,13 @@ export function App() {
         loading={loading}
         error={authError}
         advancedOpen={advancedConnectionOpen}
-        workspaceChoices={workspaceChoices}
         onAdvancedOpenChange={setAdvancedConnectionOpen}
         onServerBaseUrlChange={handleServerBaseUrlChange}
         onEmailChange={setEmail}
         onPasswordChange={setPassword}
         onPasswordLogin={handlePasswordLogin}
-        onWorkspaceLogin={handleWorkspaceLogin}
         onSetupMode={() => {
           setAuthError("");
-          setWorkspaceChoices([]);
           setSetupMode(true);
         }}
       />
@@ -338,7 +287,6 @@ export function App() {
   if (userManagementMode && isCurrentAdmin) {
     return (
       <UserManagementView
-        orgId={orgId}
         users={users}
         loading={loading}
         error={userManagementError}
@@ -352,17 +300,15 @@ export function App() {
   }
 
   return (
-    <WorkspaceView
+    <DashboardView
       state={state}
       serverBaseUrl={serverBaseUrl}
-      orgId={orgId}
       currentUser={currentUser}
       loading={loading}
       onServerBaseUrlChange={handleServerBaseUrlChange}
-      onOrgIdChange={handleOrgIdChange}
       onLogout={handleLogout}
       onOpenUserManagement={isCurrentAdmin ? handleOpenUserManagement : undefined}
-      onRefresh={() => void runWorkflow(() => loadCustomerList(createInitialWorkspaceState({ orgId }), apiClient))}
+      onRefresh={() => void runWorkflow(() => loadCustomerList(createInitialDashboardState(), apiClient))}
       onSelectCustomer={(customerId) => void runWorkflow((current) => selectCustomer(current, apiClient, customerId))}
       onSelectConversation={(conversationId) =>
         void runWorkflow((current) => selectConversation(current, apiClient, conversationId))
@@ -381,13 +327,11 @@ interface LoginViewProps {
   loading: boolean;
   error: string;
   advancedOpen: boolean;
-  workspaceChoices: InternalWorkspaceSummary[];
   onAdvancedOpenChange(value: boolean): void;
   onServerBaseUrlChange(value: string): void;
   onEmailChange(value: string): void;
   onPasswordChange(value: string): void;
   onPasswordLogin(): void;
-  onWorkspaceLogin(orgId: string): void;
   onSetupMode(): void;
 }
 
@@ -450,17 +394,6 @@ export function LoginView(props: LoginViewProps) {
           </button>
         </form>
 
-        {props.workspaceChoices.length > 0 && (
-          <div className="workspace-choice-list">
-            {props.workspaceChoices.map((workspace) => (
-              <button key={workspace.orgId} type="button" onClick={() => props.onWorkspaceLogin(workspace.orgId)}>
-                <span>{workspace.name}</span>
-                <small>{workspace.roles.join(" / ")}</small>
-              </button>
-            ))}
-          </div>
-        )}
-
         <button className="text-button" type="button" onClick={props.onSetupMode}>
           <ShieldCheck size={16} />
           <span>初始化首个管理员</span>
@@ -473,14 +406,12 @@ export function LoginView(props: LoginViewProps) {
 }
 
 interface SetupAdminViewProps {
-  orgId: string;
   serverBaseUrl: string;
   email: string;
   displayName: string;
   password: string;
   loading: boolean;
   error: string;
-  onOrgIdChange(value: string): void;
   onServerBaseUrlChange(value: string): void;
   onEmailChange(value: string): void;
   onDisplayNameChange(value: string): void;
@@ -508,10 +439,6 @@ export function SetupAdminView(props: SetupAdminViewProps) {
             props.onSetupAdmin();
           }}
         >
-          <label>
-            Org
-            <input value={props.orgId} onChange={(event) => props.onOrgIdChange(event.target.value)} />
-          </label>
           <label>
             API
             <input
@@ -553,14 +480,12 @@ export function SetupAdminView(props: SetupAdminViewProps) {
   );
 }
 
-interface WorkspaceViewProps {
-  state: WorkspaceState;
+interface DashboardViewProps {
+  state: DashboardState;
   serverBaseUrl: string;
-  orgId: string;
   currentUser?: InternalUser | null;
   loading: boolean;
   onServerBaseUrlChange(value: string): void;
-  onOrgIdChange(value: string): void;
   onLogout?(): void;
   onOpenUserManagement?(): void;
   onRefresh(): void;
@@ -571,7 +496,7 @@ interface WorkspaceViewProps {
   onAddTask(title: string): void;
 }
 
-export function WorkspaceView(props: WorkspaceViewProps) {
+export function DashboardView(props: DashboardViewProps) {
   const [customerFilter, setCustomerFilter] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
   const [tagDraft, setTagDraft] = useState("");
@@ -605,10 +530,6 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           </div>
         </div>
         <div className="connection-bar" aria-label="内部接口连接">
-          <label>
-            Org
-            <input value={props.orgId} onChange={(event) => props.onOrgIdChange(event.target.value)} />
-          </label>
           <label>
             API
             <input
@@ -840,13 +761,12 @@ export function WorkspaceView(props: WorkspaceViewProps) {
 }
 
 interface UserManagementViewProps {
-  orgId: string;
   users: InternalUser[];
   loading: boolean;
   error: string;
   onBack(): void;
   onRefreshUsers(): void;
-  onCreateUser(input: Omit<CreateInternalUserInput, "orgId">): Promise<boolean>;
+  onCreateUser(input: CreateInternalUserInput): Promise<boolean>;
   onDisableUser(userId: string): void;
   onResetPassword(userId: string, password: string): Promise<boolean>;
 }
@@ -865,7 +785,7 @@ export function UserManagementView(props: UserManagementViewProps) {
           <span className="brand-mark">TB</span>
           <div>
             <h1>用户管理</h1>
-            <p>{props.orgId} · {props.users.length} 个内部用户</p>
+            <p>{props.users.length} 个内部用户</p>
           </div>
         </div>
         <div className="admin-actions">
@@ -1015,7 +935,7 @@ function InfoRow({ label, value }: { label: string; value?: string | number | nu
   );
 }
 
-function customerSubtitle(customer: NonNullable<WorkspaceState["customers"][number]>): string {
+function customerSubtitle(customer: NonNullable<DashboardState["customers"][number]>): string {
   return [customer.country, customer.stage, customer.loginId].filter(Boolean).join(" · ") || customer.externalCustomerId;
 }
 
@@ -1044,17 +964,15 @@ function writeStorage(key: string, value: string): void {
 
 export function isSessionForConfig(
   session: LoginSessionSnapshot | null,
-  config: { orgId: string; serverBaseUrl: string }
+  config: { serverBaseUrl: string }
 ): boolean {
   return Boolean(
     session?.token.trim() &&
-      session.orgId === config.orgId &&
-      session.serverBaseUrl === config.serverBaseUrl &&
-      session.user.orgId === config.orgId
+      session.serverBaseUrl === config.serverBaseUrl
   );
 }
 
-function readSessionStorage(config: { orgId: string; serverBaseUrl: string }): LoginSessionSnapshot | null {
+function readSessionStorage(config: { serverBaseUrl: string }): LoginSessionSnapshot | null {
   if (typeof window === "undefined") return null;
   window.localStorage.removeItem(STORAGE_KEYS.legacyToken);
   window.localStorage.removeItem(STORAGE_KEYS.legacyCurrentUser);
