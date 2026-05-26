@@ -1,5 +1,8 @@
 import os from "node:os";
 import path from "node:path";
+import { loadWorkspaceEnv } from "@wangwang/env";
+
+loadWorkspaceEnv();
 
 export const WORKSPACE_ROOT = path.resolve(import.meta.dirname, "../../..");
 

@@ -1,0 +1,231 @@
+# 内部试运行手册
+
+本文用于在本机完整跑通 TradeBridge 内部试运行流程：PostgreSQL、内部服务端、Web 工作台、桌面采集端，以及端到端自动化验证。
+
+## 1. 前置条件
+
+- macOS
+- Node.js 20+
+- npm
+- Docker Desktop
+- 已安装项目依赖：
+
+```bash
+npm install
+```
+
+## 2. 环境变量
+
+Node 启动入口会自动读取项目根目录下的 `.env.local` 和 `.env`，不需要在启动前手动 `source`。
+
+本地试运行至少需要：
+
+```bash
+WANGWANG_SERVER_HOST=127.0.0.1
+WANGWANG_SERVER_PORT=5032
+WANGWANG_INTERNAL_API_TOKENS=dev-admin-token
+WANGWANG_DEVICE_TOKENS=dev-device-token
+WANGWANG_ORG_ID=org_internal
+WANGWANG_SERVER_URL=http://127.0.0.1:5032
+WANGWANG_SELLER_ACCOUNT_ID=seller-demo
+WANGWANG_COLLECTOR_DEVICE_ID=demo-device
+WANGWANG_COLLECTOR_TOKEN=dev-device-token
+```
+
+如果使用本仓库提供的 PostgreSQL Docker Compose，建议使用：
+
+```bash
+DATABASE_URL=postgres://wait9yan:Weite123@127.0.0.1:5432/tradebridge
+```
+
+如果使用你本机已有 PostgreSQL，请让 `DATABASE_URL` 和实际用户名、密码、数据库名保持一致。
+
+## 3. 启动 PostgreSQL
+
+```bash
+docker compose -f docker-compose.postgres.yml up -d
+```
+
+检查容器状态：
+
+```bash
+docker compose -f docker-compose.postgres.yml ps
+```
+
+停止 PostgreSQL：
+
+```bash
+docker compose -f docker-compose.postgres.yml down
+```
+
+需要清空本地数据时再执行：
+
+```bash
+docker compose -f docker-compose.postgres.yml down -v
+```
+
+## 4. 启动服务端和 Web 工作台
+
+```bash
+npm run dev
+```
+
+启动后确认：
+
+- 内部服务端：`http://127.0.0.1:5032`
+- Web 工作台：`http://127.0.0.1:5173`
+
+健康检查：
+
+```bash
+curl http://127.0.0.1:5032/health
+```
+
+## 5. 管理 token 和内部用户
+
+当前内部试运行使用 bootstrap 管理 token：
+
+```bash
+WANGWANG_INTERNAL_API_TOKENS=dev-admin-token
+```
+
+Web 工作台顶部输入：
+
+- Org：`org_internal`
+- API：留空
+- Token：`dev-admin-token`
+
+说明：
+
+- bootstrap token 拥有本地开发管理员权限。
+- `POST /internal/v1/auth/login` 已支持内部会话登录，但当前仓库还没有面向管理员的创建用户 UI/API。
+- 试运行阶段优先使用 bootstrap token；正式内部用户创建可以后续通过 seed 脚本、管理员 API 或后台管理页面补齐。
+
+## 6. 注册采集设备
+
+本地开发可以直接使用 `WANGWANG_DEVICE_TOKENS=dev-device-token` 作为采集端兜底 token。
+
+如果要走设备注册路径，使用 bootstrap 管理 token 注册：
+
+```bash
+curl -X POST http://127.0.0.1:5032/internal/v1/collector-devices \
+  -H 'Authorization: Bearer dev-admin-token' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "orgId": "org_internal",
+    "sellerAccountExternalId": "seller-demo",
+    "deviceName": "Demo Mac"
+  }'
+```
+
+响应里的 `token` 只返回一次。将它写入 `.env.local`：
+
+```bash
+WANGWANG_COLLECTOR_TOKEN=<注册接口返回的 token>
+```
+
+## 7. 启动桌面采集端
+
+```bash
+npm run electron -w @wangwang/collector-desktop
+```
+
+采集端会读取：
+
+- `WANGWANG_ORG_ID`
+- `WANGWANG_SERVER_URL`
+- `WANGWANG_SELLER_ACCOUNT_ID`
+- `WANGWANG_COLLECTOR_DEVICE_ID`
+- `WANGWANG_COLLECTOR_TOKEN`
+
+当前 Electron 采集端是 MVP：
+
+- 可以显示会话/设备/同步状态。
+- 支持手动同步按钮。
+- 真实数据依赖本机 AliSupplier/OneTalk 登录态。
+
+## 8. 客户视角验证
+
+打开：
+
+```text
+http://127.0.0.1:5173
+```
+
+确认：
+
+- 能加载客户列表。
+- 选择客户后能看到会话和消息。
+- 可以新增备注。
+- 可以新增标签。
+- 可以新增跟进任务。
+- 使用采集 token 访问内部 API 会被拒绝。
+
+采集 token 隔离验证：
+
+```bash
+curl http://127.0.0.1:5032/internal/v1/customers?orgId=org_internal \
+  -H 'Authorization: Bearer dev-device-token'
+```
+
+期望返回 `401`。
+
+## 9. 敏感信息验证
+
+采集端不应把 OneTalk cookie、CSRF token、浏览器 safe-storage 密钥或原始请求头上传到服务端。
+
+试运行时至少检查：
+
+1. 服务端返回的消息内容里不应出现以下字段或值：
+   - `cookie2`
+   - `ctoken`
+   - `_tb_token_`
+   - `sgcookie`
+   - `x5sec`
+   - `Cookie`
+   - `Authorization`
+2. `.env.local` 不要提交到 Git。
+3. `WANGWANG_CHROMIUM_SAFE_STORAGE_PASSWORD` 只能用于本机调试，不要写入共享文档或截图。
+
+自动化端到端测试也覆盖了“采集端 fixture 中的 cookie 不会出现在 Web 读取到的消息数据里”。
+
+## 10. 自动化端到端验证
+
+```bash
+npm run test:e2e
+```
+
+该命令会构建相关 workspace，并运行 `test/e2e/internal-trial.test.ts`。
+
+当前 E2E 覆盖：
+
+- 启动内部服务端实例。
+- 使用采集端核心和 fixture 数据上传同步批次。
+- Web API client 读取客户、会话、消息。
+- Web workflow 创建备注、标签、跟进任务。
+- 采集 token 不能读取内部 API。
+- OneTalk cookie fixture 不会出现在 Web 消息数据中。
+
+## 11. 常见问题
+
+### 服务端启动时报数据库连接失败
+
+检查 `.env.local` 的 `DATABASE_URL` 是否和 PostgreSQL 实际账号密码一致。使用本仓库 compose 时应为：
+
+```bash
+DATABASE_URL=postgres://wait9yan:Weite123@127.0.0.1:5432/tradebridge
+```
+
+### Web 显示未授权
+
+确认页面 Token 输入的是内部管理 token：
+
+```text
+dev-admin-token
+```
+
+不要把采集端 token 填到 Web 工作台。
+
+### 采集端没有真实数据
+
+确认本机 AliSupplier/OneTalk 已登录，并且采集端能探测到本机登录态。没有真实登录态时，可以先用 `npm run test:e2e` 验证内部链路。

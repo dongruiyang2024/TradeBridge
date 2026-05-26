@@ -18,6 +18,7 @@ packages/*/dist/
 *.log
 logs/*
 !logs/.gitkeep
+postgres_data/
 
 # Exported chat/message data may contain sensitive business content.
 exports/*

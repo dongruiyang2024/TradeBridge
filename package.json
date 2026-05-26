@@ -1,5 +1,5 @@
 {
-  "name": "wangwang-local-viewer",
+  "name": "tradebridge",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -8,12 +8,13 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run build -w @wangwang/shared && npm run build -w @wangwang/onetalk-adapter && npm run build -w @wangwang/database && concurrently -n api,web -c cyan,magenta \"npm run dev -w @wangwang/api\" \"npm run dev -w @wangwang/web\"",
-    "dev:api": "npm run build -w @wangwang/shared && npm run build -w @wangwang/onetalk-adapter && npm run dev -w @wangwang/api",
-    "dev:server": "npm run build -w @wangwang/database && npm run dev -w @wangwang/server",
+    "dev": "npm run build -w @wangwang/shared && npm run build -w @wangwang/env && npm run build -w @wangwang/onetalk-adapter && npm run build -w @wangwang/database && concurrently -n server,web -c cyan,magenta \"npm run dev -w @wangwang/server\" \"npm run dev -w @wangwang/web\"",
+    "dev:api": "npm run build -w @wangwang/shared && npm run build -w @wangwang/env && npm run build -w @wangwang/onetalk-adapter && npm run dev -w @wangwang/api",
+    "dev:server": "npm run build -w @wangwang/env && npm run build -w @wangwang/database && npm run dev -w @wangwang/server",
     "dev:web": "npm run dev -w @wangwang/web",
-    "build": "npm run build -w @wangwang/shared && npm run build -w @wangwang/onetalk-adapter && npm run build -w @wangwang/database && npm run build -w @wangwang/api && npm run build -w @wangwang/server && npm run build -w @wangwang/web",
-    "typecheck": "npm run build -w @wangwang/shared && npm run build -w @wangwang/onetalk-adapter && npm run build -w @wangwang/database && npm run typecheck -w @wangwang/api && npm run typecheck -w @wangwang/server && npm run typecheck -w @wangwang/web"
+    "build": "npm run build -w @wangwang/shared && npm run build -w @wangwang/env && npm run build -w @wangwang/onetalk-adapter && npm run build -w @wangwang/database && npm run build -w @wangwang/collector-desktop && npm run build -w @wangwang/api && npm run build -w @wangwang/server && npm run build -w @wangwang/web",
+    "typecheck": "npm run build -w @wangwang/shared && npm run build -w @wangwang/env && npm run build -w @wangwang/onetalk-adapter && npm run build -w @wangwang/database && npm run typecheck -w @wangwang/collector-desktop && npm run typecheck -w @wangwang/api && npm run typecheck -w @wangwang/server && npm run typecheck -w @wangwang/web",
+    "test:e2e": "npm run build -w @wangwang/shared && npm run build -w @wangwang/env && npm run build -w @wangwang/onetalk-adapter && npm run build -w @wangwang/database && npm run build -w @wangwang/collector-desktop && npm run build -w @wangwang/server && npm run build -w @wangwang/web && node --import tsx --test test/e2e/*.test.ts"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

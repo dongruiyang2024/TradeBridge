@@ -1,0 +1,222 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import type { FastifyInstance } from "fastify";
+import { InMemorySyncStore, type SyncBatch } from "@wangwang/database";
+import { collectOnce } from "../../apps/collector-desktop/src/collector.js";
+import type {
+  CollectorLastError,
+  CollectorLocalState,
+  CollectorStateStore,
+  QueuedFailedBatch
+} from "../../apps/collector-desktop/src/local-state.js";
+import { createServer } from "../../apps/server/src/server.js";
+import { createInternalApiClient } from "../../apps/web/src/internal-api";
+import {
+  addTagToSelectedCustomer,
+  createInitialWorkspaceState,
+  createNoteForSelectedCustomer,
+  createTaskForSelectedCustomer,
+  loadCustomerList
+} from "../../apps/web/src/workspace-state";
+
+const ORG_ID = "org_internal";
+const SELLER_ACCOUNT_ID = "seller-trial";
+const COLLECTOR_TOKEN = "trial-collector-token";
+const INTERNAL_TOKEN = "trial-admin-token";
+const SECRET_COOKIE = "one-talk-cookie-must-not-leave-collector";
+
+test("internal trial flow uploads collector data and exercises the Web customer workflow", async () => {
+  const store = new InMemorySyncStore();
+  const app = await createServer({
+    store,
+    deviceTokens: [COLLECTOR_TOKEN],
+    internalTokens: [INTERNAL_TOKEN]
+  });
+
+  await app.ready();
+  const baseUrl = "http://tradebridge.internal";
+  const fetchImpl = fastifyFetch(app);
+
+  try {
+    const state = new MemoryCollectorStateStore();
+    const uploadResult = await collectOnce({
+      orgId: ORG_ID,
+      sellerAccount: { externalAccountId: SELLER_ACCOUNT_ID, displayName: "Trial Seller" },
+      device: { deviceId: "trial-device", deviceName: "Trial Mac" },
+      state,
+      adapter: fixtureCollectorAdapter(),
+      uploadBatch: (batch) => uploadBatchThroughServer(app, batch),
+      collectedAt: "2026-05-25T10:50:00.000Z"
+    });
+
+    assert.equal(uploadResult.acceptedCount, 2);
+    assert.equal(uploadResult.rejectedCount, 0);
+    assert.equal(await state.getCursor(SELLER_ACCOUNT_ID), "2026-05-25T10:50:00.000Z");
+
+    const client = createInternalApiClient({ baseUrl, token: INTERNAL_TOKEN, fetchImpl });
+    let workspace = await loadCustomerList(createInitialWorkspaceState({ orgId: ORG_ID }), client);
+
+    assert.equal(workspace.customers.length, 1);
+    assert.equal(workspace.selectedCustomerId, "buyer-trial");
+    assert.equal(workspace.messages.length, 2);
+    assert.deepEqual(
+      workspace.messages.map((message) => [message.externalMessageId, message.direction, message.content]),
+      [
+        ["trial-msg-1", "received", "Can you confirm delivery?"],
+        ["trial-msg-2", "sent", "Delivery is booked for tomorrow."]
+      ]
+    );
+    assert.doesNotMatch(JSON.stringify(workspace.messages), new RegExp(SECRET_COOKIE));
+
+    workspace = await createNoteForSelectedCustomer(workspace, client, "Buyer asked for delivery confirmation.");
+    workspace = await addTagToSelectedCustomer(workspace, client, "priority");
+    workspace = await createTaskForSelectedCustomer(workspace, client, "Send tracking number");
+
+    assert.equal(workspace.notes.at(-1)?.body, "Buyer asked for delivery confirmation.");
+    assert.equal(workspace.tags.at(-1)?.tag, "priority");
+    assert.equal(workspace.tasks.at(-1)?.title, "Send tracking number");
+
+    const forbidden = await fetchImpl(new URL(`/internal/v1/customers?orgId=${ORG_ID}`, baseUrl), {
+      headers: { authorization: `Bearer ${COLLECTOR_TOKEN}` }
+    });
+    assert.equal(forbidden.status, 401);
+  } finally {
+    await app.close();
+  }
+});
+
+function fixtureCollectorAdapter() {
+  return {
+    detectSession: () => ({
+      cookies: { cookie2: SECRET_COOKIE },
+      cookieNames: ["cookie2"],
+      hasCtoken: false,
+      hasTbToken: false,
+      hasCookie2: true,
+      hasSgcookie: false,
+      logPaths: [],
+      cookieDbPaths: [],
+      tokenCachePaths: []
+    }),
+    fetchConversations: async () => ({
+      html: "<html></html>",
+      bootstrap: { aliId: "seller-ali" },
+      conversations: [
+        {
+          cid: "conv-trial",
+          contactAccountId: "buyer-trial",
+          contactNick: "Trial Buyer",
+          contactLoginId: "trial_buyer",
+          country: "US",
+          lastMessageTime: 1779706200000,
+          selfAliId: "seller-ali"
+        }
+      ]
+    }),
+    fetchMessages: async () => ({
+      status: 200,
+      contentType: "application/json",
+      code: 200,
+      raw: {},
+      messages: [
+        {
+          messageId: "trial-msg-1",
+          senderAliId: "buyer-ali",
+          messageType: "text",
+          content: "Can you confirm delivery?",
+          sendTime: 1779706140000
+        },
+        {
+          messageId: "trial-msg-2",
+          senderAliId: "seller-ali",
+          messageType: "text",
+          content: "Delivery is booked for tomorrow.",
+          sendTime: 1779706200000
+        }
+      ]
+    })
+  };
+}
+
+async function uploadBatchThroughServer(app: FastifyInstance, batch: SyncBatch) {
+  const response = await app.inject({
+    method: "POST",
+    url: "/collector/v1/sync-batches",
+    headers: { authorization: `Bearer ${COLLECTOR_TOKEN}` },
+    payload: batch
+  });
+  const body = response.json();
+  if (response.statusCode !== 200 || body.ok !== true) {
+    throw new Error(body.error || `upload_failed_${response.statusCode}`);
+  }
+  return {
+    acceptedCount: body.acceptedCount,
+    rejectedCount: body.rejectedCount,
+    nextCursor: body.nextCursor,
+    warnings: body.warnings
+  };
+}
+
+function fastifyFetch(app: FastifyInstance): typeof fetch {
+  return async (input, init) => {
+    const request = new Request(input, init);
+    const url = new URL(request.url);
+    const response = await app.inject({
+      method: request.method,
+      url: `${url.pathname}${url.search}`,
+      headers: Object.fromEntries(request.headers.entries()),
+      payload: init?.body ? String(init.body) : undefined
+    });
+
+    return new Response(response.body, {
+      status: response.statusCode,
+      headers: response.headers as HeadersInit
+    });
+  };
+}
+
+class MemoryCollectorStateStore implements CollectorStateStore {
+  private state: CollectorLocalState = {
+    cursors: {},
+    failedBatches: []
+  };
+
+  async read(): Promise<CollectorLocalState> {
+    return this.state;
+  }
+
+  async getCursor(sellerAccountExternalId: string): Promise<string | null> {
+    return this.state.cursors[sellerAccountExternalId] || null;
+  }
+
+  async saveCursor(sellerAccountExternalId: string, cursor: string): Promise<void> {
+    this.state.cursors[sellerAccountExternalId] = cursor;
+  }
+
+  async recordFailedBatch(batch: SyncBatch, reason: string): Promise<QueuedFailedBatch> {
+    const failed = {
+      id: `failed-${this.state.failedBatches.length + 1}`,
+      batch,
+      reason,
+      createdAt: new Date().toISOString()
+    };
+    this.state.failedBatches.push(failed);
+    return failed;
+  }
+
+  async listFailedBatches(): Promise<QueuedFailedBatch[]> {
+    return this.state.failedBatches;
+  }
+
+  async clearFailedBatch(id: string): Promise<void> {
+    this.state.failedBatches = this.state.failedBatches.filter((batch) => batch.id !== id);
+  }
+
+  async setLastError(error: CollectorLastError): Promise<void> {
+    this.state.lastError = error;
+  }
+
+  async clearLastError(): Promise<void> {
+    delete this.state.lastError;
+  }
+}
