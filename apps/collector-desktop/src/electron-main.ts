@@ -1,0 +1,115 @@
+import os from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { loadWorkspaceEnv } from "@wangwang/env";
+import { collectOnce } from "./collector.js";
+import { createCollectorShellController, renderCollectorShellHtml, type CollectorShellStatus } from "./electron-shell.js";
+import { JsonLocalStateStore } from "./local-state.js";
+
+loadWorkspaceEnv();
+
+const statePath =
+  process.env.WANGWANG_COLLECTOR_STATE_PATH ||
+  path.join(os.homedir(), ".wangwang-collector", "collector-state.json");
+const state = new JsonLocalStateStore(statePath);
+
+const controller = createCollectorShellController({
+  readStatus: async () => {
+    const localState = await state.read();
+    return {
+      session: {
+        hasCookie2: Boolean(process.env.WANGWANG_COLLECTOR_HAS_COOKIE2),
+        hasCtoken: Boolean(process.env.WANGWANG_COLLECTOR_HAS_CTOKEN),
+        hasTbToken: Boolean(process.env.WANGWANG_COLLECTOR_HAS_TB_TOKEN),
+        hasSgcookie: Boolean(process.env.WANGWANG_COLLECTOR_HAS_SGCOOKIE)
+      },
+      sellerAccountExternalId: process.env.WANGWANG_SELLER_ACCOUNT_ID,
+      sellerDisplayName: process.env.WANGWANG_SELLER_DISPLAY_NAME,
+      deviceName: process.env.WANGWANG_DEVICE_NAME || os.hostname(),
+      deviceStatus: process.env.WANGWANG_COLLECTOR_TOKEN ? "registered" : "unregistered",
+      lastSyncAt: process.env.WANGWANG_SELLER_ACCOUNT_ID
+        ? localState.cursors[process.env.WANGWANG_SELLER_ACCOUNT_ID]
+        : undefined,
+      lastError: localState.lastError,
+      queuedFailedBatchCount: localState.failedBatches.length
+    } satisfies CollectorShellStatus;
+  },
+  manualSync: async () =>
+    collectOnce({
+      orgId: requiredEnv("WANGWANG_ORG_ID"),
+      sellerAccount: {
+        externalAccountId: requiredEnv("WANGWANG_SELLER_ACCOUNT_ID"),
+        displayName: process.env.WANGWANG_SELLER_DISPLAY_NAME
+      },
+      device: {
+        deviceId: process.env.WANGWANG_COLLECTOR_DEVICE_ID || os.hostname(),
+        deviceName: process.env.WANGWANG_DEVICE_NAME || os.hostname()
+      },
+      serverUrl: requiredEnv("WANGWANG_SERVER_URL"),
+      collectorToken: requiredEnv("WANGWANG_COLLECTOR_TOKEN"),
+      state
+    })
+});
+
+await startElectronShell();
+
+async function startElectronShell(): Promise<void> {
+  const electron = await importElectron();
+  const { app, BrowserWindow, ipcMain } = electron;
+
+  await app.whenReady();
+  const window = new BrowserWindow({
+    width: 920,
+    height: 620,
+    minWidth: 760,
+    minHeight: 520,
+    title: "Wangwang Collector",
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false
+    }
+  });
+
+  async function refresh(): Promise<void> {
+    const html = renderCollectorShellHtml(await controller.load());
+    await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  }
+
+  ipcMain.handle("collector:manual-sync", async () => {
+    const html = renderCollectorShellHtml(await controller.manualSync());
+    await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    return true;
+  });
+
+  await refresh();
+
+  app.on("activate", async () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      await startElectronShell();
+    }
+  });
+
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") app.quit();
+  });
+}
+
+async function importElectron(): Promise<any> {
+  const moduleName = "electron";
+  try {
+    return await import(moduleName);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`electron_runtime_unavailable: ${message}`);
+  }
+}
+
+function requiredEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name}_required`);
+  return value;
+}
+
+export function electronEntrypointUrl(): string {
+  return pathToFileURL(process.argv[1] || "").href;
+}
