@@ -1,6 +1,9 @@
 import type {
+  AcceptInvitationResult,
   CustomerScope,
   InternalApiClient,
+  InternalInvitation,
+  InternalUser,
   StoredConversation,
   StoredCustomer,
   StoredCustomerAssignment,
@@ -33,6 +36,8 @@ interface ApiEnvelope<T> {
   token?: string;
   expiresAt?: string;
   user?: LoginResult["user"];
+  users?: InternalUser[];
+  invitation?: InternalInvitation;
 }
 
 export function createInternalApiClient(options: CreateInternalApiClientOptions): InternalApiClient {
@@ -44,15 +49,17 @@ export function createInternalApiClient(options: CreateInternalApiClientOptions)
     init: {
       method?: string;
       query?: Record<string, string | undefined>;
-      body?: Record<string, unknown>;
+      body?: object;
       auth?: boolean;
+      bearerToken?: string;
     } = {}
   ): Promise<ApiEnvelope<T>> {
     const headers: Record<string, string> = {
       "content-type": "application/json"
     };
-    if (init.auth !== false && options.token) {
-      headers.authorization = `Bearer ${options.token}`;
+    const token = init.bearerToken ?? (init.auth !== false ? options.token : "");
+    if (token) {
+      headers.authorization = `Bearer ${token}`;
     }
 
     const response = await fetchImpl(buildUrl(baseUrl, path, init.query), {
@@ -76,6 +83,76 @@ export function createInternalApiClient(options: CreateInternalApiClientOptions)
         body: input
       });
       return {
+        token: requireField(data.token, "token"),
+        expiresAt: data.expiresAt,
+        user: requireField(data.user, "user")
+      };
+    },
+    async logout() {
+      await request<void>("/internal/v1/auth/logout", { method: "POST" });
+    },
+    async setupAdmin(input) {
+      const { setupToken, ...body } = input;
+      const data = await request<InternalUser>("/internal/v1/setup/admin", {
+        method: "POST",
+        auth: false,
+        bearerToken: setupToken,
+        body
+      });
+      return requireField(data.user, "user");
+    },
+    async listInternalUsers(orgId) {
+      const data = await request<InternalUser[]>("/internal/v1/users", { query: { orgId } });
+      return data.users || [];
+    },
+    async createInternalUser(input) {
+      const data = await request<InternalUser>("/internal/v1/users", {
+        method: "POST",
+        body: input
+      });
+      return requireField(data.user, "user");
+    },
+    async disableInternalUser(input) {
+      const data = await request<InternalUser>(`/internal/v1/users/${encodeURIComponent(input.userId)}/disable`, {
+        method: "POST",
+        body: { orgId: input.orgId }
+      });
+      return requireField(data.user, "user");
+    },
+    async resetInternalUserPassword(input) {
+      const data = await request<InternalUser>(
+        `/internal/v1/users/${encodeURIComponent(input.userId)}/reset-password`,
+        {
+          method: "POST",
+          body: { orgId: input.orgId, password: input.password }
+        }
+      );
+      return requireField(data.user, "user");
+    },
+    async createInvitation(input) {
+      const data = await request<InternalInvitation>("/internal/v1/invitations", {
+        method: "POST",
+        body: input
+      });
+      return requireField(data.invitation, "invitation");
+    },
+    async getInvitation(token) {
+      const data = await request<InternalInvitation>(`/internal/v1/invitations/${encodeURIComponent(token)}`, {
+        auth: false
+      });
+      return requireField(data.invitation, "invitation");
+    },
+    async acceptInvitation(input) {
+      const data = await request<AcceptInvitationResult>(
+        `/internal/v1/invitations/${encodeURIComponent(input.token)}/accept`,
+        {
+          method: "POST",
+          auth: false,
+          body: { password: input.password }
+        }
+      );
+      return {
+        invitation: requireField(data.invitation, "invitation"),
         token: requireField(data.token, "token"),
         expiresAt: data.expiresAt,
         user: requireField(data.user, "user")

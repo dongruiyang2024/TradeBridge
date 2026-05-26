@@ -34,6 +34,7 @@ test("internal API client sends bearer-scoped customer workflow requests", async
   await client.listConversations("org_internal");
   await client.listMessages("org_internal", "conv-1");
   await client.login({ orgId: "org_internal", email: "admin@example.com", password: "secret" });
+  await client.logout();
   await client.listCustomerNotes(scope);
   await client.getCustomerAssignment(scope);
   await client.createCustomerNote(scope, { body: "Customer asked for updated MOQ." });
@@ -47,6 +48,7 @@ test("internal API client sends bearer-scoped customer workflow requests", async
       "/base/internal/v1/conversations",
       "/base/internal/v1/conversations/conv-1/messages",
       "/base/internal/v1/auth/login",
+      "/base/internal/v1/auth/logout",
       "/base/internal/v1/customers/customer-1/notes",
       "/base/internal/v1/customers/customer-1/assignment",
       "/base/internal/v1/customers/customer-1/notes",
@@ -59,25 +61,27 @@ test("internal API client sends bearer-scoped customer workflow requests", async
     "org_internal",
     "org_internal",
     null,
+    null,
     "org_internal",
     "org_internal",
     "org_internal",
     "org_internal",
     "org_internal"
   ]);
-  assert.equal(calls[4].url.searchParams.get("sellerAccountExternalId"), "seller-1");
+  assert.equal(calls[5].url.searchParams.get("sellerAccountExternalId"), "seller-1");
   assert.equal(calls[3].init.method, "POST");
-  assert.equal(calls[6].init.method, "POST");
+  assert.equal(calls[4].init.method, "POST");
   assert.equal(calls[7].init.method, "POST");
   assert.equal(calls[8].init.method, "POST");
+  assert.equal(calls[9].init.method, "POST");
   assert.deepEqual(JSON.parse(String(calls[3].init.body)), {
     orgId: "org_internal",
     email: "admin@example.com",
     password: "secret"
   });
-  assert.deepEqual(JSON.parse(String(calls[6].init.body)), { body: "Customer asked for updated MOQ." });
-  assert.deepEqual(JSON.parse(String(calls[7].init.body)), { tag: "hot-lead" });
-  assert.deepEqual(JSON.parse(String(calls[8].init.body)), { title: "Send revised quotation" });
+  assert.deepEqual(JSON.parse(String(calls[7].init.body)), { body: "Customer asked for updated MOQ." });
+  assert.deepEqual(JSON.parse(String(calls[8].init.body)), { tag: "hot-lead" });
+  assert.deepEqual(JSON.parse(String(calls[9].init.body)), { title: "Send revised quotation" });
 
   for (const [index, call] of calls.entries()) {
     const headers = call.init.headers as Record<string, string>;
@@ -89,11 +93,123 @@ test("internal API client sends bearer-scoped customer workflow requests", async
   }
 });
 
+test("internal API client sends setup, user management, and invitation requests", async () => {
+  const calls: Array<{ url: URL; init: RequestInit }> = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    calls.push({ url, init });
+    const body = responseFor(url.pathname, init.method || "GET");
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+
+  const client = createInternalApiClient({
+    baseUrl: "http://server.test",
+    token: "session-token"
+  });
+
+  await client.setupAdmin({
+    orgId: "org_internal",
+    email: "owner@example.com",
+    displayName: "Owner",
+    password: "setup-secret",
+    setupToken: "setup-token"
+  });
+  await client.listInternalUsers("org_internal");
+  await client.createInternalUser({
+    orgId: "org_internal",
+    email: "sales@example.com",
+    displayName: "Sales",
+    password: "sales-secret",
+    roles: ["sales"]
+  });
+  await client.disableInternalUser({ orgId: "org_internal", userId: "user/id 1" });
+  await client.resetInternalUserPassword({ orgId: "org_internal", userId: "user/id 1", password: "reset-secret" });
+  await client.createInvitation({
+    orgId: "org_internal",
+    email: "invitee@example.com",
+    displayName: "Invitee",
+    roles: ["supervisor"]
+  });
+  await client.getInvitation("invite/token 1");
+  await client.acceptInvitation({ token: "invite/token 1", password: "accepted-secret" });
+
+  assert.deepEqual(
+    calls.map((call) => call.url.pathname),
+    [
+      "/internal/v1/setup/admin",
+      "/internal/v1/users",
+      "/internal/v1/users",
+      "/internal/v1/users/user%2Fid%201/disable",
+      "/internal/v1/users/user%2Fid%201/reset-password",
+      "/internal/v1/invitations",
+      "/internal/v1/invitations/invite%2Ftoken%201",
+      "/internal/v1/invitations/invite%2Ftoken%201/accept"
+    ]
+  );
+  assert.equal(calls[1].url.searchParams.get("orgId"), "org_internal");
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[1].init.method, undefined);
+  assert.equal(calls[2].init.method, "POST");
+  assert.equal(calls[3].init.method, "POST");
+  assert.equal(calls[4].init.method, "POST");
+  assert.equal(calls[5].init.method, "POST");
+  assert.equal(calls[6].init.method, undefined);
+  assert.equal(calls[7].init.method, "POST");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), {
+    orgId: "org_internal",
+    email: "owner@example.com",
+    displayName: "Owner",
+    password: "setup-secret"
+  });
+  assert.deepEqual(JSON.parse(String(calls[2].init.body)), {
+    orgId: "org_internal",
+    email: "sales@example.com",
+    displayName: "Sales",
+    password: "sales-secret",
+    roles: ["sales"]
+  });
+  assert.deepEqual(JSON.parse(String(calls[3].init.body)), { orgId: "org_internal" });
+  assert.deepEqual(JSON.parse(String(calls[4].init.body)), { orgId: "org_internal", password: "reset-secret" });
+  assert.deepEqual(JSON.parse(String(calls[5].init.body)), {
+    orgId: "org_internal",
+    email: "invitee@example.com",
+    displayName: "Invitee",
+    roles: ["supervisor"]
+  });
+  assert.deepEqual(JSON.parse(String(calls[7].init.body)), { password: "accepted-secret" });
+
+  assert.equal((calls[0].init.headers as Record<string, string>).authorization, "Bearer setup-token");
+  for (const index of [1, 2, 3, 4, 5]) {
+    assert.equal((calls[index].init.headers as Record<string, string>).authorization, "Bearer session-token");
+  }
+  assert.equal((calls[6].init.headers as Record<string, string>).authorization, undefined);
+  assert.equal((calls[7].init.headers as Record<string, string>).authorization, undefined);
+});
+
 function responseFor(pathname: string, method: string): unknown {
   if (pathname.endsWith("/customers")) return { ok: true, customers: [] };
   if (pathname.endsWith("/conversations")) return { ok: true, conversations: [] };
   if (pathname.endsWith("/messages")) return { ok: true, messages: [] };
   if (pathname.endsWith("/auth/login")) return { ok: true, token: "session-token", user: { email: "admin@example.com" } };
+  if (pathname.endsWith("/setup/admin")) return { ok: true, user: { id: "admin-1", email: "owner@example.com" } };
+  if (pathname.endsWith("/auth/logout")) return { ok: true };
+  if (method === "GET" && pathname.endsWith("/users")) return { ok: true, users: [] };
+  if (method === "POST" && pathname.endsWith("/users")) return { ok: true, user: { id: "user-1" } };
+  if (pathname.endsWith("/disable")) return { ok: true, user: { id: "user-1", status: "disabled" } };
+  if (pathname.endsWith("/reset-password")) return { ok: true, user: { id: "user-1", status: "active" } };
+  if (method === "POST" && pathname.endsWith("/invitations")) return { ok: true, invitation: { id: "invite-1" } };
+  if (pathname.endsWith("/accept")) {
+    return {
+      ok: true,
+      invitation: { id: "invite-1", acceptedAt: "2026-05-26T00:00:00.000Z" },
+      token: "accepted-session-token",
+      user: { id: "user-1" }
+    };
+  }
+  if (pathname.includes("/invitations/")) return { ok: true, invitation: { id: "invite-1" } };
   if (pathname.endsWith("/assignment")) return { ok: true, assignment: { id: "assignment-1" } };
   if (method === "POST" && pathname.endsWith("/notes")) return { ok: true, note: { id: "note-1" } };
   if (method === "POST" && pathname.endsWith("/tags")) return { ok: true, tag: { id: "tag-1" } };

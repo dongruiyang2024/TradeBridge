@@ -72,12 +72,30 @@ export interface StoredCustomerAssignment extends CustomerScope {
   updatedAt: string;
 }
 
+export type InternalRole = "admin" | "supervisor" | "sales";
+
 export interface InternalUser {
   id: string;
   orgId: string;
   email: string;
-  displayName?: string;
-  roles: string[];
+  displayName: string;
+  status: string;
+  roles: InternalRole[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface InternalInvitation {
+  id: string;
+  orgId: string;
+  email: string;
+  displayName: string;
+  roles: InternalRole[];
+  token?: string;
+  createdByUserId?: string;
+  expiresAt: string;
+  acceptedAt?: string;
+  createdAt: string;
 }
 
 export interface LoginResult {
@@ -86,8 +104,60 @@ export interface LoginResult {
   user: InternalUser;
 }
 
+export interface SetupAdminInput {
+  orgId: string;
+  email: string;
+  displayName: string;
+  password: string;
+  setupToken: string;
+}
+
+export interface CreateInternalUserInput {
+  orgId: string;
+  email: string;
+  displayName: string;
+  password: string;
+  roles: InternalRole[];
+}
+
+export interface DisableInternalUserInput {
+  orgId: string;
+  userId: string;
+}
+
+export interface ResetInternalUserPasswordInput {
+  orgId: string;
+  userId: string;
+  password: string;
+}
+
+export interface CreateInvitationInput {
+  orgId: string;
+  email: string;
+  displayName: string;
+  roles: InternalRole[];
+}
+
+export interface AcceptInvitationInput {
+  token: string;
+  password: string;
+}
+
+export interface AcceptInvitationResult extends LoginResult {
+  invitation: InternalInvitation;
+}
+
 export interface InternalApiClient {
   login(input: { orgId: string; email: string; password: string }): Promise<LoginResult>;
+  logout(): Promise<void>;
+  setupAdmin(input: SetupAdminInput): Promise<InternalUser>;
+  listInternalUsers(orgId: string): Promise<InternalUser[]>;
+  createInternalUser(input: CreateInternalUserInput): Promise<InternalUser>;
+  disableInternalUser(input: DisableInternalUserInput): Promise<InternalUser>;
+  resetInternalUserPassword(input: ResetInternalUserPasswordInput): Promise<InternalUser>;
+  createInvitation(input: CreateInvitationInput): Promise<InternalInvitation>;
+  getInvitation(token: string): Promise<InternalInvitation>;
+  acceptInvitation(input: AcceptInvitationInput): Promise<AcceptInvitationResult>;
   listCustomers(orgId: string): Promise<StoredCustomer[]>;
   listConversations(orgId: string): Promise<StoredConversation[]>;
   listMessages(orgId: string, externalConversationId: string): Promise<StoredMessage[]>;
