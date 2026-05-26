@@ -214,6 +214,28 @@ export interface CreateInternalUserInput {
   status?: string;
 }
 
+export interface InternalUserCredentials extends InternalUser {
+  passwordHash: string;
+}
+
+export interface GetInternalUserCredentialsInput {
+  orgId: string;
+  email: string;
+}
+
+export interface UpdateInternalUserInput {
+  orgId: string;
+  userId: string;
+  displayName?: string;
+  passwordHash?: string;
+  roles?: InternalRole[];
+  status?: "pending" | "active" | "disabled";
+}
+
+export interface RevokeInternalSessionInput {
+  token: string;
+}
+
 export interface IssueInternalSessionInput {
   orgId: string;
   email: string;
