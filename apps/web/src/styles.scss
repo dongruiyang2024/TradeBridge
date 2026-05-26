@@ -26,6 +26,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -142,6 +143,20 @@ button {
   font-size: 13px;
 }
 
+.text-button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-soft);
+  color: #253241;
+  cursor: pointer;
+}
+
 .crm-shell {
   display: grid;
   height: 100vh;
@@ -199,7 +214,7 @@ button {
 
 .connection-bar {
   display: grid;
-  grid-template-columns: minmax(120px, 0.65fr) minmax(150px, 1fr) auto auto;
+  grid-template-columns: minmax(120px, 0.65fr) minmax(150px, 1fr) repeat(3, auto);
   gap: 10px;
   align-items: end;
 
@@ -214,6 +229,7 @@ button {
 }
 
 input,
+select,
 textarea {
   width: 100%;
   min-width: 0;
@@ -230,6 +246,11 @@ textarea {
 }
 
 input {
+  height: 34px;
+  padding: 0 10px;
+}
+
+select {
   height: 34px;
   padding: 0 10px;
 }
@@ -729,9 +750,185 @@ textarea {
   }
 }
 
+.admin-shell {
+  height: auto;
+  min-height: 100vh;
+}
+
+.admin-topbar {
+  grid-template-columns: minmax(260px, 1fr) auto;
+}
+
+.admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.admin-panel {
+  display: grid;
+  width: min(1180px, 100%);
+  gap: 14px;
+  align-content: start;
+  padding: 18px;
+  justify-self: center;
+}
+
+.panel-heading {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  h2,
+  p {
+    margin: 0;
+  }
+
+  h2 {
+    font-size: 16px;
+  }
+
+  p {
+    margin-top: 3px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  svg {
+    color: var(--blue);
+  }
+}
+
+.create-user-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.1fr) minmax(160px, 0.9fr) minmax(140px, 0.8fr) minmax(120px, 0.6fr) auto;
+  gap: 12px;
+  align-items: end;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+
+  label {
+    display: grid;
+    min-width: 0;
+    gap: 5px;
+    color: #536171;
+    font-size: 12px;
+    font-weight: 650;
+  }
+
+  button {
+    display: inline-flex;
+    height: 34px;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 0 12px;
+    border: 1px solid #1d5fd0;
+    border-radius: 7px;
+    background: #1d5fd0;
+    color: #fff;
+    cursor: pointer;
+
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.62;
+    }
+  }
+}
+
+.user-table {
+  display: grid;
+  min-width: 0;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.user-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(140px, 0.8fr) minmax(120px, 0.6fr) minmax(92px, 0.45fr) minmax(360px, 1.45fr);
+  gap: 10px;
+  min-width: 920px;
+  align-items: center;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+
+  &:last-child {
+    border-bottom: 0;
+  }
+
+  strong,
+  span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
+.user-row-head {
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.user-actions {
+  display: grid;
+  grid-template-columns: auto minmax(110px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.status-pill {
+  width: fit-content;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #f4f7fa;
+  color: #4f5c6a;
+  font-size: 12px;
+  font-weight: 680;
+
+  &.active {
+    border-color: #b8dec3;
+    background: #eef8f1;
+    color: #23723a;
+  }
+
+  &.disabled {
+    border-color: #f0c1bc;
+    background: #fff4f2;
+    color: var(--red);
+  }
+
+  &.pending {
+    border-color: #ead0a7;
+    background: #fff8ed;
+    color: var(--amber);
+  }
+}
+
+.admin-error {
+  width: min(620px, 100%);
+}
+
 @media (max-width: 1240px) {
   .workspace-grid {
     grid-template-columns: 280px minmax(380px, 1fr);
+  }
+
+  .create-user-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+
+    button {
+      justify-self: start;
+    }
   }
 
   .collaboration-pane {
@@ -750,7 +947,23 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .admin-topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-actions {
+    justify-content: flex-start;
+  }
+
   .connection-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-panel {
+    padding: 12px;
+  }
+
+  .create-user-form {
     grid-template-columns: 1fr;
   }
 
