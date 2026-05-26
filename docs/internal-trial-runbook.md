@@ -103,12 +103,30 @@ curl -X POST http://127.0.0.1:5032/internal/v1/setup/admin \
   }'
 ```
 
-Web 工作台顶部输入：
+创建完成后，可以直接用邮箱密码登录。普通登录不需要传 `orgId`：
 
-- Org：`org_internal`
-- API：留空
-- 邮箱：`admin@example.com`
-- 密码：`change-me-password`
+```bash
+curl -X POST http://127.0.0.1:5032/internal/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "email": "admin@example.com",
+    "password": "change-me-password"
+  }'
+```
+
+如果同一个邮箱存在于多个工作空间，服务端会返回工作空间选择。选择后可以用显式 `orgId` 完成登录：
+
+```bash
+curl -X POST http://127.0.0.1:5032/internal/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "orgId": "org_internal",
+    "email": "admin@example.com",
+    "password": "change-me-password"
+  }'
+```
+
+打开 `http://127.0.0.1:5173/` 后直接输入邮箱和密码。普通登录页面不再要求填写工作空间 ID；如果当前邮箱存在于多个工作空间，页面会在密码校验成功后显示工作空间选择。
 
 说明：
 
@@ -127,7 +145,6 @@ Web 工作台顶部输入：
 curl -X POST http://127.0.0.1:5032/internal/v1/auth/login \
   -H 'Content-Type: application/json' \
   -d '{
-    "orgId": "org_internal",
     "email": "admin@example.com",
     "password": "change-me-password"
   }'
@@ -249,11 +266,12 @@ DATABASE_URL=postgres://wait9yan:Weite123@127.0.0.1:5432/tradebridge
 确认页面使用的是内部用户账号：
 
 ```text
-Org: org_internal
-API: 留空
 邮箱: admin@example.com
 密码: change-me-password
 ```
+
+普通账号登录只需要邮箱和密码，不需要填写工作空间 ID。需要切换后端地址时，点击登录页的“连接设置”填写 API 地址。
+初始化首个管理员时仍会显示 Org，本地开发填写 `org_internal`。
 
 不要把采集端 token 填到 Web 工作台。
 
