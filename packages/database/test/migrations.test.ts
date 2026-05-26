@@ -3,16 +3,15 @@ import { test } from "node:test";
 import { INTERNAL_SYNC_MIGRATIONS } from "../src/index.js";
 
 test("internal sync migrations expose the initial schema in order", () => {
-  assert.equal(INTERNAL_SYNC_MIGRATIONS.length, 2);
+  assert.equal(INTERNAL_SYNC_MIGRATIONS.length, 1);
   assert.equal(INTERNAL_SYNC_MIGRATIONS[0].id, "001_internal_sync_schema");
   assert.equal(INTERNAL_SYNC_MIGRATIONS[0].filename, "001_internal_sync_schema.sql");
-  assert.match(INTERNAL_SYNC_MIGRATIONS[0].sql, /CREATE TABLE IF NOT EXISTS org/i);
+  assert.doesNotMatch(INTERNAL_SYNC_MIGRATIONS[0].sql, /CREATE TABLE IF NOT EXISTS org/i);
 });
 
 test("initial schema contains the core platform tables", () => {
   const sql = INTERNAL_SYNC_MIGRATIONS[0].sql;
   const tables = [
-    "org",
     "app_user",
     "role",
     "user_role",
@@ -42,22 +41,28 @@ test("initial schema contains the core platform tables", () => {
 test("initial schema defines idempotency constraints for sync writes", () => {
   const normalized = INTERNAL_SYNC_MIGRATIONS[0].sql.replace(/\s+/g, " ").toLowerCase();
 
-  assert.match(normalized, /unique \(org_id, external_account_id\)/);
-  assert.match(normalized, /unique \(org_id, device_token_hash\)/);
-  assert.match(normalized, /unique \(org_id, seller_account_id, external_conversation_id\)/);
-  assert.match(normalized, /unique \(org_id, seller_account_id, conversation_id, external_message_id\)/);
-  assert.match(normalized, /unique \(org_id, conversation_id, sent_at, direction, content_hash\)/);
-  assert.match(normalized, /unique \(org_id, seller_account_id, source_batch_key\)/);
+  assert.match(normalized, /unique \(external_account_id\)/);
+  assert.match(normalized, /unique \(device_token_hash\)/);
+  assert.match(normalized, /unique \(seller_account_id, external_conversation_id\)/);
+  assert.match(normalized, /unique \(seller_account_id, conversation_id, external_message_id\)/);
+  assert.match(normalized, /unique \(conversation_id, sent_at, direction, content_hash\)/);
+  assert.match(normalized, /unique \(seller_account_id, source_batch_key\)/);
 });
 
-test("initial schema uses text organization keys for API supplied org ids", () => {
+test("initial schema does not contain organization tables or columns", () => {
   const normalized = INTERNAL_SYNC_MIGRATIONS[0].sql.replace(/\s+/g, " ").toLowerCase();
-  const orgIdColumns = normalized.match(/\borg_id\s+text\s+not null references org\(id\)/g) || [];
 
-  assert.match(normalized, /create table if not exists org \( id text primary key,/);
-  assert.equal(orgIdColumns.length, 19);
-  assert.equal(normalized.includes("org_id uuid"), false);
-  assert.equal(normalized.includes("id uuid primary key default gen_random_uuid(), name text not null"), false);
+  assert.doesNotMatch(normalized, /create table if not exists org/);
+  assert.doesNotMatch(normalized, /\borg_id\b/);
+  assert.doesNotMatch(normalized, /references org\(id\)/);
+});
+
+test("initial schema defines single-tenant user and role constraints", () => {
+  const normalized = INTERNAL_SYNC_MIGRATIONS[0].sql.replace(/\s+/g, " ").toLowerCase();
+
+  assert.match(normalized, /unique \(email\)/);
+  assert.match(normalized, /unique \(name\)/);
+  assert.match(normalized, /primary key \(user_id, role_id\)/);
 });
 
 test("initial schema contains internal auth credentials and sessions", () => {
@@ -77,8 +82,8 @@ test("initial schema contains internal user invitations", () => {
   assert.match(normalized, /roles text\[\] not null/);
   assert.match(normalized, /created_by uuid references app_user\(id\) on delete set null/);
   assert.match(normalized, /accepted_at timestamptz/);
-  assert.match(normalized, /unique \(org_id, email, token_hash\)/);
-  assert.match(normalized, /create index if not exists idx_user_invitation_email on user_invitation \(org_id, email\)/);
+  assert.match(normalized, /unique \(email, token_hash\)/);
+  assert.match(normalized, /create index if not exists idx_user_invitation_email on user_invitation \(email\)/);
   assert.match(normalized, /create index if not exists idx_user_invitation_token_hash on user_invitation \(token_hash\)/);
 });
 
@@ -91,14 +96,8 @@ test("initial schema does not define raw OneTalk credential columns", () => {
   }
 });
 
-test("workspace login facade migration is exported after the initial schema", () => {
-  assert.equal(INTERNAL_SYNC_MIGRATIONS.length, 2);
-  assert.equal(INTERNAL_SYNC_MIGRATIONS[1].id, "002_workspace_login_facade");
-  assert.equal(INTERNAL_SYNC_MIGRATIONS[1].filename, "002_workspace_login_facade.sql");
-});
-
-test("workspace login facade migration adds lookup indexes for email login and session switching", () => {
-  const normalized = INTERNAL_SYNC_MIGRATIONS[1].sql.replace(/\s+/g, " ").toLowerCase();
+test("single-tenant schema includes auth lookup indexes", () => {
+  const normalized = INTERNAL_SYNC_MIGRATIONS[0].sql.replace(/\s+/g, " ").toLowerCase();
 
   assert.match(normalized, /create index if not exists idx_app_user_email on app_user \(email\)/);
   assert.match(normalized, /create index if not exists idx_internal_session_user_id on internal_session \(user_id\)/);

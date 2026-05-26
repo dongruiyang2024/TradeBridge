@@ -8,8 +8,7 @@ export interface DatabaseMigration {
 }
 
 export const INTERNAL_SYNC_MIGRATIONS: DatabaseMigration[] = [
-  loadMigration("001_internal_sync_schema", "001_internal_sync_schema.sql"),
-  loadMigration("002_workspace_login_facade", "002_workspace_login_facade.sql")
+  loadMigration("001_internal_sync_schema", "001_internal_sync_schema.sql")
 ];
 
 function loadMigration(id: string, filename: string): DatabaseMigration {

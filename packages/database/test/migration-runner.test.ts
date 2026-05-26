@@ -33,7 +33,7 @@ test("runMigrations creates migration table and applies pending migrations", asy
   for (const migration of INTERNAL_SYNC_MIGRATIONS) {
     assert.equal(client.queries.some((query) => query.sql === migration.sql), true);
   }
-  assert.deepEqual(client.queries.at(-1)?.params, ["002_workspace_login_facade"]);
+  assert.deepEqual(client.queries.at(-1)?.params, ["001_internal_sync_schema"]);
 });
 
 test("runMigrations skips already applied migrations", async () => {
