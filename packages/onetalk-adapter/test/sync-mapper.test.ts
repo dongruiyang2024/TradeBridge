@@ -1,0 +1,88 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { mapWebliteToSyncBatch } from "../src/browser.js";
+
+test("mapWebliteToSyncBatch maps conversations and messages into collector batch shape", () => {
+  const batch = mapWebliteToSyncBatch({
+    orgId: "org_internal",
+    sellerAccount: { externalAccountId: "seller-demo", displayName: "Seller Demo" },
+    device: { deviceId: "chrome-extension-demo", deviceName: "Chrome Extension" },
+    collectedAt: "2026-05-26T08:10:00.000Z",
+    source: "chrome-extension",
+    previousCursor: null,
+    weblite: {
+      html: "",
+      bootstrap: { aliId: "self-ali" },
+      conversations: [
+        {
+          cid: "conv-1",
+          contactAccountId: "buyer-1",
+          contactNick: "Buyer One",
+          lastMessageTime: 1779706200000
+        }
+      ]
+    },
+    messagesByConversationId: {
+      "conv-1": [
+        {
+          messageId: "m1",
+          senderAliId: "self-ali",
+          messageType: "text",
+          content: "I can ship tomorrow",
+          sendTime: 1779706140000
+        },
+        {
+          messageId: "m2",
+          senderAliId: "buyer-ali",
+          messageType: "text",
+          content: "Thanks",
+          sendTime: 1779706200000
+        }
+      ]
+    }
+  });
+
+  assert.equal(batch.sourceMeta?.source, "chrome-extension");
+  assert.equal(batch.sourceMeta?.sourceBatchKey, "seller-demo:chrome-extension-demo:2026-05-26T08:10:00.000Z");
+  assert.deepEqual(batch.customers, [
+    {
+      externalCustomerId: "buyer-1",
+      displayName: "Buyer One"
+    }
+  ]);
+  assert.deepEqual(batch.conversations, [
+    {
+      externalConversationId: "conv-1",
+      externalCustomerId: "buyer-1",
+      lastMessageAt: "2026-05-25T10:50:00.000Z"
+    }
+  ]);
+  assert.deepEqual(batch.messages?.map((message) => [message.externalMessageId, message.direction]), [
+    ["m1", "sent"],
+    ["m2", "received"]
+  ]);
+});
+
+test("mapWebliteToSyncBatch filters messages at or before the previous cursor", () => {
+  const batch = mapWebliteToSyncBatch({
+    orgId: "org_internal",
+    sellerAccount: { externalAccountId: "seller-demo" },
+    device: { deviceId: "chrome-extension-demo" },
+    collectedAt: "2026-05-26T08:10:00.000Z",
+    source: "chrome-extension",
+    previousCursor: "2026-05-25T10:49:00.000Z",
+    weblite: {
+      html: "",
+      bootstrap: { aliId: "self-ali" },
+      conversations: [{ cid: "conv-1", contactAccountId: "buyer-1" }]
+    },
+    messagesByConversationId: {
+      "conv-1": [
+        { messageId: "old", senderAliId: "buyer", content: "old", sendTime: 1779706140000 },
+        { messageId: "new", senderAliId: "buyer", content: "new", sendTime: 1779706200000 }
+      ]
+    }
+  });
+
+  assert.deepEqual(batch.messages?.map((message) => message.externalMessageId), ["new"]);
+});

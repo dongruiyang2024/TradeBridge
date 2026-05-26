@@ -1,5 +1,7 @@
 export * from "./config.js";
 export * from "./facade.js";
 export * from "./onetalk-client.js";
+export * from "./payload.js";
 export * from "./session.js";
+export * from "./sync-mapper.js";
 export * from "./weblite-parser.js";

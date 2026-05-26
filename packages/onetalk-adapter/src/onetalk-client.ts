@@ -1,4 +1,5 @@
 import { ALIWORKBENCH_UA } from "./config.js";
+import { buildPayload } from "./payload.js";
 import { CookieJar, cookieHeader, csrfQuery } from "./session.js";
 import { extractJsonAfter, pageBootstrap } from "./weblite-parser.js";
 
@@ -123,29 +124,6 @@ export class OnetalkClient {
       data
     };
   }
-}
-
-export function buildPayload(
-  conversation: Record<string, unknown>,
-  bootstrap: Record<string, string>,
-  before: number | null,
-  pageSize: number
-): Record<string, unknown> {
-  return {
-    contactAccountId: conversation.contactAccountId,
-    contactAccountIdEncrypt: conversation.encryptContactAccountId ?? conversation.contactAccountIdEncrypt,
-    aliId: conversation.contactAliId,
-    aliIdEncrypt: conversation.encryptContactAliId ?? conversation.aliIdEncrypt,
-    cid: conversation.cid,
-    conversationCode: conversation.cid,
-    chatToken: conversation.chatToken,
-    selfAliId: conversation.selfAliId ?? bootstrap.aliId,
-    timeSlide: {
-      forward: false,
-      timeStamp: before,
-      pageSize
-    }
-  };
 }
 
 function safeJson(text: string): unknown {
