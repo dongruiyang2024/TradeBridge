@@ -1,5 +1,6 @@
 export type ExtensionMessage =
   | { type: "onetalk-page-ready"; url: string }
+  | { type: "onetalk-login-required"; url: string }
   | { type: "sync-now" }
   | { type: "open-options" }
   | { type: "read-status" };
