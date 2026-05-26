@@ -20,6 +20,7 @@ logs/*
 !logs/.gitkeep
 apps/collector-desktop/logs/
 postgres_data/
+.worktrees/
 
 # Exported chat/message data may contain sensitive business content.
 exports/*
