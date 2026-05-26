@@ -125,6 +125,27 @@ test("POST and GET follow-up tasks return open tasks by default", async () => {
   assert.deepEqual(listResponse.json().tasks, [createResponse.json().task]);
 });
 
+test("customer collaboration routes use session org when orgId is omitted", async () => {
+  const app = await createSeededApp();
+  const headers = await createInternalAuthHeaders(app);
+
+  const notesResponse = await app.inject({
+    method: "GET",
+    url: `${customerPath}/notes?sellerAccountExternalId=seller-1`,
+    headers
+  });
+  const tasksResponse = await app.inject({
+    method: "GET",
+    url: `${customerPath}/follow-up-tasks?sellerAccountExternalId=seller-1`,
+    headers
+  });
+
+  assert.equal(notesResponse.statusCode, 200);
+  assert.deepEqual(notesResponse.json().notes, []);
+  assert.equal(tasksResponse.statusCode, 200);
+  assert.deepEqual(tasksResponse.json().tasks, []);
+});
+
 test("customer collaboration routes reject orgId outside the authenticated user's org", async () => {
   const app = await createSeededApp();
   const authHeaders = await createInternalAuthHeaders(app);

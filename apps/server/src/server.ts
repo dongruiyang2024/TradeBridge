@@ -336,9 +336,8 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, adminRoles);
     if (!auth) return;
 
-    const orgId = queryOrgId(request.query);
-    if (!orgId) return reply.code(400).send({ ok: false, error: "org_id_required" });
-    if (auth.user.orgId !== orgId) return reply.code(403).send({ ok: false, error: "forbidden" });
+    const orgId = requestedOrgIdOrSession(request.query, auth);
+    if (!requireOrgScope(auth, orgId, reply)) return;
 
     return { ok: true, users: await store.listInternalUsers(orgId) };
   });
@@ -513,10 +512,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, adminRoles);
     if (!auth) return;
 
-    const orgId = queryOrgId(request.query);
-    if (!orgId) {
-      return reply.code(400).send({ ok: false, error: "org_id_required" });
-    }
+    const orgId = requestedOrgIdOrSession(request.query, auth);
     if (!requireOrgScope(auth, orgId, reply)) return;
 
     return {
@@ -565,10 +561,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const orgId = queryOrgId(request.query);
-    if (!orgId) {
-      return reply.code(400).send({ ok: false, error: "org_id_required" });
-    }
+    const orgId = requestedOrgIdOrSession(request.query, auth);
     if (!requireOrgScope(auth, orgId, reply)) return;
 
     return {
@@ -581,10 +574,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const orgId = queryOrgId(request.query);
-    if (!orgId) {
-      return reply.code(400).send({ ok: false, error: "org_id_required" });
-    }
+    const orgId = requestedOrgIdOrSession(request.query, auth);
     if (!requireOrgScope(auth, orgId, reply)) return;
 
     return {
@@ -597,10 +587,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const orgId = queryOrgId(request.query);
-    if (!orgId) {
-      return reply.code(400).send({ ok: false, error: "org_id_required" });
-    }
+    const orgId = requestedOrgIdOrSession(request.query, auth);
     if (!requireOrgScope(auth, orgId, reply)) return;
 
     const params = request.params as { externalConversationId?: string };
@@ -614,7 +601,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const scope = queryCustomerScope(request.query, request.params);
+    const scope = customerScopeFromQueryOrSession(request.query, request.params, auth);
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
@@ -654,7 +641,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const scope = queryCustomerScope(request.query, request.params);
+    const scope = customerScopeFromQueryOrSession(request.query, request.params, auth);
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
@@ -737,7 +724,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const scope = queryCustomerScope(request.query, request.params);
+    const scope = customerScopeFromQueryOrSession(request.query, request.params, auth);
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
@@ -758,7 +745,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const scope = queryCustomerScope(request.query, request.params);
+    const scope = customerScopeFromQueryOrSession(request.query, request.params, auth);
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
@@ -774,7 +761,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const scope = queryCustomerScope(request.query, request.params);
+    const scope = customerScopeFromQueryOrSession(request.query, request.params, auth);
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
@@ -795,7 +782,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const scope = queryCustomerScope(request.query, request.params);
+    const scope = customerScopeFromQueryOrSession(request.query, request.params, auth);
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
@@ -811,7 +798,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const scope = queryCustomerScope(request.query, request.params);
+    const scope = customerScopeFromQueryOrSession(request.query, request.params, auth);
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
@@ -850,7 +837,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const scope = queryCustomerScope(request.query, request.params);
+    const scope = customerScopeFromQueryOrSession(request.query, request.params, auth);
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
@@ -866,7 +853,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const scope = queryCustomerScope(request.query, request.params);
+    const scope = customerScopeFromQueryOrSession(request.query, request.params, auth);
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
@@ -893,7 +880,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const scope = queryCustomerScope(request.query, request.params);
+    const scope = customerScopeFromQueryOrSession(request.query, request.params, auth);
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
@@ -1295,14 +1282,21 @@ function queryOrgId(query: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function queryCustomerScope(query: unknown, params: unknown): CustomerScope | null {
-  const orgId = queryOrgId(query);
+function requestedOrgIdOrSession(query: unknown, auth: InternalAuthContext): string {
+  return queryOrgId(query) || auth.user.orgId;
+}
+
+function customerScopeFromQueryOrSession(
+  query: unknown,
+  params: unknown,
+  auth: InternalAuthContext
+): CustomerScope | null {
   const sellerAccountExternalId = queryStringField(query, "sellerAccountExternalId");
   const externalCustomerId = queryStringField(params, "externalCustomerId");
-  if (!orgId || !sellerAccountExternalId || !externalCustomerId) return null;
+  if (!sellerAccountExternalId || !externalCustomerId) return null;
 
   return {
-    orgId,
+    orgId: requestedOrgIdOrSession(query, auth),
     sellerAccountExternalId,
     externalCustomerId
   };

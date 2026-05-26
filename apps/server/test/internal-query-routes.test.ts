@@ -163,14 +163,30 @@ test("collector device tokens cannot read internal query APIs", async () => {
   assert.deepEqual(response.json(), { ok: false, error: "internal_unauthorized" });
 });
 
-test("internal query APIs require orgId", async () => {
+test("internal query APIs use the authenticated session org when orgId is omitted", async () => {
   const app = await createSeededApp();
-  const response = await app.inject({
+  const authHeaders = await createInternalAuthHeaders(app);
+
+  const customersResponse = await app.inject({
     method: "GET",
     url: "/internal/v1/customers",
-    headers: await createInternalAuthHeaders(app)
+    headers: authHeaders
+  });
+  const conversationsResponse = await app.inject({
+    method: "GET",
+    url: "/internal/v1/conversations",
+    headers: authHeaders
+  });
+  const messagesResponse = await app.inject({
+    method: "GET",
+    url: "/internal/v1/conversations/conv-1/messages",
+    headers: authHeaders
   });
 
-  assert.equal(response.statusCode, 400);
-  assert.deepEqual(response.json(), { ok: false, error: "org_id_required" });
+  assert.equal(customersResponse.statusCode, 200);
+  assert.equal(customersResponse.json().customers[0].orgId, "org_internal");
+  assert.equal(conversationsResponse.statusCode, 200);
+  assert.equal(conversationsResponse.json().conversations[0].orgId, "org_internal");
+  assert.equal(messagesResponse.statusCode, 200);
+  assert.equal(messagesResponse.json().messages[0].orgId, "org_internal");
 });
