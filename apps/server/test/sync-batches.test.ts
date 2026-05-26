@@ -44,6 +44,37 @@ test("POST /collector/v1/sync-batches accepts a valid batch", async () => {
   assert.equal(store.listMessages("org_internal").length, 1);
 });
 
+test("POST /collector/v1/sync-batches rejects invalid batch shapes before writing", async () => {
+  const store = new InMemorySyncStore();
+  const app = await createServer({ store, deviceTokens: ["device-token"] });
+  const invalidPayloads = [
+    { sellerAccount: { externalAccountId: "seller-1" }, device: { deviceId: "device-1" } },
+    { orgId: "org_internal", sellerAccount: {}, device: { deviceId: "device-1" } },
+    { orgId: "org_internal", sellerAccount: { externalAccountId: "seller-1" }, device: {} },
+    {
+      orgId: "org_internal",
+      sellerAccount: { externalAccountId: "seller-1" },
+      device: { deviceId: "device-1" },
+      conversations: [{ externalConversationId: "conv-1" }],
+      messages: [{ externalConversationId: "conv-1", direction: "sideways", content: "bad" }]
+    }
+  ];
+
+  for (const payload of invalidPayloads) {
+    const response = await app.inject({
+      method: "POST",
+      url: "/collector/v1/sync-batches",
+      headers: { authorization: "Bearer device-token" },
+      payload
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.deepEqual(response.json(), { ok: false, error: "invalid_sync_batch" });
+  }
+
+  assert.equal(store.listMessages("org_internal").length, 0);
+});
+
 test("POST /collector/v1/sync-batches returns idempotent counts for duplicate messages", async () => {
   const store = new InMemorySyncStore();
   const app = await createServer({ store, deviceTokens: ["device-token"] });

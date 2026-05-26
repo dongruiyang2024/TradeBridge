@@ -1,0 +1,166 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { InMemorySyncStore } from "@wangwang/database";
+import { createServer } from "../src/server.js";
+
+const customerSummaryPath =
+  "/internal/v1/customers/customer-1/ai-summary?orgId=org_internal&sellerAccountExternalId=seller-1";
+const replySuggestionPath =
+  "/internal/v1/conversations/conv-1/reply-suggestions?orgId=org_internal&sellerAccountExternalId=seller-1";
+
+async function createSeededApp(aiProvider = createFakeAiProvider(), aiJobQueue?: unknown) {
+  const app = await createServer({
+    store: new InMemorySyncStore(),
+    deviceTokens: ["device-token"],
+    internalTokens: ["internal-token"],
+    aiProvider,
+    aiJobQueue
+  });
+
+  await app.inject({
+    method: "POST",
+    url: "/collector/v1/sync-batches",
+    headers: { authorization: "Bearer device-token" },
+    payload: {
+      orgId: "org_internal",
+      sellerAccount: { externalAccountId: "seller-1", displayName: "Seller One" },
+      device: { deviceId: "device-1" },
+      customers: [{ externalCustomerId: "customer-1", loginId: "buyer_login", displayName: "Buyer One" }],
+      conversations: [{ externalConversationId: "conv-1", externalCustomerId: "customer-1" }],
+      messages: [
+        {
+          externalConversationId: "conv-1",
+          externalMessageId: "msg-1",
+          direction: "received",
+          messageType: "text",
+          content: "Can you quote 500 units?",
+          sentAt: "2026-05-25T09:00:00.000Z"
+        },
+        {
+          externalConversationId: "conv-1",
+          externalMessageId: "msg-2",
+          direction: "sent",
+          messageType: "text",
+          content: "Sure, I will send it today.",
+          sentAt: "2026-05-25T09:05:00.000Z"
+        }
+      ]
+    }
+  });
+
+  return app;
+}
+
+test("POST and GET customer AI summary use provider output and persist latest result", async () => {
+  const providerInputs: Record<string, unknown> = {};
+  const queuedJobs: string[] = [];
+  const app = await createSeededApp(createFakeAiProvider(providerInputs), createRecordingQueue(queuedJobs));
+
+  const createResponse = await app.inject({
+    method: "POST",
+    url: customerSummaryPath,
+    headers: { authorization: "Bearer internal-token" }
+  });
+  const getResponse = await app.inject({
+    method: "GET",
+    url: customerSummaryPath,
+    headers: { authorization: "Bearer internal-token" }
+  });
+
+  assert.equal(createResponse.statusCode, 200);
+  assert.equal(createResponse.json().ok, true);
+  assert.equal(createResponse.json().job.status, "completed");
+  assert.equal(createResponse.json().job.id, "test-job-1");
+  assert.equal(createResponse.json().summary.promptVersion, "fake-ai-v1");
+  assert.equal(createResponse.json().summary.summary, "Buyer wants a quote for 500 units.");
+  assert.equal(createResponse.json().summary.intentLevel, "high");
+  assert.equal(createResponse.json().summary.nextAction, "Send revised quotation");
+  assert.equal((providerInputs.customerSummary as { messages: unknown[] }).messages.length, 2);
+  assert.deepEqual(queuedJobs, ["customer-summary"]);
+  assert.equal(getResponse.statusCode, 200);
+  assert.deepEqual(getResponse.json().summary, createResponse.json().summary);
+});
+
+test("POST and GET conversation reply suggestions use provider output and persist drafts", async () => {
+  const providerInputs: Record<string, unknown> = {};
+  const queuedJobs: string[] = [];
+  const app = await createSeededApp(createFakeAiProvider(providerInputs), createRecordingQueue(queuedJobs));
+
+  const createResponse = await app.inject({
+    method: "POST",
+    url: replySuggestionPath,
+    headers: { authorization: "Bearer internal-token" },
+    payload: { tone: "concise" }
+  });
+  const getResponse = await app.inject({
+    method: "GET",
+    url: replySuggestionPath,
+    headers: { authorization: "Bearer internal-token" }
+  });
+
+  assert.equal(createResponse.statusCode, 200);
+  assert.equal(createResponse.json().ok, true);
+  assert.equal(createResponse.json().job.status, "completed");
+  assert.equal(createResponse.json().job.id, "test-job-1");
+  assert.deepEqual(
+    createResponse.json().suggestions.map((item: { suggestion: string }) => item.suggestion),
+    ["Thanks, I will send the 500-unit quote today.", "I can include MOQ, lead time, and shipping terms."]
+  );
+  assert.equal(createResponse.json().suggestions[0].promptVersion, "fake-ai-v1");
+  assert.equal((providerInputs.replySuggestion as { tone: string; messages: unknown[] }).tone, "concise");
+  assert.equal((providerInputs.replySuggestion as { tone: string; messages: unknown[] }).messages.length, 2);
+  assert.deepEqual(queuedJobs, ["reply-suggestions"]);
+  assert.equal(getResponse.statusCode, 200);
+  assert.deepEqual(getResponse.json().suggestions, createResponse.json().suggestions);
+});
+
+test("AI routes reject collector tokens", async () => {
+  const app = await createSeededApp();
+  const response = await app.inject({
+    method: "POST",
+    url: customerSummaryPath,
+    headers: { authorization: "Bearer device-token" }
+  });
+
+  assert.equal(response.statusCode, 401);
+  assert.deepEqual(response.json(), { ok: false, error: "internal_unauthorized" });
+});
+
+function createFakeAiProvider(calls: Record<string, unknown> = {}) {
+  return {
+    async generateCustomerSummary(input: unknown) {
+      calls.customerSummary = input;
+      return {
+        promptVersion: "fake-ai-v1",
+        summary: "Buyer wants a quote for 500 units.",
+        intentLevel: "high",
+        nextAction: "Send revised quotation"
+      };
+    },
+    async generateReplySuggestion(input: unknown) {
+      calls.replySuggestion = input;
+      return {
+        promptVersion: "fake-ai-v1",
+        suggestions: [
+          "Thanks, I will send the 500-unit quote today.",
+          "I can include MOQ, lead time, and shipping terms."
+        ]
+      };
+    }
+  };
+}
+
+function createRecordingQueue(calls: string[]) {
+  let sequence = 0;
+  return {
+    async run(name: string, _payload: unknown, handler: () => Promise<unknown>) {
+      calls.push(name);
+      sequence += 1;
+      return {
+        jobId: `test-job-${sequence}`,
+        status: "completed",
+        result: await handler()
+      };
+    }
+  };
+}

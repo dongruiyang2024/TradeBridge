@@ -1,15 +1,106 @@
-import Fastify, { type FastifyInstance } from "fastify";
-import { InMemorySyncStore, type SyncBatch } from "@wangwang/database";
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
+import { loadWorkspaceEnv } from "@wangwang/env";
+import {
+  InMemorySyncStore,
+  PostgresSyncStore,
+  createNodePostgresClient,
+  runMigrations,
+  type AddCustomerTagInput,
+  type AssignCustomerInput,
+  type CollectorDevice,
+  type ConversationCustomerScope,
+  type CreateAiSummaryInput,
+  type CreateAuditLogInput,
+  type RegisteredCollectorDevice,
+  type RegisterCollectorDeviceInput,
+  type RevokeCollectorDeviceInput,
+  type CreateInternalUserInput,
+  type CreateCustomerNoteInput,
+  type CreateFollowUpTaskInput,
+  type CreateReplySuggestionInput,
+  type CustomerScope,
+  type InternalRole,
+  type InternalSession,
+  type InternalUser,
+  type IssueInternalSessionInput,
+  type StoredConversation,
+  type StoredAuditLog,
+  type StoredAiSummary,
+  type StoredCustomerAssignment,
+  type StoredCustomer,
+  type StoredCustomerNote,
+  type StoredCustomerTag,
+  type StoredFollowUpTask,
+  type StoredMessage,
+  type StoredReplySuggestion,
+  type SqlClient,
+  type SyncBatch,
+  type SyncBatchResult,
+  type UpdateFollowUpTaskInput
+} from "@wangwang/database";
+import {
+  createBullMqAiJobQueue,
+  createSyncAiJobQueue,
+  publicAiJob,
+  type AiJobQueue
+} from "./ai-queue.js";
+import { createDeterministicAiProvider, type AiProvider } from "./ai-service.js";
+import { hashPassword } from "./auth.js";
 
 export interface CreateServerOptions {
-  store?: InMemorySyncStore;
+  store?: SyncStore;
   deviceTokens?: string[];
+  internalTokens?: string[];
+  aiProvider?: AiProvider;
+  aiJobQueue?: AiJobQueue;
   logger?: boolean;
+}
+
+export interface CreateServerFromEnvOptions {
+  env?: Record<string, string | undefined>;
+  deviceTokens?: string[];
+  internalTokens?: string[];
+  logger?: boolean;
+  sqlClientFactory?: (databaseUrl: string) => Promise<SqlClient> | SqlClient;
+  aiJobQueueFactory?: (env: Record<string, string | undefined>) => Promise<AiJobQueue | undefined> | AiJobQueue | undefined;
+}
+
+export interface SyncStore {
+  acceptSyncBatch(batch: SyncBatch): Promise<SyncBatchResult>;
+  listCustomers(orgId: string): Promise<StoredCustomer[]> | StoredCustomer[];
+  listConversations(orgId: string): Promise<StoredConversation[]> | StoredConversation[];
+  listMessages(orgId: string, externalConversationId?: string): Promise<StoredMessage[]> | StoredMessage[];
+  createCustomerNote(input: CreateCustomerNoteInput): Promise<StoredCustomerNote> | StoredCustomerNote;
+  listCustomerNotes(scope: CustomerScope): Promise<StoredCustomerNote[]> | StoredCustomerNote[];
+  addCustomerTag(input: AddCustomerTagInput): Promise<StoredCustomerTag> | StoredCustomerTag;
+  listCustomerTags(scope: CustomerScope): Promise<StoredCustomerTag[]> | StoredCustomerTag[];
+  createFollowUpTask(input: CreateFollowUpTaskInput): Promise<StoredFollowUpTask> | StoredFollowUpTask;
+  listFollowUpTasks(scope: CustomerScope): Promise<StoredFollowUpTask[]> | StoredFollowUpTask[];
+  assignCustomer(input: AssignCustomerInput): Promise<StoredCustomerAssignment> | StoredCustomerAssignment;
+  getCustomerAssignment(scope: CustomerScope): Promise<StoredCustomerAssignment | null> | StoredCustomerAssignment | null;
+  updateFollowUpTask(input: UpdateFollowUpTaskInput): Promise<StoredFollowUpTask> | StoredFollowUpTask;
+  appendAuditLog(input: CreateAuditLogInput): Promise<StoredAuditLog> | StoredAuditLog;
+  createAiSummary(input: CreateAiSummaryInput): Promise<StoredAiSummary> | StoredAiSummary;
+  getLatestAiSummary(scope: CustomerScope): Promise<StoredAiSummary | null> | StoredAiSummary | null;
+  createReplySuggestion(input: CreateReplySuggestionInput): Promise<StoredReplySuggestion> | StoredReplySuggestion;
+  listReplySuggestions(scope: ConversationCustomerScope): Promise<StoredReplySuggestion[]> | StoredReplySuggestion[];
+  createInternalUser(input: CreateInternalUserInput): Promise<InternalUser> | InternalUser;
+  issueInternalSession(input: IssueInternalSessionInput): Promise<InternalSession> | InternalSession;
+  getInternalSession(token: string): Promise<InternalSession | null> | InternalSession | null;
+  registerCollectorDevice(input: RegisterCollectorDeviceInput): Promise<RegisteredCollectorDevice> | RegisteredCollectorDevice;
+  listCollectorDevices(orgId: string): Promise<CollectorDevice[]> | CollectorDevice[];
+  revokeCollectorDevice(input: RevokeCollectorDeviceInput): Promise<CollectorDevice> | CollectorDevice;
+  authenticateCollectorDevice(token: string): Promise<CollectorDevice | null> | CollectorDevice | null;
 }
 
 export async function createServer(options: CreateServerOptions = {}): Promise<FastifyInstance> {
   const store = options.store || new InMemorySyncStore();
   const deviceTokens = new Set(options.deviceTokens || envDeviceTokens());
+  const internalTokens = new Set(options.internalTokens || envInternalTokens());
+  const aiProvider = options.aiProvider || createDeterministicAiProvider();
+  const aiJobQueue = options.aiJobQueue || createSyncAiJobQueue();
+  const internalAccessRoles: InternalRole[] = ["admin", "supervisor", "sales"];
+  const adminRoles: InternalRole[] = ["admin"];
   const app = Fastify({
     logger: options.logger ?? false
   });
@@ -21,31 +112,860 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   }));
 
   app.post("/collector/v1/sync-batches", async (request, reply) => {
-    const auth = request.headers.authorization || "";
-    const token = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
-    if (!token || !deviceTokens.has(token)) {
+    if (!(await isCollectorAuthorized(request.headers.authorization || "", store, deviceTokens))) {
       return reply.code(401).send({ ok: false, error: "unauthorized" });
     }
 
-    const result = await store.acceptSyncBatch(request.body as SyncBatch);
+    const batch = request.body as SyncBatch;
+    if (!isValidSyncBatch(batch)) {
+      return reply.code(400).send({ ok: false, error: "invalid_sync_batch" });
+    }
+
+    const result = await store.acceptSyncBatch(batch);
     return {
       ok: true,
       ...result
     };
   });
 
+  app.post("/internal/v1/auth/login", async (request, reply) => {
+    const orgId = bodyStringField(request.body, "orgId");
+    const email = bodyStringField(request.body, "email");
+    const password = bodyStringField(request.body, "password");
+    if (!orgId || !email || !password) {
+      return reply.code(400).send({ ok: false, error: "invalid_login_request" });
+    }
+
+    try {
+      const session = await store.issueInternalSession({
+        orgId,
+        email,
+        passwordHash: hashPassword(password)
+      });
+      return {
+        ok: true,
+        token: session.token,
+        expiresAt: session.expiresAt,
+        user: publicUserFromSession(session)
+      };
+    } catch (error) {
+      if (isInvalidCredentialsError(error)) {
+        return reply.code(401).send({ ok: false, error: "invalid_credentials" });
+      }
+      throw error;
+    }
+  });
+
+  app.get("/internal/v1/me", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalTokens);
+    if (!auth) return;
+
+    return {
+      ok: true,
+      user: auth.user
+    };
+  });
+
+  app.post("/internal/v1/collector-devices", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalTokens, adminRoles);
+    if (!auth) return;
+
+    const orgId = bodyStringField(request.body, "orgId");
+    if (!orgId) {
+      return reply.code(400).send({ ok: false, error: "org_id_required" });
+    }
+
+    const registered = await store.registerCollectorDevice({
+      orgId,
+      sellerAccountExternalId: bodyStringField(request.body, "sellerAccountExternalId") || undefined,
+      deviceName: bodyStringField(request.body, "deviceName") || undefined
+    });
+    await store.appendAuditLog({
+      orgId,
+      actorUserId: auth.user.id,
+      action: "collector_device.registered",
+      targetType: "collector_device",
+      targetId: registered.id,
+      metadata: {
+        sellerAccountExternalId: registered.sellerAccountExternalId,
+        deviceName: registered.deviceName
+      }
+    });
+
+    return {
+      ok: true,
+      token: registered.token,
+      device: publicCollectorDevice(registered)
+    };
+  });
+
+  app.get("/internal/v1/collector-devices", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalTokens, adminRoles);
+    if (!auth) return;
+
+    const orgId = queryOrgId(request.query);
+    if (!orgId) {
+      return reply.code(400).send({ ok: false, error: "org_id_required" });
+    }
+
+    return {
+      ok: true,
+      devices: (await store.listCollectorDevices(orgId)).map(publicCollectorDevice)
+    };
+  });
+
+  app.post("/internal/v1/collector-devices/:deviceId/revoke", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalTokens, adminRoles);
+    if (!auth) return;
+
+    const orgId = bodyStringField(request.body, "orgId");
+    const deviceId = queryStringField(request.params, "deviceId");
+    if (!orgId || !deviceId) {
+      return reply.code(400).send({ ok: false, error: "collector_device_scope_required" });
+    }
+
+    try {
+      const device = await store.revokeCollectorDevice({ orgId, deviceId });
+      await store.appendAuditLog({
+        orgId,
+        actorUserId: auth.user.id,
+        action: "collector_device.revoked",
+        targetType: "collector_device",
+        targetId: device.id,
+        metadata: {
+          sellerAccountExternalId: device.sellerAccountExternalId,
+          deviceName: device.deviceName
+        }
+      });
+      return {
+        ok: true,
+        device: publicCollectorDevice(device)
+      };
+    } catch (error) {
+      if (isNotFoundError(error, "collector_device")) {
+        return reply.code(404).send({ ok: false, error: "collector_device_not_found" });
+      }
+      throw error;
+    }
+  });
+
+  app.get("/internal/v1/customers", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    if (!auth) return;
+
+    const orgId = queryOrgId(request.query);
+    if (!orgId) {
+      return reply.code(400).send({ ok: false, error: "org_id_required" });
+    }
+
+    return {
+      ok: true,
+      customers: await store.listCustomers(orgId)
+    };
+  });
+
+  app.get("/internal/v1/conversations", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    if (!auth) return;
+
+    const orgId = queryOrgId(request.query);
+    if (!orgId) {
+      return reply.code(400).send({ ok: false, error: "org_id_required" });
+    }
+
+    return {
+      ok: true,
+      conversations: await store.listConversations(orgId)
+    };
+  });
+
+  app.get("/internal/v1/conversations/:externalConversationId/messages", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    if (!auth) return;
+
+    const orgId = queryOrgId(request.query);
+    if (!orgId) {
+      return reply.code(400).send({ ok: false, error: "org_id_required" });
+    }
+
+    const params = request.params as { externalConversationId?: string };
+    return {
+      ok: true,
+      messages: await store.listMessages(orgId, params.externalConversationId)
+    };
+  });
+
+  app.post("/internal/v1/customers/:externalCustomerId/ai-summary", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    if (!auth) return;
+
+    const scope = queryCustomerScope(request.query, request.params);
+    if (!scope) {
+      return reply.code(400).send({ ok: false, error: "customer_scope_required" });
+    }
+
+    const bundle = await loadCustomerMessageBundle(store, scope);
+    if (!bundle.customer) {
+      return reply.code(404).send({ ok: false, error: "customer_not_found" });
+    }
+
+    const job = await aiJobQueue.run("customer-summary", { scope }, async () => {
+      const generated = await aiProvider.generateCustomerSummary({
+        scope,
+        customer: bundle.customer,
+        conversations: bundle.conversations,
+        messages: bundle.messages
+      });
+      return store.createAiSummary({
+        ...scope,
+        promptVersion: generated.promptVersion,
+        summary: generated.summary,
+        intentLevel: generated.intentLevel,
+        nextAction: generated.nextAction,
+        sourceMessageStartAt: minMessageTime(bundle.messages),
+        sourceMessageEndAt: maxMessageTime(bundle.messages)
+      });
+    });
+
+    return {
+      ok: true,
+      job: publicAiJob(job),
+      summary: job.result || null
+    };
+  });
+
+  app.get("/internal/v1/customers/:externalCustomerId/ai-summary", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    if (!auth) return;
+
+    const scope = queryCustomerScope(request.query, request.params);
+    if (!scope) {
+      return reply.code(400).send({ ok: false, error: "customer_scope_required" });
+    }
+
+    return {
+      ok: true,
+      summary: await store.getLatestAiSummary(scope)
+    };
+  });
+
+  app.post("/internal/v1/conversations/:externalConversationId/reply-suggestions", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    if (!auth) return;
+
+    const conversationScope = await resolveConversationScope(store, request.query, request.params);
+    if (!conversationScope) {
+      return reply.code(400).send({ ok: false, error: "conversation_scope_required" });
+    }
+
+    const { scope, conversation, customer } = conversationScope;
+    const messages = await store.listMessages(scope.orgId, scope.externalConversationId);
+    const job = await aiJobQueue.run("reply-suggestions", { scope }, async () => {
+      const generated = await aiProvider.generateReplySuggestion({
+        scope,
+        customer,
+        conversation,
+        messages,
+        tone: bodyStringField(request.body, "tone") || undefined
+      });
+      const suggestions = [];
+      for (const suggestion of generated.suggestions) {
+        suggestions.push(
+          await store.createReplySuggestion({
+            ...scope,
+            promptVersion: generated.promptVersion,
+            suggestion,
+            createdByUserId: auth.bootstrap ? undefined : auth.user.id
+          })
+        );
+      }
+      return suggestions;
+    });
+
+    return {
+      ok: true,
+      job: publicAiJob(job),
+      suggestions: job.result || []
+    };
+  });
+
+  app.get("/internal/v1/conversations/:externalConversationId/reply-suggestions", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    if (!auth) return;
+
+    const conversationScope = await resolveConversationScope(store, request.query, request.params);
+    if (!conversationScope) {
+      return reply.code(400).send({ ok: false, error: "conversation_scope_required" });
+    }
+
+    return {
+      ok: true,
+      suggestions: await store.listReplySuggestions(conversationScope.scope)
+    };
+  });
+
+  app.post("/internal/v1/customers/:externalCustomerId/notes", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    if (!auth) return;
+
+    const scope = queryCustomerScope(request.query, request.params);
+    if (!scope) {
+      return reply.code(400).send({ ok: false, error: "customer_scope_required" });
+    }
+
+    const body = bodyStringField(request.body, "body");
+    if (!body) {
+      return reply.code(400).send({ ok: false, error: "note_body_required" });
+    }
+
+    return {
+      ok: true,
+      note: await store.createCustomerNote({ ...scope, body })
+    };
+  });
+
+  app.get("/internal/v1/customers/:externalCustomerId/notes", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    if (!auth) return;
+
+    const scope = queryCustomerScope(request.query, request.params);
+    if (!scope) {
+      return reply.code(400).send({ ok: false, error: "customer_scope_required" });
+    }
+
+    return {
+      ok: true,
+      notes: await store.listCustomerNotes(scope)
+    };
+  });
+
+  app.post("/internal/v1/customers/:externalCustomerId/tags", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    if (!auth) return;
+
+    const scope = queryCustomerScope(request.query, request.params);
+    if (!scope) {
+      return reply.code(400).send({ ok: false, error: "customer_scope_required" });
+    }
+
+    const tag = bodyStringField(request.body, "tag");
+    if (!tag) {
+      return reply.code(400).send({ ok: false, error: "tag_required" });
+    }
+
+    return {
+      ok: true,
+      tag: await store.addCustomerTag({ ...scope, tag })
+    };
+  });
+
+  app.get("/internal/v1/customers/:externalCustomerId/tags", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    if (!auth) return;
+
+    const scope = queryCustomerScope(request.query, request.params);
+    if (!scope) {
+      return reply.code(400).send({ ok: false, error: "customer_scope_required" });
+    }
+
+    return {
+      ok: true,
+      tags: await store.listCustomerTags(scope)
+    };
+  });
+
+  app.post("/internal/v1/customers/:externalCustomerId/assignment", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    if (!auth) return;
+
+    const scope = queryCustomerScope(request.query, request.params);
+    if (!scope) {
+      return reply.code(400).send({ ok: false, error: "customer_scope_required" });
+    }
+
+    const assignedToUserId = bodyStringField(request.body, "assignedToUserId");
+    if (!assignedToUserId) {
+      return reply.code(400).send({ ok: false, error: "assigned_to_user_required" });
+    }
+
+    const assignment = await store.assignCustomer({
+      ...scope,
+      assignedToUserId,
+      assignedByUserId: auth.user.id
+    });
+    await store.appendAuditLog({
+      orgId: scope.orgId,
+      actorUserId: auth.user.id,
+      action: "customer.assignment.updated",
+      targetType: "customer",
+      targetId: assignment.id,
+      metadata: {
+        sellerAccountExternalId: scope.sellerAccountExternalId,
+        externalCustomerId: scope.externalCustomerId,
+        assignedToUserId
+      }
+    });
+
+    return {
+      ok: true,
+      assignment
+    };
+  });
+
+  app.get("/internal/v1/customers/:externalCustomerId/assignment", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    if (!auth) return;
+
+    const scope = queryCustomerScope(request.query, request.params);
+    if (!scope) {
+      return reply.code(400).send({ ok: false, error: "customer_scope_required" });
+    }
+
+    return {
+      ok: true,
+      assignment: await store.getCustomerAssignment(scope)
+    };
+  });
+
+  app.post("/internal/v1/customers/:externalCustomerId/follow-up-tasks", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    if (!auth) return;
+
+    const scope = queryCustomerScope(request.query, request.params);
+    if (!scope) {
+      return reply.code(400).send({ ok: false, error: "customer_scope_required" });
+    }
+
+    const title = bodyStringField(request.body, "title");
+    if (!title) {
+      return reply.code(400).send({ ok: false, error: "follow_up_title_required" });
+    }
+
+    return {
+      ok: true,
+      task: await store.createFollowUpTask({
+        ...scope,
+        title,
+        assignedToUserId: bodyStringField(request.body, "assignedToUserId") || undefined,
+        dueAt: bodyStringField(request.body, "dueAt") || undefined,
+        status: bodyStringField(request.body, "status") || undefined
+      })
+    };
+  });
+
+  app.get("/internal/v1/customers/:externalCustomerId/follow-up-tasks", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    if (!auth) return;
+
+    const scope = queryCustomerScope(request.query, request.params);
+    if (!scope) {
+      return reply.code(400).send({ ok: false, error: "customer_scope_required" });
+    }
+
+    return {
+      ok: true,
+      tasks: await store.listFollowUpTasks(scope)
+    };
+  });
+
+  app.patch("/internal/v1/follow-up-tasks/:taskId", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    if (!auth) return;
+
+    const taskId = queryStringField(request.params, "taskId");
+    const orgId = bodyStringField(request.body, "orgId") || queryOrgId(request.query);
+    if (!orgId) {
+      return reply.code(400).send({ ok: false, error: "org_id_required" });
+    }
+    if (!taskId) {
+      return reply.code(400).send({ ok: false, error: "follow_up_task_required" });
+    }
+
+    const update = compactRecord({
+      status: bodyStringField(request.body, "status"),
+      title: bodyStringField(request.body, "title"),
+      assignedToUserId: bodyStringField(request.body, "assignedToUserId"),
+      dueAt: bodyStringField(request.body, "dueAt")
+    });
+    if (Object.keys(update).length === 0) {
+      return reply.code(400).send({ ok: false, error: "follow_up_update_required" });
+    }
+
+    try {
+      const task = await store.updateFollowUpTask({
+        orgId,
+        taskId,
+        ...update
+      });
+      await store.appendAuditLog({
+        orgId,
+        actorUserId: auth.user.id,
+        action: "follow_up_task.updated",
+        targetType: "follow_up_task",
+        targetId: task.id,
+        metadata: update
+      });
+
+      return {
+        ok: true,
+        task
+      };
+    } catch (error) {
+      if (isNotFoundError(error, "follow_up_task")) {
+        return reply.code(404).send({ ok: false, error: "follow_up_task_not_found" });
+      }
+      throw error;
+    }
+  });
+
   return app;
 }
 
-function envDeviceTokens(): string[] {
-  return (process.env.WANGWANG_DEVICE_TOKENS || "")
+export async function createServerFromEnv(options: CreateServerFromEnvOptions = {}): Promise<FastifyInstance> {
+  const env = options.env || process.env;
+  const databaseUrl = env.DATABASE_URL;
+  const store = databaseUrl
+    ? await createPostgresStore(databaseUrl, options.sqlClientFactory)
+    : new InMemorySyncStore();
+  const aiJobQueue = options.aiJobQueueFactory
+    ? await options.aiJobQueueFactory(env)
+    : await createAiJobQueueFromEnv(env);
+
+  return createServer({
+    store,
+    deviceTokens: options.deviceTokens || envDeviceTokens(env),
+    internalTokens: options.internalTokens || envInternalTokens(env),
+    aiJobQueue,
+    logger: options.logger
+  });
+}
+
+async function createAiJobQueueFromEnv(env: Record<string, string | undefined>): Promise<AiJobQueue | undefined> {
+  const redisUrl = env.REDIS_URL || env.WANGWANG_REDIS_URL;
+  if (!redisUrl) return undefined;
+  return createBullMqAiJobQueue({
+    redisUrl,
+    waitForCompletion: env.WANGWANG_AI_QUEUE_WAIT_FOR_COMPLETION === "true"
+  });
+}
+
+async function createPostgresStore(
+  databaseUrl: string,
+  sqlClientFactory?: (databaseUrl: string) => Promise<SqlClient> | SqlClient
+): Promise<PostgresSyncStore> {
+  const client = await (sqlClientFactory ? sqlClientFactory(databaseUrl) : createNodePostgresClient(databaseUrl));
+  await runMigrations(client);
+  return new PostgresSyncStore(client);
+}
+
+function envDeviceTokens(env: Record<string, string | undefined> = process.env): string[] {
+  return (env.WANGWANG_DEVICE_TOKENS || "")
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
 }
 
+function envInternalTokens(env: Record<string, string | undefined> = process.env): string[] {
+  return (env.WANGWANG_INTERNAL_API_TOKENS || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function isBearerAuthorized(authorization: string, tokens: Set<string>): boolean {
+  const token = bearerToken(authorization);
+  return Boolean(token && tokens.has(token));
+}
+
+async function isCollectorAuthorized(authorization: string, store: SyncStore, fallbackTokens: Set<string>): Promise<boolean> {
+  if (isBearerAuthorized(authorization, fallbackTokens)) return true;
+
+  const token = bearerToken(authorization);
+  if (!token) return false;
+
+  return Boolean(await store.authenticateCollectorDevice(token));
+}
+
+interface PublicInternalUser {
+  id: string;
+  orgId: string;
+  email: string;
+  displayName: string;
+  roles: InternalRole[];
+}
+
+interface InternalAuthContext {
+  user: PublicInternalUser;
+  roles: InternalRole[];
+  bootstrap: boolean;
+}
+
+async function requireInternalAuth(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  store: SyncStore,
+  bootstrapTokens: Set<string>,
+  allowedRoles?: InternalRole[]
+): Promise<InternalAuthContext | null> {
+  const token = bearerToken(request.headers.authorization || "");
+  if (!token) {
+    reply.code(401).send({ ok: false, error: "internal_unauthorized" });
+    return null;
+  }
+
+  const auth = bootstrapTokens.has(token) ? bootstrapAuthContext() : await sessionAuthContext(store, token);
+  if (!auth) {
+    reply.code(401).send({ ok: false, error: "internal_unauthorized" });
+    return null;
+  }
+
+  if (allowedRoles && !requireRole(auth, allowedRoles)) {
+    reply.code(403).send({ ok: false, error: "forbidden" });
+    return null;
+  }
+
+  return auth;
+}
+
+function requireRole(auth: InternalAuthContext, allowedRoles: InternalRole[]): boolean {
+  return allowedRoles.some((role) => auth.roles.includes(role));
+}
+
+async function sessionAuthContext(store: SyncStore, token: string): Promise<InternalAuthContext | null> {
+  const session = await store.getInternalSession(token);
+  if (!session) return null;
+
+  return {
+    user: publicUserFromSession(session),
+    roles: session.roles,
+    bootstrap: false
+  };
+}
+
+function bootstrapAuthContext(): InternalAuthContext {
+  const roles: InternalRole[] = ["admin"];
+  return {
+    user: {
+      id: "bootstrap",
+      orgId: "bootstrap",
+      email: "bootstrap@local",
+      displayName: "Bootstrap Admin",
+      roles
+    },
+    roles,
+    bootstrap: true
+  };
+}
+
+function publicUserFromSession(session: InternalSession): PublicInternalUser {
+  return {
+    id: session.userId,
+    orgId: session.orgId,
+    email: session.email,
+    displayName: session.displayName,
+    roles: session.roles
+  };
+}
+
+function publicCollectorDevice(device: CollectorDevice | RegisteredCollectorDevice): CollectorDevice {
+  return {
+    id: device.id,
+    orgId: device.orgId,
+    sellerAccountExternalId: device.sellerAccountExternalId,
+    deviceName: device.deviceName,
+    status: device.status,
+    lastHeartbeatAt: device.lastHeartbeatAt,
+    createdAt: device.createdAt,
+    updatedAt: device.updatedAt
+  };
+}
+
+async function loadCustomerMessageBundle(store: SyncStore, scope: CustomerScope): Promise<{
+  customer: StoredCustomer | null;
+  conversations: StoredConversation[];
+  messages: StoredMessage[];
+}> {
+  const [customers, conversations] = await Promise.all([
+    store.listCustomers(scope.orgId),
+    store.listConversations(scope.orgId)
+  ]);
+  const customer =
+    customers.find(
+      (item) =>
+        item.sellerAccountExternalId === scope.sellerAccountExternalId &&
+        item.externalCustomerId === scope.externalCustomerId
+    ) || null;
+  const scopedConversations = conversations.filter(
+    (item) =>
+      item.sellerAccountExternalId === scope.sellerAccountExternalId &&
+      item.externalCustomerId === scope.externalCustomerId
+  );
+  const messageGroups = await Promise.all(
+    scopedConversations.map((conversation) => store.listMessages(scope.orgId, conversation.externalConversationId))
+  );
+  return {
+    customer,
+    conversations: scopedConversations,
+    messages: messageGroups.flat().sort((left, right) => compareIso(left.sentAt, right.sentAt))
+  };
+}
+
+async function resolveConversationScope(
+  store: SyncStore,
+  query: unknown,
+  params: unknown
+): Promise<{
+  scope: ConversationCustomerScope;
+  conversation: StoredConversation;
+  customer: StoredCustomer | null;
+} | null> {
+  const orgId = queryOrgId(query);
+  const sellerAccountExternalId = queryStringField(query, "sellerAccountExternalId");
+  const externalConversationId = queryStringField(params, "externalConversationId");
+  if (!orgId || !sellerAccountExternalId || !externalConversationId) return null;
+
+  const conversations = await store.listConversations(orgId);
+  const conversation = conversations.find(
+    (item) =>
+      item.sellerAccountExternalId === sellerAccountExternalId &&
+      item.externalConversationId === externalConversationId &&
+      item.externalCustomerId
+  );
+  if (!conversation?.externalCustomerId) return null;
+
+  const customers = await store.listCustomers(orgId);
+  const customer =
+    customers.find(
+      (item) =>
+        item.sellerAccountExternalId === sellerAccountExternalId &&
+        item.externalCustomerId === conversation.externalCustomerId
+    ) || null;
+
+  return {
+    scope: {
+      orgId,
+      sellerAccountExternalId,
+      externalCustomerId: conversation.externalCustomerId,
+      externalConversationId
+    },
+    conversation,
+    customer
+  };
+}
+
+function minMessageTime(messages: StoredMessage[]): string | undefined {
+  return messages.reduce<string | undefined>((current, message) => minIso(current, message.sentAt), undefined);
+}
+
+function maxMessageTime(messages: StoredMessage[]): string | undefined {
+  return messages.reduce<string | undefined>((current, message) => maxIso(current, message.sentAt), undefined);
+}
+
+function compareIso(left?: string, right?: string): number {
+  return isoTimestamp(left) - isoTimestamp(right);
+}
+
+function minIso(current?: string, candidate?: string): string | undefined {
+  if (!candidate) return current;
+  if (!current) return candidate;
+  return Date.parse(candidate) < Date.parse(current) ? candidate : current;
+}
+
+function maxIso(current?: string, candidate?: string): string | undefined {
+  if (!candidate) return current;
+  if (!current) return candidate;
+  return Date.parse(candidate) > Date.parse(current) ? candidate : current;
+}
+
+function isoTimestamp(value?: string): number {
+  return value ? Date.parse(value) : 0;
+}
+
+function compactRecord<T extends Record<string, string | null | undefined>>(value: T): Partial<Record<keyof T, string>> {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item != null)) as Partial<Record<keyof T, string>>;
+}
+
+function bearerToken(authorization: string): string {
+  return authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
+}
+
+function isInvalidCredentialsError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message === "invalid_credentials" || message === "internal_session_not_found";
+}
+
+function isNotFoundError(error: unknown, source: string): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message === `${source}_not_found`;
+}
+
+function queryOrgId(query: unknown): string | null {
+  const value = (query as { orgId?: unknown }).orgId;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function queryCustomerScope(query: unknown, params: unknown): CustomerScope | null {
+  const orgId = queryOrgId(query);
+  const sellerAccountExternalId = queryStringField(query, "sellerAccountExternalId");
+  const externalCustomerId = queryStringField(params, "externalCustomerId");
+  if (!orgId || !sellerAccountExternalId || !externalCustomerId) return null;
+
+  return {
+    orgId,
+    sellerAccountExternalId,
+    externalCustomerId
+  };
+}
+
+function queryStringField(source: unknown, field: string): string | null {
+  const value = (source as Record<string, unknown>)[field];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function bodyStringField(source: unknown, field: string): string | null {
+  const value = (source as Record<string, unknown> | null | undefined)?.[field];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function isValidSyncBatch(value: unknown): value is SyncBatch {
+  const batch = value as Partial<SyncBatch> | null | undefined;
+  if (!batch || typeof batch !== "object") return false;
+  if (!isNonEmptyString(batch.orgId)) return false;
+  if (!batch.sellerAccount || !isNonEmptyString(batch.sellerAccount.externalAccountId)) return false;
+  if (!batch.device || !isNonEmptyString(batch.device.deviceId)) return false;
+
+  if (batch.customers && !batch.customers.every((customer) => isNonEmptyString(customer.externalCustomerId))) {
+    return false;
+  }
+  if (
+    batch.conversations &&
+    !batch.conversations.every((conversation) => isNonEmptyString(conversation.externalConversationId))
+  ) {
+    return false;
+  }
+  if (
+    batch.messages &&
+    !batch.messages.every(
+      (message) => isNonEmptyString(message.externalConversationId) && isValidDirection(message.direction)
+    )
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isValidDirection(value: unknown): boolean {
+  return value === "received" || value === "sent" || value === "unknown";
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const app = await createServer({ logger: true });
+  loadWorkspaceEnv();
+  const app = await createServerFromEnv({ env: process.env, logger: true });
   const host = process.env.WANGWANG_SERVER_HOST || "127.0.0.1";
   const port = Number(process.env.WANGWANG_SERVER_PORT || 5032);
   await app.listen({ host, port });

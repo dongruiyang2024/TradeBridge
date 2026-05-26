@@ -1,14 +1,39 @@
 import crypto from "node:crypto";
 import type {
+  AddCustomerTagInput,
+  AssignCustomerInput,
+  CollectorDevice,
+  ConversationCustomerScope,
+  CreateAiSummaryInput,
+  CreateAuditLogInput,
+  CreateCustomerNoteInput,
+  CreateFollowUpTaskInput,
+  CreateInternalUserInput,
+  CreateReplySuggestionInput,
+  CustomerScope,
+  InternalSession,
+  InternalUser,
+  IssueInternalSessionInput,
+  RegisteredCollectorDevice,
+  RegisterCollectorDeviceInput,
+  RevokeCollectorDeviceInput,
+  StoredAuditLog,
+  StoredAiSummary,
+  StoredCustomerAssignment,
+  StoredCustomerNote,
   StoredConversation,
   StoredCustomer,
+  StoredCustomerTag,
+  StoredFollowUpTask,
   StoredMessage,
+  StoredReplySuggestion,
   StoredSellerAccount,
   SyncBatch,
   SyncBatchResult,
   SyncConversationInput,
   SyncCustomerInput,
-  SyncMessageInput
+  SyncMessageInput,
+  UpdateFollowUpTaskInput
 } from "./sync-types.js";
 
 export class InMemorySyncStore {
@@ -16,6 +41,21 @@ export class InMemorySyncStore {
   private readonly customers = new Map<string, StoredCustomer>();
   private readonly conversations = new Map<string, StoredConversation>();
   private readonly messages = new Map<string, StoredMessage>();
+  private readonly customerNotes = new Map<string, StoredCustomerNote>();
+  private readonly customerTags = new Map<string, StoredCustomerTag>();
+  private readonly followUpTasks = new Map<string, StoredFollowUpTask>();
+  private readonly customerAssignments = new Map<string, StoredCustomerAssignment>();
+  private readonly aiSummaries = new Map<string, StoredAiSummary>();
+  private readonly replySuggestions = new Map<string, StoredReplySuggestion>();
+  private readonly auditLogs: StoredAuditLog[] = [];
+  private readonly internalUsers = new Map<string, InternalUser & { passwordHash: string }>();
+  private readonly internalSessions = new Map<string, InternalSession>();
+  private readonly collectorDevices = new Map<string, CollectorDevice & { tokenHash: string }>();
+  private collaborationSequence = 0;
+  private internalUserSequence = 0;
+  private collectorDeviceSequence = 0;
+  private auditLogSequence = 0;
+  private aiSequence = 0;
 
   async acceptSyncBatch(batch: SyncBatch): Promise<SyncBatchResult> {
     const warnings: string[] = [];
@@ -97,8 +137,266 @@ export class InMemorySyncStore {
     return Array.from(this.conversations.values()).filter((item) => item.orgId === orgId);
   }
 
-  listMessages(orgId: string): StoredMessage[] {
-    return Array.from(this.messages.values()).filter((item) => item.orgId === orgId);
+  listMessages(orgId: string, externalConversationId?: string): StoredMessage[] {
+    return Array.from(this.messages.values()).filter(
+      (item) => item.orgId === orgId && (!externalConversationId || item.externalConversationId === externalConversationId)
+    );
+  }
+
+  createCustomerNote(input: CreateCustomerNoteInput): StoredCustomerNote {
+    const now = new Date().toISOString();
+    const note: StoredCustomerNote = {
+      ...input,
+      id: this.nextCollaborationId("note"),
+      createdAt: now,
+      updatedAt: now
+    };
+    this.customerNotes.set(note.id, note);
+    return note;
+  }
+
+  listCustomerNotes(scope: CustomerScope): StoredCustomerNote[] {
+    return Array.from(this.customerNotes.values()).filter((item) => isSameCustomerScope(item, scope));
+  }
+
+  addCustomerTag(input: AddCustomerTagInput): StoredCustomerTag {
+    const existing = this.listCustomerTags(input).find((item) => item.tag === input.tag);
+    if (existing) return existing;
+
+    const tag: StoredCustomerTag = {
+      ...input,
+      id: this.nextCollaborationId("tag"),
+      createdAt: new Date().toISOString()
+    };
+    this.customerTags.set(tag.id, tag);
+    return tag;
+  }
+
+  listCustomerTags(scope: CustomerScope): StoredCustomerTag[] {
+    return Array.from(this.customerTags.values()).filter((item) => isSameCustomerScope(item, scope));
+  }
+
+  createFollowUpTask(input: CreateFollowUpTaskInput): StoredFollowUpTask {
+    const now = new Date().toISOString();
+    const task: StoredFollowUpTask = {
+      ...input,
+      id: this.nextCollaborationId("follow_up"),
+      status: input.status || "open",
+      createdAt: now,
+      updatedAt: now
+    };
+    this.followUpTasks.set(task.id, task);
+    return task;
+  }
+
+  listFollowUpTasks(scope: CustomerScope): StoredFollowUpTask[] {
+    return Array.from(this.followUpTasks.values()).filter((item) => isSameCustomerScope(item, scope));
+  }
+
+  async assignCustomer(input: AssignCustomerInput): Promise<StoredCustomerAssignment> {
+    const now = new Date().toISOString();
+    const key = customerKey(input.orgId, input.sellerAccountExternalId, input.externalCustomerId);
+    const existing = this.customerAssignments.get(key);
+    const assignment: StoredCustomerAssignment = {
+      ...input,
+      id: existing?.id || this.nextCollaborationId("assignment"),
+      assignedAt: existing?.assignedAt || now,
+      updatedAt: now
+    };
+    this.customerAssignments.set(key, assignment);
+    return assignment;
+  }
+
+  async getCustomerAssignment(scope: CustomerScope): Promise<StoredCustomerAssignment | null> {
+    return this.customerAssignments.get(customerKey(scope.orgId, scope.sellerAccountExternalId, scope.externalCustomerId)) || null;
+  }
+
+  async updateFollowUpTask(input: UpdateFollowUpTaskInput): Promise<StoredFollowUpTask> {
+    const existing = this.followUpTasks.get(input.taskId);
+    if (!existing || existing.orgId !== input.orgId) {
+      throw new Error("follow_up_task_not_found");
+    }
+
+    const updated: StoredFollowUpTask = {
+      ...existing,
+      title: input.title ?? existing.title,
+      assignedToUserId: input.assignedToUserId ?? existing.assignedToUserId,
+      dueAt: input.dueAt ?? existing.dueAt,
+      status: input.status ?? existing.status,
+      updatedAt: new Date().toISOString()
+    };
+    this.followUpTasks.set(updated.id, updated);
+    return updated;
+  }
+
+  async appendAuditLog(input: CreateAuditLogInput): Promise<StoredAuditLog> {
+    const log: StoredAuditLog = {
+      ...input,
+      id: this.nextAuditLogId(),
+      createdAt: new Date().toISOString()
+    };
+    this.auditLogs.push(log);
+    return log;
+  }
+
+  async listAuditLogs(orgId: string): Promise<StoredAuditLog[]> {
+    return this.auditLogs.filter((log) => log.orgId === orgId);
+  }
+
+  async createAiSummary(input: CreateAiSummaryInput): Promise<StoredAiSummary> {
+    const summary: StoredAiSummary = {
+      ...input,
+      id: this.nextAiId("summary"),
+      createdAt: new Date().toISOString()
+    };
+    this.aiSummaries.set(summary.id, summary);
+    return summary;
+  }
+
+  async getLatestAiSummary(scope: CustomerScope): Promise<StoredAiSummary | null> {
+    const summaries = Array.from(this.aiSummaries.values()).filter((item) => isSameCustomerScope(item, scope));
+    return summaries.at(-1) || null;
+  }
+
+  async createReplySuggestion(input: CreateReplySuggestionInput): Promise<StoredReplySuggestion> {
+    const now = new Date().toISOString();
+    const suggestion: StoredReplySuggestion = {
+      ...input,
+      id: this.nextAiId("reply"),
+      status: input.status || "draft",
+      createdAt: now,
+      updatedAt: now
+    };
+    this.replySuggestions.set(suggestion.id, suggestion);
+    return suggestion;
+  }
+
+  async listReplySuggestions(scope: ConversationCustomerScope): Promise<StoredReplySuggestion[]> {
+    return Array.from(this.replySuggestions.values()).filter((item) => isSameConversationCustomerScope(item, scope));
+  }
+
+  private nextCollaborationId(prefix: string): string {
+    this.collaborationSequence += 1;
+    return `${prefix}_${this.collaborationSequence}`;
+  }
+
+  async createInternalUser(input: CreateInternalUserInput): Promise<InternalUser> {
+    const now = new Date().toISOString();
+    const key = internalUserKey(input.orgId, input.email);
+    const existing = this.internalUsers.get(key);
+    const user: InternalUser & { passwordHash: string } = {
+      id: existing?.id || this.nextInternalUserId(),
+      orgId: input.orgId,
+      email: input.email,
+      displayName: input.displayName,
+      status: input.status || "active",
+      roles: input.roles ?? ["sales"],
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      passwordHash: input.passwordHash
+    };
+    this.internalUsers.set(key, user);
+    return toPublicInternalUser(user);
+  }
+
+  async issueInternalSession(input: IssueInternalSessionInput): Promise<InternalSession> {
+    const user = this.internalUsers.get(internalUserKey(input.orgId, input.email));
+    if (!user || user.status !== "active" || user.passwordHash !== input.passwordHash) {
+      throw new Error("invalid_credentials");
+    }
+
+    const token = input.token || crypto.randomBytes(32).toString("hex");
+    const session: InternalSession = {
+      token,
+      tokenHash: hashContent(token),
+      orgId: user.orgId,
+      userId: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      roles: user.roles,
+      createdAt: new Date().toISOString(),
+      expiresAt: input.expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+    };
+    this.internalSessions.set(session.tokenHash, session);
+    return session;
+  }
+
+  async getInternalSession(token: string): Promise<InternalSession | null> {
+    const session = this.internalSessions.get(hashContent(token));
+    if (!session) return null;
+    if (Date.parse(session.expiresAt) <= Date.now()) return null;
+    return session;
+  }
+
+  async registerCollectorDevice(input: RegisterCollectorDeviceInput): Promise<RegisteredCollectorDevice> {
+    const now = new Date().toISOString();
+    const token = input.token || crypto.randomBytes(32).toString("hex");
+    const tokenHash = hashContent(token);
+    const device: CollectorDevice & { tokenHash: string } = {
+      id: this.nextCollectorDeviceId(),
+      orgId: input.orgId,
+      sellerAccountExternalId: input.sellerAccountExternalId,
+      deviceName: input.deviceName,
+      status: input.status || "active",
+      createdAt: now,
+      updatedAt: now,
+      tokenHash
+    };
+    this.collectorDevices.set(device.id, device);
+    return {
+      ...toPublicCollectorDevice(device),
+      token,
+      tokenHash
+    };
+  }
+
+  listCollectorDevices(orgId: string): CollectorDevice[] {
+    return Array.from(this.collectorDevices.values())
+      .filter((device) => device.orgId === orgId)
+      .map(toPublicCollectorDevice);
+  }
+
+  async revokeCollectorDevice(input: RevokeCollectorDeviceInput): Promise<CollectorDevice> {
+    const existing = this.collectorDevices.get(input.deviceId);
+    if (!existing || existing.orgId !== input.orgId) {
+      throw new Error("collector_device_not_found");
+    }
+
+    const updated: CollectorDevice & { tokenHash: string } = {
+      ...existing,
+      status: "revoked",
+      updatedAt: new Date().toISOString()
+    };
+    this.collectorDevices.set(updated.id, updated);
+    return toPublicCollectorDevice(updated);
+  }
+
+  async authenticateCollectorDevice(token: string): Promise<CollectorDevice | null> {
+    const tokenHash = hashContent(token);
+    const device = Array.from(this.collectorDevices.values()).find(
+      (item) => item.tokenHash === tokenHash && item.status === "active"
+    );
+    return device ? toPublicCollectorDevice(device) : null;
+  }
+
+  private nextInternalUserId(): string {
+    this.internalUserSequence += 1;
+    return `user_${this.internalUserSequence}`;
+  }
+
+  private nextCollectorDeviceId(): string {
+    this.collectorDeviceSequence += 1;
+    return `collector_device_${this.collectorDeviceSequence}`;
+  }
+
+  private nextAuditLogId(): string {
+    this.auditLogSequence += 1;
+    return `audit_${this.auditLogSequence}`;
+  }
+
+  private nextAiId(prefix: string): string {
+    this.aiSequence += 1;
+    return `${prefix}_${this.aiSequence}`;
   }
 }
 
@@ -135,4 +433,46 @@ function maxIso(current: string | null, candidate: string | null): string | null
 function sourceTime(batch: SyncBatch): string {
   const collectedAt = batch.sourceMeta?.collectedAt;
   return typeof collectedAt === "string" ? collectedAt : new Date(0).toISOString();
+}
+
+function isSameCustomerScope(left: CustomerScope, right: CustomerScope): boolean {
+  return (
+    left.orgId === right.orgId &&
+    left.sellerAccountExternalId === right.sellerAccountExternalId &&
+    left.externalCustomerId === right.externalCustomerId
+  );
+}
+
+function isSameConversationCustomerScope(left: ConversationCustomerScope, right: ConversationCustomerScope): boolean {
+  return isSameCustomerScope(left, right) && left.externalConversationId === right.externalConversationId;
+}
+
+function internalUserKey(orgId: string, email: string): string {
+  return [orgId, email.toLowerCase()].join(":");
+}
+
+function toPublicInternalUser(user: InternalUser & { passwordHash: string }): InternalUser {
+  return {
+    id: user.id,
+    orgId: user.orgId,
+    email: user.email,
+    displayName: user.displayName,
+    status: user.status,
+    roles: user.roles,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt
+  };
+}
+
+function toPublicCollectorDevice(device: CollectorDevice & { tokenHash: string }): CollectorDevice {
+  return {
+    id: device.id,
+    orgId: device.orgId,
+    sellerAccountExternalId: device.sellerAccountExternalId,
+    deviceName: device.deviceName,
+    status: device.status,
+    lastHeartbeatAt: device.lastHeartbeatAt,
+    createdAt: device.createdAt,
+    updatedAt: device.updatedAt
+  };
 }
