@@ -3,7 +3,12 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadWorkspaceEnv } from "@wangwang/env";
 import { collectOnce } from "./collector.js";
-import { createCollectorShellController, renderCollectorShellHtml, type CollectorShellStatus } from "./electron-shell.js";
+import {
+  createCollectorShellController,
+  renderCollectorShellHtml,
+  type CollectorShellStatus,
+  type CollectorShellViewModel
+} from "./electron-shell.js";
 import { JsonLocalStateStore } from "./local-state.js";
 
 loadWorkspaceEnv();
@@ -12,6 +17,9 @@ const statePath =
   process.env.WANGWANG_COLLECTOR_STATE_PATH ||
   path.join(os.homedir(), ".wangwang-collector", "collector-state.json");
 const state = new JsonLocalStateStore(statePath);
+let mainWindow: any = null;
+let appEventsRegistered = false;
+let ipcHandlersRegistered = false;
 
 const controller = createCollectorShellController({
   readStatus: async () => {
@@ -51,14 +59,23 @@ const controller = createCollectorShellController({
     })
 });
 
-await startElectronShell();
+void startElectronShell().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
 
 async function startElectronShell(): Promise<void> {
   const electron = await importElectron();
   const { app, BrowserWindow, ipcMain } = electron;
 
   await app.whenReady();
-  const window = new BrowserWindow({
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+    return;
+  }
+
+  mainWindow = new BrowserWindow({
     width: 920,
     height: 620,
     minWidth: 760,
@@ -69,29 +86,49 @@ async function startElectronShell(): Promise<void> {
       contextIsolation: false
     }
   });
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
 
-  async function refresh(): Promise<void> {
-    const html = renderCollectorShellHtml(await controller.load());
-    await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  registerIpcHandlers(ipcMain);
+
+  mainWindow.show();
+  mainWindow.focus();
+  await loadCollectorShell(mainWindow, await controller.load());
+  mainWindow.focus();
+
+  if (!appEventsRegistered) {
+    app.on("activate", async () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        await startElectronShell();
+      } else if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    });
+
+    app.on("window-all-closed", () => {
+      if (process.platform !== "darwin") app.quit();
+    });
+    appEventsRegistered = true;
   }
+}
 
+function registerIpcHandlers(ipcMain: any): void {
+  if (ipcHandlersRegistered) return;
   ipcMain.handle("collector:manual-sync", async () => {
-    const html = renderCollectorShellHtml(await controller.manualSync());
-    await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    if (!mainWindow || mainWindow.isDestroyed()) return false;
+    await loadCollectorShell(mainWindow, await controller.manualSync());
+    mainWindow.show();
+    mainWindow.focus();
     return true;
   });
+  ipcHandlersRegistered = true;
+}
 
-  await refresh();
-
-  app.on("activate", async () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      await startElectronShell();
-    }
-  });
-
-  app.on("window-all-closed", () => {
-    if (process.platform !== "darwin") app.quit();
-  });
+async function loadCollectorShell(window: any, viewModel: CollectorShellViewModel): Promise<void> {
+  const html = renderCollectorShellHtml(viewModel);
+  await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 }
 
 async function importElectron(): Promise<any> {
