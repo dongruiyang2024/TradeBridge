@@ -14,14 +14,17 @@ import {
   type RegisteredCollectorDevice,
   type RegisterCollectorDeviceInput,
   type RevokeCollectorDeviceInput,
+  type RevokeInternalSessionInput,
   type CreateInternalUserInput,
   type CreateCustomerNoteInput,
   type CreateFollowUpTaskInput,
   type CreateReplySuggestionInput,
   type CustomerScope,
+  type GetInternalUserCredentialsInput,
   type InternalRole,
   type InternalSession,
   type InternalUser,
+  type InternalUserCredentials,
   type IssueInternalSessionInput,
   type StoredConversation,
   type StoredAuditLog,
@@ -45,12 +48,11 @@ import {
   type AiJobQueue
 } from "./ai-queue.js";
 import { createDeterministicAiProvider, type AiProvider } from "./ai-service.js";
-import { hashPassword } from "./auth.js";
+import { verifyPassword } from "./auth.js";
 
 export interface CreateServerOptions {
   store?: SyncStore;
   deviceTokens?: string[];
-  internalTokens?: string[];
   aiProvider?: AiProvider;
   aiJobQueue?: AiJobQueue;
   logger?: boolean;
@@ -59,7 +61,6 @@ export interface CreateServerOptions {
 export interface CreateServerFromEnvOptions {
   env?: Record<string, string | undefined>;
   deviceTokens?: string[];
-  internalTokens?: string[];
   logger?: boolean;
   sqlClientFactory?: (databaseUrl: string) => Promise<SqlClient> | SqlClient;
   aiJobQueueFactory?: (env: Record<string, string | undefined>) => Promise<AiJobQueue | undefined> | AiJobQueue | undefined;
@@ -85,8 +86,10 @@ export interface SyncStore {
   createReplySuggestion(input: CreateReplySuggestionInput): Promise<StoredReplySuggestion> | StoredReplySuggestion;
   listReplySuggestions(scope: ConversationCustomerScope): Promise<StoredReplySuggestion[]> | StoredReplySuggestion[];
   createInternalUser(input: CreateInternalUserInput): Promise<InternalUser> | InternalUser;
+  getInternalUserCredentials(input: GetInternalUserCredentialsInput): Promise<InternalUserCredentials | null> | InternalUserCredentials | null;
   issueInternalSession(input: IssueInternalSessionInput): Promise<InternalSession> | InternalSession;
   getInternalSession(token: string): Promise<InternalSession | null> | InternalSession | null;
+  revokeInternalSession(input: RevokeInternalSessionInput): Promise<boolean> | boolean;
   registerCollectorDevice(input: RegisterCollectorDeviceInput): Promise<RegisteredCollectorDevice> | RegisteredCollectorDevice;
   listCollectorDevices(orgId: string): Promise<CollectorDevice[]> | CollectorDevice[];
   revokeCollectorDevice(input: RevokeCollectorDeviceInput): Promise<CollectorDevice> | CollectorDevice;
@@ -96,7 +99,6 @@ export interface SyncStore {
 export async function createServer(options: CreateServerOptions = {}): Promise<FastifyInstance> {
   const store = options.store || new InMemorySyncStore();
   const deviceTokens = new Set(options.deviceTokens || envDeviceTokens());
-  const internalTokens = new Set(options.internalTokens || envInternalTokens());
   const aiProvider = options.aiProvider || createDeterministicAiProvider();
   const aiJobQueue = options.aiJobQueue || createSyncAiJobQueue();
   const internalAccessRoles: InternalRole[] = ["admin", "supervisor", "sales"];
@@ -136,28 +138,43 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       return reply.code(400).send({ ok: false, error: "invalid_login_request" });
     }
 
+    const credentials = await store.getInternalUserCredentials({ orgId, email });
+    if (!credentials || !(await verifyPassword(password, credentials.passwordHash))) {
+      await appendLoginFailedAuditLog(store, orgId, email);
+      return reply.code(401).send({ ok: false, error: "invalid_credentials" });
+    }
+
+    let session: InternalSession;
     try {
-      const session = await store.issueInternalSession({
+      session = await store.issueInternalSession({
         orgId,
         email,
-        passwordHash: hashPassword(password)
+        passwordHash: credentials.passwordHash
       });
-      return {
-        ok: true,
-        token: session.token,
-        expiresAt: session.expiresAt,
-        user: publicUserFromSession(session)
-      };
     } catch (error) {
       if (isInvalidCredentialsError(error)) {
+        await appendLoginFailedAuditLog(store, orgId, email);
         return reply.code(401).send({ ok: false, error: "invalid_credentials" });
       }
       throw error;
     }
+    await store.appendAuditLog({
+      orgId,
+      actorUserId: session.userId,
+      action: "auth.login.succeeded",
+      targetType: "app_user",
+      targetId: session.userId
+    });
+    return {
+      ok: true,
+      token: session.token,
+      expiresAt: session.expiresAt,
+      user: publicUserFromSession(session)
+    };
   });
 
   app.get("/internal/v1/me", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store, internalTokens);
+    const auth = await requireInternalAuth(request, reply, store);
     if (!auth) return;
 
     return {
@@ -166,8 +183,25 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     };
   });
 
+  app.post("/internal/v1/auth/logout", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store);
+    if (!auth) return;
+
+    const token = bearerToken(request.headers.authorization || "");
+    if (token) await store.revokeInternalSession({ token });
+    await store.appendAuditLog({
+      orgId: auth.user.orgId,
+      actorUserId: auth.user.id,
+      action: "auth.logout",
+      targetType: "app_user",
+      targetId: auth.user.id
+    });
+
+    return { ok: true };
+  });
+
   app.post("/internal/v1/collector-devices", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store, internalTokens, adminRoles);
+    const auth = await requireInternalAuth(request, reply, store, adminRoles);
     if (!auth) return;
 
     const orgId = bodyStringField(request.body, "orgId");
@@ -200,7 +234,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.get("/internal/v1/collector-devices", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store, internalTokens, adminRoles);
+    const auth = await requireInternalAuth(request, reply, store, adminRoles);
     if (!auth) return;
 
     const orgId = queryOrgId(request.query);
@@ -215,7 +249,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.post("/internal/v1/collector-devices/:deviceId/revoke", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store, internalTokens, adminRoles);
+    const auth = await requireInternalAuth(request, reply, store, adminRoles);
     if (!auth) return;
 
     const orgId = bodyStringField(request.body, "orgId");
@@ -250,7 +284,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.get("/internal/v1/customers", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
     const orgId = queryOrgId(request.query);
@@ -265,7 +299,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.get("/internal/v1/conversations", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
     const orgId = queryOrgId(request.query);
@@ -280,7 +314,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.get("/internal/v1/conversations/:externalConversationId/messages", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
     const orgId = queryOrgId(request.query);
@@ -296,7 +330,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.post("/internal/v1/customers/:externalCustomerId/ai-summary", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
     const scope = queryCustomerScope(request.query, request.params);
@@ -335,7 +369,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.get("/internal/v1/customers/:externalCustomerId/ai-summary", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
     const scope = queryCustomerScope(request.query, request.params);
@@ -350,7 +384,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.post("/internal/v1/conversations/:externalConversationId/reply-suggestions", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
     const conversationScope = await resolveConversationScope(store, request.query, request.params);
@@ -375,7 +409,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
             ...scope,
             promptVersion: generated.promptVersion,
             suggestion,
-            createdByUserId: auth.bootstrap ? undefined : auth.user.id
+            createdByUserId: auth.user.id
           })
         );
       }
@@ -390,7 +424,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.get("/internal/v1/conversations/:externalConversationId/reply-suggestions", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
     const conversationScope = await resolveConversationScope(store, request.query, request.params);
@@ -405,7 +439,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.post("/internal/v1/customers/:externalCustomerId/notes", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
     const scope = queryCustomerScope(request.query, request.params);
@@ -425,7 +459,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.get("/internal/v1/customers/:externalCustomerId/notes", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
     const scope = queryCustomerScope(request.query, request.params);
@@ -440,7 +474,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.post("/internal/v1/customers/:externalCustomerId/tags", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
     const scope = queryCustomerScope(request.query, request.params);
@@ -460,7 +494,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.get("/internal/v1/customers/:externalCustomerId/tags", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
     const scope = queryCustomerScope(request.query, request.params);
@@ -475,7 +509,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.post("/internal/v1/customers/:externalCustomerId/assignment", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
     const scope = queryCustomerScope(request.query, request.params);
@@ -513,7 +547,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.get("/internal/v1/customers/:externalCustomerId/assignment", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
     const scope = queryCustomerScope(request.query, request.params);
@@ -528,7 +562,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.post("/internal/v1/customers/:externalCustomerId/follow-up-tasks", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
     const scope = queryCustomerScope(request.query, request.params);
@@ -554,7 +588,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.get("/internal/v1/customers/:externalCustomerId/follow-up-tasks", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
     const scope = queryCustomerScope(request.query, request.params);
@@ -569,7 +603,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.patch("/internal/v1/follow-up-tasks/:taskId", async (request, reply) => {
-    const auth = await requireInternalAuth(request, reply, store, internalTokens, internalAccessRoles);
+    const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
     const taskId = queryStringField(request.params, "taskId");
@@ -634,7 +668,6 @@ export async function createServerFromEnv(options: CreateServerFromEnvOptions = 
   return createServer({
     store,
     deviceTokens: options.deviceTokens || envDeviceTokens(env),
-    internalTokens: options.internalTokens || envInternalTokens(env),
     aiJobQueue,
     logger: options.logger
   });
@@ -665,13 +698,6 @@ function envDeviceTokens(env: Record<string, string | undefined> = process.env):
     .filter(Boolean);
 }
 
-function envInternalTokens(env: Record<string, string | undefined> = process.env): string[] {
-  return (env.WANGWANG_INTERNAL_API_TOKENS || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
 function isBearerAuthorized(authorization: string, tokens: Set<string>): boolean {
   const token = bearerToken(authorization);
   return Boolean(token && tokens.has(token));
@@ -697,14 +723,12 @@ interface PublicInternalUser {
 interface InternalAuthContext {
   user: PublicInternalUser;
   roles: InternalRole[];
-  bootstrap: boolean;
 }
 
 async function requireInternalAuth(
   request: FastifyRequest,
   reply: FastifyReply,
   store: SyncStore,
-  bootstrapTokens: Set<string>,
   allowedRoles?: InternalRole[]
 ): Promise<InternalAuthContext | null> {
   const token = bearerToken(request.headers.authorization || "");
@@ -713,7 +737,7 @@ async function requireInternalAuth(
     return null;
   }
 
-  const auth = bootstrapTokens.has(token) ? bootstrapAuthContext() : await sessionAuthContext(store, token);
+  const auth = await sessionAuthContext(store, token);
   if (!auth) {
     reply.code(401).send({ ok: false, error: "internal_unauthorized" });
     return null;
@@ -737,23 +761,7 @@ async function sessionAuthContext(store: SyncStore, token: string): Promise<Inte
 
   return {
     user: publicUserFromSession(session),
-    roles: session.roles,
-    bootstrap: false
-  };
-}
-
-function bootstrapAuthContext(): InternalAuthContext {
-  const roles: InternalRole[] = ["admin"];
-  return {
-    user: {
-      id: "bootstrap",
-      orgId: "bootstrap",
-      email: "bootstrap@local",
-      displayName: "Bootstrap Admin",
-      roles
-    },
-    roles,
-    bootstrap: true
+    roles: session.roles
   };
 }
 
@@ -887,6 +895,19 @@ function compactRecord<T extends Record<string, string | null | undefined>>(valu
 
 function bearerToken(authorization: string): string {
   return authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
+}
+
+async function appendLoginFailedAuditLog(store: SyncStore, orgId: string, email: string): Promise<void> {
+  try {
+    await store.appendAuditLog({
+      orgId,
+      action: "auth.login.failed",
+      targetType: "app_user",
+      metadata: { email }
+    });
+  } catch {
+    return;
+  }
 }
 
 function isInvalidCredentialsError(error: unknown): boolean {

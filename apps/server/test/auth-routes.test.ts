@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import crypto from "node:crypto";
 import { test } from "node:test";
 import { InMemorySyncStore } from "@wangwang/database";
+import { hashPassword } from "../src/auth.js";
 import { createServer } from "../src/server.js";
 
 const syncPayload = {
@@ -11,24 +11,19 @@ const syncPayload = {
   customers: [{ externalCustomerId: "customer-1", displayName: "Buyer One" }]
 };
 
-function passwordHash(password: string): string {
-  return crypto.createHash("sha256").update(password).digest("hex");
-}
-
 async function createAuthApp() {
   const store = new InMemorySyncStore();
   await store.createInternalUser({
     orgId: "org_internal",
     email: "admin@example.com",
     displayName: "Admin User",
-    passwordHash: passwordHash("secret"),
+    passwordHash: await hashPassword("secret"),
     roles: ["admin"]
   });
 
   const app = await createServer({
     store,
-    deviceTokens: ["device-token"],
-    internalTokens: ["bootstrap-token"]
+    deviceTokens: ["device-token"]
   });
 
   return { app, store };
@@ -84,7 +79,42 @@ test("POST /internal/v1/auth/login rejects invalid credentials", async () => {
   assert.deepEqual(response.json(), { ok: false, error: "invalid_credentials" });
 });
 
-test("bootstrap internal tokens remain available as admin auth during development", async () => {
+test("POST /internal/v1/auth/login rejects disabled users with valid passwords", async () => {
+  const { app, store } = await createAuthApp();
+  await store.createInternalUser({
+    orgId: "org_internal",
+    email: "disabled@example.com",
+    displayName: "Disabled User",
+    passwordHash: await hashPassword("secret"),
+    roles: ["admin"],
+    status: "disabled"
+  });
+
+  const response = await login(app, "disabled@example.com");
+
+  assert.equal(response.statusCode, 401);
+  assert.deepEqual(response.json(), { ok: false, error: "invalid_credentials" });
+});
+
+test("POST /internal/v1/auth/login returns 401 when failed-login audit cannot be written", async () => {
+  const { app, store } = await createAuthApp();
+  const originalAppendAuditLog = store.appendAuditLog.bind(store);
+  store.appendAuditLog = async (input) => {
+    if (input.action === "auth.login.failed") throw new Error("audit_org_missing");
+    return originalAppendAuditLog(input);
+  };
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/internal/v1/auth/login",
+    payload: { orgId: "missing_org", email: "nobody@example.com", password: "wrong" }
+  });
+
+  assert.equal(response.statusCode, 401);
+  assert.deepEqual(response.json(), { ok: false, error: "invalid_credentials" });
+});
+
+test("legacy development bearer tokens cannot access internal APIs", async () => {
   const { app } = await createAuthApp();
   const response = await app.inject({
     method: "GET",
@@ -92,10 +122,29 @@ test("bootstrap internal tokens remain available as admin auth during developmen
     headers: { authorization: "Bearer bootstrap-token" }
   });
 
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.json().ok, true);
-  assert.equal(response.json().user.id, "bootstrap");
-  assert.deepEqual(response.json().user.roles, ["admin"]);
+  assert.equal(response.statusCode, 401);
+  assert.deepEqual(response.json(), { ok: false, error: "internal_unauthorized" });
+});
+
+test("POST /internal/v1/auth/logout revokes the current session", async () => {
+  const { app } = await createAuthApp();
+  const loginResponse = await login(app);
+  const token = loginResponse.json().token;
+
+  const logoutResponse = await app.inject({
+    method: "POST",
+    url: "/internal/v1/auth/logout",
+    headers: { authorization: `Bearer ${token}` }
+  });
+  const meResponse = await app.inject({
+    method: "GET",
+    url: "/internal/v1/me",
+    headers: { authorization: `Bearer ${token}` }
+  });
+
+  assert.equal(logoutResponse.statusCode, 200);
+  assert.deepEqual(logoutResponse.json(), { ok: true });
+  assert.equal(meResponse.statusCode, 401);
 });
 
 test("session tokens can access internal APIs while collector tokens cannot", async () => {
@@ -131,7 +180,7 @@ test("authenticated users without a permitted role cannot access internal APIs",
     orgId: "org_internal",
     email: "norole@example.com",
     displayName: "No Role",
-    passwordHash: passwordHash("secret"),
+    passwordHash: await hashPassword("secret"),
     roles: []
   });
 
