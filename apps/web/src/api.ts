@@ -1,1 +1,1 @@
-export { createInternalApiClient } from "./internal-api";
+export { createInternalApiClient, WorkspaceSelectionRequiredError } from "./internal-api";

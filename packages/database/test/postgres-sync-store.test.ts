@@ -337,6 +337,103 @@ class FakePostgresClient implements SqlClient {
         rowCount: 1
       };
     }
+    if (/get_internal_user_credentials_by_email/i.test(sql)) {
+      return {
+        rows: [
+          {
+            id: "user-db-id",
+            orgId: "org_internal",
+            email: "admin@example.com",
+            displayName: "Admin User",
+            status: "active",
+            roles: ["admin"],
+            createdAt: "2026-05-25T10:00:00.000Z",
+            updatedAt: "2026-05-25T10:00:00.000Z",
+            passwordHash: "password-hash"
+          },
+          {
+            id: "user-other-id",
+            orgId: "org_other",
+            email: "admin@example.com",
+            displayName: "Other Admin",
+            status: "active",
+            roles: ["supervisor"],
+            createdAt: "2026-05-25T10:00:00.000Z",
+            updatedAt: "2026-05-25T10:00:00.000Z",
+            passwordHash: "other-password-hash"
+          }
+        ] as T[],
+        rowCount: 2
+      };
+    }
+    if (/list_internal_user_workspaces_by_email/i.test(sql)) {
+      return {
+        rows: [
+          {
+            orgId: "org_internal",
+            name: "org_internal",
+            userId: "user-db-id",
+            email: "admin@example.com",
+            displayName: "Admin User",
+            roles: ["admin"]
+          },
+          {
+            orgId: "org_other",
+            name: "org_other",
+            userId: "user-other-id",
+            email: "admin@example.com",
+            displayName: "Other Admin",
+            roles: ["supervisor"]
+          }
+        ] as T[],
+        rowCount: 2
+      };
+    }
+    if (/switch_internal_session_org_current/i.test(sql)) {
+      return {
+        rows: [
+          {
+            tokenHash: "session-token-hash",
+            email: "admin@example.com"
+          }
+        ] as T[],
+        rowCount: 1
+      };
+    }
+    if (/switch_internal_session_org_target/i.test(sql)) {
+      return {
+        rows: [
+          {
+            id: "user-other-id",
+            orgId: "org_other",
+            email: "admin@example.com",
+            displayName: "Other Admin",
+            status: "active",
+            roles: ["supervisor"],
+            createdAt: "2026-05-25T10:00:00.000Z",
+            updatedAt: "2026-05-25T10:00:00.000Z"
+          }
+        ] as T[],
+        rowCount: 1
+      };
+    }
+    if (/switch_internal_session_org_update/i.test(sql)) {
+      return {
+        rows: [
+          {
+            tokenHash: "session-token-hash",
+            orgId: "org_other",
+            userId: "user-other-id",
+            email: "admin@example.com",
+            displayName: "Other Admin",
+            roles: ["supervisor"],
+            createdAt: "2026-05-25T10:01:00.000Z",
+            expiresAt: "2026-05-26T00:00:00.000Z"
+          }
+        ] as T[],
+        rowCount: 1
+      };
+    }
     if (/get_internal_user_credentials/i.test(sql)) {
       return {
         rows: [
@@ -1048,6 +1145,61 @@ test("PostgresSyncStore supports internal user management and invitations", asyn
   assert.match(updateSql, /FROM\s+updated_user[\s\S]*CROSS JOIN LATERAL\s+unnest/i);
   assert.match(acceptSql, /roles_removed/i);
   assert.match(acceptSql, /CROSS JOIN roles_removed/i);
+});
+
+test("PostgresSyncStore exposes workspace lookup and session switching queries", async () => {
+  const client = new FakePostgresClient();
+  const store = new PostgresSyncStore(client);
+
+  const credentials = await store.getInternalUserCredentialsByEmail({
+    email: " Admin@Example.com "
+  });
+  const workspaces = await store.listInternalUserWorkspacesByEmail(" Admin@Example.com ");
+  const switched = await store.switchInternalSessionOrg({
+    token: "session-token",
+    orgId: "org_other"
+  });
+
+  assert.deepEqual(
+    credentials.map((item) => ({
+      orgId: item.orgId,
+      passwordHash: item.passwordHash
+    })),
+    [
+      { orgId: "org_internal", passwordHash: "password-hash" },
+      { orgId: "org_other", passwordHash: "other-password-hash" }
+    ]
+  );
+  assert.deepEqual(
+    workspaces.map((item) => ({
+      orgId: item.orgId,
+      name: item.name,
+      roles: item.roles
+    })),
+    [
+      { orgId: "org_internal", name: "org_internal", roles: ["admin"] },
+      { orgId: "org_other", name: "org_other", roles: ["supervisor"] }
+    ]
+  );
+  assert.equal(switched.orgId, "org_other");
+  assert.equal(switched.displayName, "Other Admin");
+  assert.deepEqual(switched.roles, ["supervisor"]);
+
+  const sql = client.queries.map((query) => query.sql).join("\n");
+  assert.match(sql, /get_internal_user_credentials_by_email/);
+  assert.match(sql, /list_internal_user_workspaces_by_email/);
+  assert.match(sql, /switch_internal_session_org_current/);
+  assert.match(sql, /switch_internal_session_org_target/);
+  assert.match(sql, /switch_internal_session_org_update/);
+  assert.equal(
+    client.queries.find((query) => /get_internal_user_credentials_by_email/i.test(query.sql))?.params[0],
+    "admin@example.com"
+  );
+  assert.equal(
+    client.queries.find((query) => /list_internal_user_workspaces_by_email/i.test(query.sql))?.params[0],
+    "admin@example.com"
+  );
+  assert.equal(client.queries.some((query) => query.params.includes("session-token")), false);
 });
 
 test("PostgresSyncStore reports already accepted invitations distinctly", async () => {

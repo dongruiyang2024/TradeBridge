@@ -16,17 +16,19 @@ import type { InternalApiClient, WorkspaceState } from "../src/types.ts";
 test("login view renders account login without developer token fallback", () => {
   const html = renderToString(
     <LoginView
-      orgId="org_internal"
       serverBaseUrl=""
       email="admin@example.com"
       password=""
       loading={false}
       error=""
-      onOrgIdChange={() => undefined}
+      advancedOpen={false}
+      workspaceChoices={[]}
+      onAdvancedOpenChange={() => undefined}
       onServerBaseUrlChange={() => undefined}
       onEmailChange={() => undefined}
       onPasswordChange={() => undefined}
       onPasswordLogin={() => undefined}
+      onWorkspaceLogin={() => undefined}
       onSetupMode={() => undefined}
     />
   );
@@ -36,6 +38,60 @@ test("login view renders account login without developer token fallback", () => 
   assert.match(html, /密码/);
   assert.match(html, /初始化首个管理员/);
   assert.doesNotMatch(html, /开发 Token/);
+});
+
+test("login view hides raw org input and keeps API in advanced connection settings", () => {
+  const html = renderToString(
+    <LoginView
+      serverBaseUrl=""
+      email=""
+      password=""
+      loading={false}
+      error=""
+      advancedOpen={false}
+      workspaceChoices={[]}
+      onAdvancedOpenChange={() => undefined}
+      onServerBaseUrlChange={() => undefined}
+      onEmailChange={() => undefined}
+      onPasswordChange={() => undefined}
+      onPasswordLogin={() => undefined}
+      onWorkspaceLogin={() => undefined}
+      onSetupMode={() => undefined}
+    />
+  );
+
+  assert.doesNotMatch(html, /Org/);
+  assert.doesNotMatch(html, />API</);
+  assert.match(html, /连接设置/);
+});
+
+test("login view renders workspace choices returned by the server", () => {
+  const html = renderToString(
+    <LoginView
+      serverBaseUrl=""
+      email="admin@example.com"
+      password="secret"
+      loading={false}
+      error="请选择要进入的工作空间。"
+      advancedOpen={false}
+      workspaceChoices={[
+        { orgId: "org_internal", name: "内部空间", roles: ["admin"] },
+        { orgId: "org_other", name: "其他空间", roles: ["sales"] }
+      ]}
+      onAdvancedOpenChange={() => undefined}
+      onServerBaseUrlChange={() => undefined}
+      onEmailChange={() => undefined}
+      onPasswordChange={() => undefined}
+      onPasswordLogin={() => undefined}
+      onWorkspaceLogin={() => undefined}
+      onSetupMode={() => undefined}
+    />
+  );
+
+  assert.match(html, /内部空间/);
+  assert.match(html, /其他空间/);
+  assert.match(html, /admin/);
+  assert.match(html, /sales/);
 });
 
 test("setup admin view renders initialization fields", () => {

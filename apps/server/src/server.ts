@@ -23,11 +23,13 @@ import {
   type CreateFollowUpTaskInput,
   type CreateReplySuggestionInput,
   type CustomerScope,
+  type GetInternalUserCredentialsByEmailInput,
   type GetInternalUserCredentialsInput,
   type InternalRole,
   type InternalSession,
   type InternalUser,
   type InternalUserCredentials,
+  type InternalWorkspaceSummary,
   type IssueInternalSessionInput,
   type StoredConversation,
   type StoredAuditLog,
@@ -40,6 +42,7 @@ import {
   type StoredMessage,
   type StoredReplySuggestion,
   type StoredUserInvitation,
+  type SwitchInternalSessionOrgInput,
   type SqlClient,
   type SyncBatch,
   type SyncBatchResult,
@@ -95,9 +98,12 @@ export interface SyncStore {
   createInternalUser(input: CreateInternalUserInput): Promise<InternalUser> | InternalUser;
   listInternalUsers(orgId: string): Promise<InternalUser[]> | InternalUser[];
   getInternalUserCredentials(input: GetInternalUserCredentialsInput): Promise<InternalUserCredentials | null> | InternalUserCredentials | null;
+  getInternalUserCredentialsByEmail(input: GetInternalUserCredentialsByEmailInput): Promise<InternalUserCredentials[]> | InternalUserCredentials[];
+  listInternalUserWorkspacesByEmail(email: string): Promise<InternalWorkspaceSummary[]> | InternalWorkspaceSummary[];
   updateInternalUser(input: UpdateInternalUserInput): Promise<InternalUser> | InternalUser;
   issueInternalSession(input: IssueInternalSessionInput): Promise<InternalSession> | InternalSession;
   getInternalSession(token: string): Promise<InternalSession | null> | InternalSession | null;
+  switchInternalSessionOrg(input: SwitchInternalSessionOrgInput): Promise<InternalSession> | InternalSession;
   revokeInternalSession(input: RevokeInternalSessionInput): Promise<boolean> | boolean;
   createUserInvitation(input: CreateUserInvitationInput): Promise<StoredUserInvitation> | StoredUserInvitation;
   getUserInvitation(token: string): Promise<StoredUserInvitation | null> | StoredUserInvitation | null;
@@ -147,8 +153,48 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const orgId = bodyStringField(request.body, "orgId");
     const email = bodyStringField(request.body, "email");
     const password = bodyStringField(request.body, "password");
-    if (!orgId || !email || !password) {
+    if (!email || !password) {
       return reply.code(400).send({ ok: false, error: "invalid_login_request" });
+    }
+
+    if (!orgId) {
+      const candidates = await store.getInternalUserCredentialsByEmail({ email });
+      const matchingCredentials: InternalUserCredentials[] = [];
+      for (const candidate of candidates) {
+        if (await verifyPassword(password, candidate.passwordHash)) {
+          matchingCredentials.push(candidate);
+        }
+      }
+
+      if (matchingCredentials.length === 0) {
+        await appendLoginFailedAuditLogsForCredentials(store, candidates, email);
+        return reply.code(401).send({ ok: false, error: "invalid_credentials" });
+      }
+
+      if (matchingCredentials.length > 1) {
+        const matchingOrgIds = new Set(matchingCredentials.map((item) => item.orgId));
+        const workspaces = (await store.listInternalUserWorkspacesByEmail(email)).filter((item) =>
+          matchingOrgIds.has(item.orgId)
+        );
+        return reply.code(409).send({
+          ok: false,
+          error: "workspace_selection_required",
+          workspaces: workspaces.map(publicWorkspaceSummary)
+        });
+      }
+
+      try {
+        return {
+          ok: true,
+          ...(await issueLoginSession(store, matchingCredentials[0]))
+        };
+      } catch (error) {
+        if (isInvalidCredentialsError(error)) {
+          await appendLoginFailedAuditLog(store, matchingCredentials[0].orgId, email);
+          return reply.code(401).send({ ok: false, error: "invalid_credentials" });
+        }
+        throw error;
+      }
     }
 
     const credentials = await store.getInternalUserCredentials({ orgId, email });
@@ -157,13 +203,11 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       return reply.code(401).send({ ok: false, error: "invalid_credentials" });
     }
 
-    let session: InternalSession;
     try {
-      session = await store.issueInternalSession({
-        orgId,
-        email,
-        passwordHash: credentials.passwordHash
-      });
+      return {
+        ok: true,
+        ...(await issueLoginSession(store, credentials))
+      };
     } catch (error) {
       if (isInvalidCredentialsError(error)) {
         await appendLoginFailedAuditLog(store, orgId, email);
@@ -171,19 +215,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       }
       throw error;
     }
-    await store.appendAuditLog({
-      orgId,
-      actorUserId: session.userId,
-      action: "auth.login.succeeded",
-      targetType: "app_user",
-      targetId: session.userId
-    });
-    return {
-      ok: true,
-      token: session.token,
-      expiresAt: session.expiresAt,
-      user: publicUserFromSession(session)
-    };
   });
 
   app.post("/internal/v1/setup/admin", async (request, reply) => {
@@ -239,6 +270,51 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     };
   });
 
+  app.get("/internal/v1/workspaces", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store);
+    if (!auth) return;
+
+    const workspaces = await store.listInternalUserWorkspacesByEmail(auth.user.email);
+    return {
+      ok: true,
+      workspaces: workspaces.map(publicWorkspaceSummary)
+    };
+  });
+
+  app.patch("/internal/v1/workspaces/active", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store);
+    if (!auth) return;
+
+    const orgId = bodyStringField(request.body, "orgId");
+    if (!orgId) {
+      return reply.code(400).send({ ok: false, error: "org_id_required" });
+    }
+
+    const token = bearerToken(request.headers.authorization || "");
+    try {
+      const session = await store.switchInternalSessionOrg({ token, orgId });
+      await store.appendAuditLog({
+        orgId: session.orgId,
+        actorUserId: session.userId,
+        action: "auth.workspace.switched",
+        targetType: "org",
+        targetId: session.orgId
+      });
+      return {
+        ok: true,
+        user: publicUserFromSession(session)
+      };
+    } catch (error) {
+      if (isWorkspaceNotFoundError(error)) {
+        return reply.code(404).send({ ok: false, error: "workspace_not_found" });
+      }
+      if (isInvalidCredentialsError(error)) {
+        return reply.code(401).send({ ok: false, error: "internal_unauthorized" });
+      }
+      throw error;
+    }
+  });
+
   app.post("/internal/v1/auth/logout", async (request, reply) => {
     const auth = await requireInternalAuth(request, reply, store);
     if (!auth) return;
@@ -260,9 +336,8 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, adminRoles);
     if (!auth) return;
 
-    const orgId = queryOrgId(request.query);
-    if (!orgId) return reply.code(400).send({ ok: false, error: "org_id_required" });
-    if (auth.user.orgId !== orgId) return reply.code(403).send({ ok: false, error: "forbidden" });
+    const orgId = requestedOrgIdOrSession(request.query, auth);
+    if (!requireOrgScope(auth, orgId, reply)) return;
 
     return { ok: true, users: await store.listInternalUsers(orgId) };
   });
@@ -437,10 +512,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, adminRoles);
     if (!auth) return;
 
-    const orgId = queryOrgId(request.query);
-    if (!orgId) {
-      return reply.code(400).send({ ok: false, error: "org_id_required" });
-    }
+    const orgId = requestedOrgIdOrSession(request.query, auth);
     if (!requireOrgScope(auth, orgId, reply)) return;
 
     return {
@@ -489,10 +561,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const orgId = queryOrgId(request.query);
-    if (!orgId) {
-      return reply.code(400).send({ ok: false, error: "org_id_required" });
-    }
+    const orgId = requestedOrgIdOrSession(request.query, auth);
     if (!requireOrgScope(auth, orgId, reply)) return;
 
     return {
@@ -505,10 +574,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const orgId = queryOrgId(request.query);
-    if (!orgId) {
-      return reply.code(400).send({ ok: false, error: "org_id_required" });
-    }
+    const orgId = requestedOrgIdOrSession(request.query, auth);
     if (!requireOrgScope(auth, orgId, reply)) return;
 
     return {
@@ -521,10 +587,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const orgId = queryOrgId(request.query);
-    if (!orgId) {
-      return reply.code(400).send({ ok: false, error: "org_id_required" });
-    }
+    const orgId = requestedOrgIdOrSession(request.query, auth);
     if (!requireOrgScope(auth, orgId, reply)) return;
 
     const params = request.params as { externalConversationId?: string };
@@ -538,7 +601,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const scope = queryCustomerScope(request.query, request.params);
+    const scope = customerScopeFromQueryOrSession(request.query, request.params, auth);
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
@@ -578,7 +641,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const scope = queryCustomerScope(request.query, request.params);
+    const scope = customerScopeFromQueryOrSession(request.query, request.params, auth);
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
@@ -661,7 +724,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const scope = queryCustomerScope(request.query, request.params);
+    const scope = customerScopeFromQueryOrSession(request.query, request.params, auth);
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
@@ -682,7 +745,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const scope = queryCustomerScope(request.query, request.params);
+    const scope = customerScopeFromQueryOrSession(request.query, request.params, auth);
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
@@ -698,7 +761,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const scope = queryCustomerScope(request.query, request.params);
+    const scope = customerScopeFromQueryOrSession(request.query, request.params, auth);
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
@@ -719,7 +782,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const scope = queryCustomerScope(request.query, request.params);
+    const scope = customerScopeFromQueryOrSession(request.query, request.params, auth);
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
@@ -735,7 +798,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const scope = queryCustomerScope(request.query, request.params);
+    const scope = customerScopeFromQueryOrSession(request.query, request.params, auth);
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
@@ -774,7 +837,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const scope = queryCustomerScope(request.query, request.params);
+    const scope = customerScopeFromQueryOrSession(request.query, request.params, auth);
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
@@ -790,7 +853,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const scope = queryCustomerScope(request.query, request.params);
+    const scope = customerScopeFromQueryOrSession(request.query, request.params, auth);
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
@@ -817,7 +880,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
-    const scope = queryCustomerScope(request.query, request.params);
+    const scope = customerScopeFromQueryOrSession(request.query, request.params, auth);
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
@@ -949,6 +1012,12 @@ interface PublicInternalUser {
   roles: InternalRole[];
 }
 
+interface PublicInternalWorkspace {
+  orgId: string;
+  name: string;
+  roles: InternalRole[];
+}
+
 interface InternalAuthContext {
   user: PublicInternalUser;
   roles: InternalRole[];
@@ -1000,6 +1069,30 @@ async function sessionAuthContext(store: SyncStore, token: string): Promise<Inte
   };
 }
 
+async function issueLoginSession(store: SyncStore, credentials: InternalUserCredentials): Promise<{
+  token: string;
+  expiresAt: string;
+  user: PublicInternalUser;
+}> {
+  const session = await store.issueInternalSession({
+    orgId: credentials.orgId,
+    email: credentials.email,
+    passwordHash: credentials.passwordHash
+  });
+  await store.appendAuditLog({
+    orgId: session.orgId,
+    actorUserId: session.userId,
+    action: "auth.login.succeeded",
+    targetType: "app_user",
+    targetId: session.userId
+  });
+  return {
+    token: session.token,
+    expiresAt: session.expiresAt,
+    user: publicUserFromSession(session)
+  };
+}
+
 function publicUserFromSession(session: InternalSession): PublicInternalUser {
   return {
     id: session.userId,
@@ -1007,6 +1100,14 @@ function publicUserFromSession(session: InternalSession): PublicInternalUser {
     email: session.email,
     displayName: session.displayName,
     roles: session.roles
+  };
+}
+
+function publicWorkspaceSummary(workspace: InternalWorkspaceSummary): PublicInternalWorkspace {
+  return {
+    orgId: workspace.orgId,
+    name: workspace.name,
+    roles: workspace.roles
   };
 }
 
@@ -1145,9 +1246,22 @@ async function appendLoginFailedAuditLog(store: SyncStore, orgId: string, email:
   }
 }
 
+async function appendLoginFailedAuditLogsForCredentials(
+  store: SyncStore,
+  credentials: InternalUserCredentials[],
+  email: string
+): Promise<void> {
+  await Promise.all(credentials.map((item) => appendLoginFailedAuditLog(store, item.orgId, email)));
+}
+
 function isInvalidCredentialsError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return message === "invalid_credentials" || message === "internal_session_not_found";
+}
+
+function isWorkspaceNotFoundError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message === "workspace_not_found";
 }
 
 function isNotFoundError(error: unknown, source: string): boolean {
@@ -1168,14 +1282,21 @@ function queryOrgId(query: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function queryCustomerScope(query: unknown, params: unknown): CustomerScope | null {
-  const orgId = queryOrgId(query);
+function requestedOrgIdOrSession(query: unknown, auth: InternalAuthContext): string {
+  return queryOrgId(query) || auth.user.orgId;
+}
+
+function customerScopeFromQueryOrSession(
+  query: unknown,
+  params: unknown,
+  auth: InternalAuthContext
+): CustomerScope | null {
   const sellerAccountExternalId = queryStringField(query, "sellerAccountExternalId");
   const externalCustomerId = queryStringField(params, "externalCustomerId");
-  if (!orgId || !sellerAccountExternalId || !externalCustomerId) return null;
+  if (!sellerAccountExternalId || !externalCustomerId) return null;
 
   return {
-    orgId,
+    orgId: requestedOrgIdOrSession(query, auth),
     sellerAccountExternalId,
     externalCustomerId
   };

@@ -41,6 +41,17 @@ async function login(app: Awaited<ReturnType<typeof createServer>>, email = "adm
   });
 }
 
+async function loginWithoutOrg(app: Awaited<ReturnType<typeof createServer>>, email = "admin@example.com") {
+  return app.inject({
+    method: "POST",
+    url: "/internal/v1/auth/login",
+    payload: {
+      email,
+      password: "secret"
+    }
+  });
+}
+
 async function createInternalAuthHeaders(app: Awaited<ReturnType<typeof createServer>>, email = "admin@example.com") {
   const loginResponse = await login(app, email);
   assert.equal(loginResponse.statusCode, 200);
@@ -67,6 +78,52 @@ test("POST /internal/v1/auth/login issues a session token and GET /internal/v1/m
 
   assert.equal(meResponse.statusCode, 200);
   assert.deepEqual(meResponse.json().user, loginBody.user);
+});
+
+test("POST /internal/v1/auth/login infers the workspace for single-workspace users", async () => {
+  const { app } = await createAuthApp();
+  const loginResponse = await loginWithoutOrg(app);
+
+  assert.equal(loginResponse.statusCode, 200);
+  const loginBody = loginResponse.json();
+  assert.equal(loginBody.ok, true);
+  assert.equal(typeof loginBody.token, "string");
+  assert.equal(loginBody.user.orgId, "org_internal");
+  assert.equal(loginBody.user.email, "admin@example.com");
+
+  const meResponse = await app.inject({
+    method: "GET",
+    url: "/internal/v1/me",
+    headers: { authorization: `Bearer ${loginBody.token}` }
+  });
+
+  assert.equal(meResponse.statusCode, 200);
+  assert.deepEqual(meResponse.json().user, loginBody.user);
+});
+
+test("POST /internal/v1/auth/login asks multi-workspace users to choose a workspace", async () => {
+  const { app, store } = await createAuthApp();
+  await store.createInternalUser({
+    orgId: "org_other",
+    email: "admin@example.com",
+    displayName: "Other Admin",
+    passwordHash: await hashPassword("secret"),
+    roles: ["sales"]
+  });
+
+  const response = await loginWithoutOrg(app);
+  const body = response.json();
+
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(body, {
+    ok: false,
+    error: "workspace_selection_required",
+    workspaces: [
+      { orgId: "org_internal", name: "org_internal", roles: ["admin"] },
+      { orgId: "org_other", name: "org_other", roles: ["sales"] }
+    ]
+  });
+  assert.equal("token" in body, false);
 });
 
 test("POST /internal/v1/auth/login rejects invalid credentials", async () => {
@@ -130,6 +187,51 @@ test("legacy development bearer tokens cannot access internal APIs", async () =>
 
   assert.equal(response.statusCode, 401);
   assert.deepEqual(response.json(), { ok: false, error: "internal_unauthorized" });
+});
+
+test("authenticated users can list and switch active workspaces", async () => {
+  const { app, store } = await createAuthApp();
+  await store.createInternalUser({
+    orgId: "org_other",
+    email: "admin@example.com",
+    displayName: "Other Admin",
+    passwordHash: await hashPassword("secret"),
+    roles: ["sales"]
+  });
+  const loginResponse = await login(app);
+  const token = loginResponse.json().token;
+  const headers = { authorization: `Bearer ${token}` };
+
+  const listResponse = await app.inject({
+    method: "GET",
+    url: "/internal/v1/workspaces",
+    headers
+  });
+  const switchResponse = await app.inject({
+    method: "PATCH",
+    url: "/internal/v1/workspaces/active",
+    headers,
+    payload: { orgId: "org_other" }
+  });
+  const meResponse = await app.inject({
+    method: "GET",
+    url: "/internal/v1/me",
+    headers
+  });
+
+  assert.equal(listResponse.statusCode, 200);
+  assert.deepEqual(listResponse.json(), {
+    ok: true,
+    workspaces: [
+      { orgId: "org_internal", name: "org_internal", roles: ["admin"] },
+      { orgId: "org_other", name: "org_other", roles: ["sales"] }
+    ]
+  });
+  assert.equal(switchResponse.statusCode, 200);
+  assert.equal(switchResponse.json().user.orgId, "org_other");
+  assert.equal(switchResponse.json().user.displayName, "Other Admin");
+  assert.deepEqual(switchResponse.json().user.roles, ["sales"]);
+  assert.deepEqual(meResponse.json().user, switchResponse.json().user);
 });
 
 test("POST /internal/v1/auth/logout revokes the current session", async () => {

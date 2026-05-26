@@ -14,10 +14,12 @@ import type {
   CreateReplySuggestionInput,
   CreateUserInvitationInput,
   CustomerScope,
+  GetInternalUserCredentialsByEmailInput,
   GetInternalUserCredentialsInput,
   InternalSession,
   InternalUser,
   InternalUserCredentials,
+  InternalWorkspaceSummary,
   IssueInternalSessionInput,
   RegisteredCollectorDevice,
   RegisterCollectorDeviceInput,
@@ -35,6 +37,7 @@ import type {
   StoredReplySuggestion,
   StoredSellerAccount,
   StoredUserInvitation,
+  SwitchInternalSessionOrgInput,
   SyncBatch,
   SyncBatchResult,
   SyncConversationInput,
@@ -60,6 +63,7 @@ export class InMemorySyncStore {
   private readonly internalSessions = new Map<string, InternalSession>();
   private readonly userInvitations = new Map<string, StoredUserInvitation & { tokenHash: string }>();
   private readonly collectorDevices = new Map<string, CollectorDevice & { tokenHash: string }>();
+  private readonly orgs = new Map<string, { id: string; name: string }>();
   private collaborationSequence = 0;
   private internalUserSequence = 0;
   private collectorDeviceSequence = 0;
@@ -67,6 +71,7 @@ export class InMemorySyncStore {
   private aiSequence = 0;
 
   async acceptSyncBatch(batch: SyncBatch): Promise<SyncBatchResult> {
+    this.ensureOrg(batch.orgId);
     const warnings: string[] = [];
     let acceptedCount = 0;
     let rejectedCount = 0;
@@ -290,6 +295,7 @@ export class InMemorySyncStore {
   }
 
   async createInternalUser(input: CreateInternalUserInput): Promise<InternalUser> {
+    this.ensureOrg(input.orgId);
     const now = new Date().toISOString();
     const normalizedEmail = input.email.trim().toLowerCase();
     const key = internalUserKey(input.orgId, normalizedEmail);
@@ -319,6 +325,31 @@ export class InMemorySyncStore {
   async getInternalUserCredentials(input: GetInternalUserCredentialsInput): Promise<InternalUserCredentials | null> {
     const user = this.internalUsers.get(internalUserKey(input.orgId, input.email.trim().toLowerCase()));
     return user ? { ...toPublicInternalUser(user), passwordHash: user.passwordHash } : null;
+  }
+
+  async getInternalUserCredentialsByEmail(
+    input: GetInternalUserCredentialsByEmailInput
+  ): Promise<InternalUserCredentials[]> {
+    const normalizedEmail = input.email.trim().toLowerCase();
+    return Array.from(this.internalUsers.values())
+      .filter((user) => user.email === normalizedEmail && user.status === "active")
+      .map((user) => ({ ...toPublicInternalUser(user), passwordHash: user.passwordHash }))
+      .sort((left, right) => left.orgId.localeCompare(right.orgId));
+  }
+
+  async listInternalUserWorkspacesByEmail(email: string): Promise<InternalWorkspaceSummary[]> {
+    const normalizedEmail = email.trim().toLowerCase();
+    return Array.from(this.internalUsers.values())
+      .filter((user) => user.email === normalizedEmail && user.status === "active")
+      .map((user) => ({
+        orgId: user.orgId,
+        name: this.orgs.get(user.orgId)?.name || user.orgId,
+        userId: user.id,
+        email: user.email,
+        displayName: user.displayName,
+        roles: user.roles
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
   }
 
   async updateInternalUser(input: UpdateInternalUserInput): Promise<InternalUser> {
@@ -363,6 +394,27 @@ export class InMemorySyncStore {
 
   async revokeInternalSession(input: RevokeInternalSessionInput): Promise<boolean> {
     return this.internalSessions.delete(hashContent(input.token));
+  }
+
+  async switchInternalSessionOrg(input: SwitchInternalSessionOrgInput): Promise<InternalSession> {
+    const tokenHash = hashContent(input.token);
+    const existingSession = this.internalSessions.get(tokenHash);
+    if (!existingSession) throw new Error("internal_session_not_found");
+
+    const targetUser = this.internalUsers.get(internalUserKey(input.orgId, existingSession.email));
+    if (!targetUser || targetUser.status !== "active") {
+      throw new Error("workspace_not_found");
+    }
+
+    const switched: InternalSession = {
+      ...existingSession,
+      orgId: targetUser.orgId,
+      userId: targetUser.id,
+      displayName: targetUser.displayName,
+      roles: targetUser.roles
+    };
+    this.internalSessions.set(tokenHash, switched);
+    return switched;
   }
 
   async createUserInvitation(input: CreateUserInvitationInput): Promise<StoredUserInvitation> {
@@ -477,6 +529,12 @@ export class InMemorySyncStore {
   private nextInternalUserId(): string {
     this.internalUserSequence += 1;
     return `user_${this.internalUserSequence}`;
+  }
+
+  private ensureOrg(orgId: string): void {
+    if (!this.orgs.has(orgId)) {
+      this.orgs.set(orgId, { id: orgId, name: orgId });
+    }
   }
 
   private nextCollectorDeviceId(): string {

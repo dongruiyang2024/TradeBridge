@@ -223,6 +223,19 @@ export interface GetInternalUserCredentialsInput {
   email: string;
 }
 
+export interface GetInternalUserCredentialsByEmailInput {
+  email: string;
+}
+
+export interface InternalWorkspaceSummary {
+  orgId: string;
+  name: string;
+  userId: string;
+  email: string;
+  displayName: string;
+  roles: InternalRole[];
+}
+
 export interface UpdateInternalUserInput {
   orgId: string;
   userId: string;
@@ -234,6 +247,11 @@ export interface UpdateInternalUserInput {
 
 export interface RevokeInternalSessionInput {
   token: string;
+}
+
+export interface SwitchInternalSessionOrgInput {
+  token: string;
+  orgId: string;
 }
 
 export interface CreateUserInvitationInput {

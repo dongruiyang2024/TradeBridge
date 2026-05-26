@@ -74,6 +74,12 @@ export interface StoredCustomerAssignment extends CustomerScope {
 
 export type InternalRole = "admin" | "supervisor" | "sales";
 
+export interface InternalWorkspaceSummary {
+  orgId: string;
+  name: string;
+  roles: InternalRole[];
+}
+
 export interface InternalUser {
   id: string;
   orgId: string;
@@ -148,9 +154,11 @@ export interface AcceptInvitationResult extends LoginResult {
 }
 
 export interface InternalApiClient {
-  login(input: { orgId: string; email: string; password: string }): Promise<LoginResult>;
+  login(input: { orgId?: string; email: string; password: string }): Promise<LoginResult>;
   logout(): Promise<void>;
   setupAdmin(input: SetupAdminInput): Promise<InternalUser>;
+  listWorkspaces(): Promise<InternalWorkspaceSummary[]>;
+  switchWorkspace(orgId: string): Promise<InternalUser>;
   listInternalUsers(orgId: string): Promise<InternalUser[]>;
   createInternalUser(input: CreateInternalUserInput): Promise<InternalUser>;
   disableInternalUser(input: DisableInternalUserInput): Promise<InternalUser>;
@@ -158,9 +166,9 @@ export interface InternalApiClient {
   createInvitation(input: CreateInvitationInput): Promise<InternalInvitation>;
   getInvitation(token: string): Promise<InternalInvitation>;
   acceptInvitation(input: AcceptInvitationInput): Promise<AcceptInvitationResult>;
-  listCustomers(orgId: string): Promise<StoredCustomer[]>;
-  listConversations(orgId: string): Promise<StoredConversation[]>;
-  listMessages(orgId: string, externalConversationId: string): Promise<StoredMessage[]>;
+  listCustomers(orgId?: string): Promise<StoredCustomer[]>;
+  listConversations(orgId?: string): Promise<StoredConversation[]>;
+  listMessages(orgId: string | undefined, externalConversationId: string): Promise<StoredMessage[]>;
   getCustomerAssignment(scope: CustomerScope): Promise<StoredCustomerAssignment | null>;
   listCustomerNotes(scope: CustomerScope): Promise<StoredCustomerNote[]>;
   createCustomerNote(scope: CustomerScope, input: { body: string }): Promise<StoredCustomerNote>;

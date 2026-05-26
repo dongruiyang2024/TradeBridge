@@ -8,6 +8,7 @@ import {
   RefreshCcw,
   Search,
   Send,
+  Settings2,
   ShieldCheck,
   StickyNote,
   Tag,
@@ -15,8 +16,14 @@ import {
   UserRound
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { createInternalApiClient } from "./api";
-import type { CreateInternalUserInput, InternalRole, InternalUser, WorkspaceState } from "./types";
+import { createInternalApiClient, WorkspaceSelectionRequiredError } from "./api";
+import type {
+  CreateInternalUserInput,
+  InternalRole,
+  InternalUser,
+  InternalWorkspaceSummary,
+  WorkspaceState
+} from "./types";
 import {
   addTagToSelectedCustomer,
   createInitialWorkspaceState,
@@ -27,7 +34,9 @@ import {
   selectCustomer
 } from "./workspace-state";
 
-const DEFAULT_ORG_ID = "org_internal";
+const DEFAULT_ORG_ID =
+  (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_TRADEBRIDGE_ORG_ID ||
+  "org_internal";
 const STORAGE_KEYS = {
   session: "wangwang.internalSession",
   legacyToken: "wangwang.internalToken",
@@ -58,6 +67,8 @@ export function App() {
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
+  const [advancedConnectionOpen, setAdvancedConnectionOpen] = useState(false);
+  const [workspaceChoices, setWorkspaceChoices] = useState<InternalWorkspaceSummary[]>([]);
   const [state, setState] = useState<WorkspaceState>(() => createInitialWorkspaceState({ orgId }));
   const [users, setUsers] = useState<InternalUser[]>([]);
   const [userManagementMode, setUserManagementMode] = useState(false);
@@ -128,13 +139,21 @@ export function App() {
   async function runLogin(login: () => Promise<{ token: string; user: InternalUser }>) {
     setLoading(true);
     setAuthError("");
+    setWorkspaceChoices([]);
     try {
       const result = await login();
-      setSession({ token: result.token, user: result.user, orgId, serverBaseUrl });
+      const nextOrgId = result.user.orgId || orgId;
+      setOrgId(nextOrgId);
+      setSession({ token: result.token, user: result.user, orgId: nextOrgId, serverBaseUrl });
       setSetupMode(false);
       setUserManagementMode(false);
     } catch (error) {
-      setAuthError(errorMessage(error));
+      if (error instanceof WorkspaceSelectionRequiredError) {
+        setWorkspaceChoices(error.workspaces);
+        setAuthError("请选择要进入的工作空间。");
+      } else {
+        setAuthError(errorMessage(error));
+      }
     } finally {
       setLoading(false);
     }
@@ -147,7 +166,19 @@ export function App() {
     }
     void runLogin(async () => {
       const result = await createInternalApiClient({ baseUrl: serverBaseUrl, token: "" }).login({
-        orgId,
+        email: email.trim(),
+        password
+      });
+      return { token: result.token, user: result.user };
+    });
+  }
+
+  function handleWorkspaceLogin(nextOrgId: string) {
+    setOrgId(nextOrgId);
+    setWorkspaceChoices([]);
+    void runLogin(async () => {
+      const result = await createInternalApiClient({ baseUrl: serverBaseUrl, token: "" }).login({
+        orgId: nextOrgId,
         email: email.trim(),
         password
       });
@@ -208,12 +239,14 @@ export function App() {
   function handleOrgIdChange(value: string) {
     setOrgId(value);
     setAuthError("");
+    setWorkspaceChoices([]);
     clearLocalSession(value);
   }
 
   function handleServerBaseUrlChange(value: string) {
     setServerBaseUrl(value);
     setAuthError("");
+    setWorkspaceChoices([]);
     clearLocalSession(orgId);
   }
 
@@ -284,19 +317,22 @@ export function App() {
 
     return (
       <LoginView
-        orgId={orgId}
         serverBaseUrl={serverBaseUrl}
         email={email}
         password={password}
         loading={loading}
         error={authError}
-        onOrgIdChange={handleOrgIdChange}
+        advancedOpen={advancedConnectionOpen}
+        workspaceChoices={workspaceChoices}
+        onAdvancedOpenChange={setAdvancedConnectionOpen}
         onServerBaseUrlChange={handleServerBaseUrlChange}
         onEmailChange={setEmail}
         onPasswordChange={setPassword}
         onPasswordLogin={handlePasswordLogin}
+        onWorkspaceLogin={handleWorkspaceLogin}
         onSetupMode={() => {
           setAuthError("");
+          setWorkspaceChoices([]);
           setSetupMode(true);
         }}
       />
@@ -343,17 +379,19 @@ export function App() {
 }
 
 interface LoginViewProps {
-  orgId: string;
   serverBaseUrl: string;
   email: string;
   password: string;
   loading: boolean;
   error: string;
-  onOrgIdChange(value: string): void;
+  advancedOpen: boolean;
+  workspaceChoices: InternalWorkspaceSummary[];
+  onAdvancedOpenChange(value: boolean): void;
   onServerBaseUrlChange(value: string): void;
   onEmailChange(value: string): void;
   onPasswordChange(value: string): void;
   onPasswordLogin(): void;
+  onWorkspaceLogin(orgId: string): void;
   onSetupMode(): void;
 }
 
@@ -377,18 +415,6 @@ export function LoginView(props: LoginViewProps) {
           }}
         >
           <label>
-            Org
-            <input value={props.orgId} onChange={(event) => props.onOrgIdChange(event.target.value)} />
-          </label>
-          <label>
-            API
-            <input
-              placeholder="/internal 代理"
-              value={props.serverBaseUrl}
-              onChange={(event) => props.onServerBaseUrlChange(event.target.value)}
-            />
-          </label>
-          <label>
             邮箱
             <input
               type="email"
@@ -404,11 +430,40 @@ export function LoginView(props: LoginViewProps) {
               onChange={(event) => props.onPasswordChange(event.target.value)}
             />
           </label>
+          <button
+            className="text-button connection-toggle"
+            type="button"
+            onClick={() => props.onAdvancedOpenChange(!props.advancedOpen)}
+          >
+            <Settings2 size={16} />
+            <span>连接设置</span>
+          </button>
+          {props.advancedOpen && (
+            <label>
+              API
+              <input
+                placeholder="/internal 代理"
+                value={props.serverBaseUrl}
+                onChange={(event) => props.onServerBaseUrlChange(event.target.value)}
+              />
+            </label>
+          )}
           <button type="submit" disabled={props.loading}>
             <LogIn size={16} />
             <span>登录</span>
           </button>
         </form>
+
+        {props.workspaceChoices.length > 0 && (
+          <div className="workspace-choice-list">
+            {props.workspaceChoices.map((workspace) => (
+              <button key={workspace.orgId} type="button" onClick={() => props.onWorkspaceLogin(workspace.orgId)}>
+                <span>{workspace.name}</span>
+                <small>{workspace.roles.join(" / ")}</small>
+              </button>
+            ))}
+          </div>
+        )}
 
         <button className="text-button" type="button" onClick={props.onSetupMode}>
           <ShieldCheck size={16} />
