@@ -138,6 +138,27 @@ test("POST and GET conversation reply suggestions use provider output and persis
   assert.deepEqual(getResponse.json().suggestions, createResponse.json().suggestions);
 });
 
+test("AI routes reject orgId outside the authenticated user's org", async () => {
+  const app = await createSeededApp();
+  const authHeaders = await createInternalAuthHeaders(app);
+  const customerSummaryPath =
+    "/internal/v1/customers/customer-1/ai-summary?orgId=org_other&sellerAccountExternalId=seller-1";
+  const replySuggestionsPath =
+    "/internal/v1/conversations/conv-1/reply-suggestions?orgId=org_other&sellerAccountExternalId=seller-1";
+  const requests = [
+    { method: "POST", url: customerSummaryPath, headers: authHeaders },
+    { method: "GET", url: customerSummaryPath, headers: authHeaders },
+    { method: "POST", url: replySuggestionsPath, headers: authHeaders, payload: { tone: "concise" } },
+    { method: "GET", url: replySuggestionsPath, headers: authHeaders }
+  ] as const;
+
+  for (const request of requests) {
+    const response = await app.inject(request);
+    assert.equal(response.statusCode, 403);
+    assert.deepEqual(response.json(), { ok: false, error: "forbidden" });
+  }
+});
+
 test("AI routes reject collector tokens", async () => {
   const app = await createSeededApp();
   const response = await app.inject({

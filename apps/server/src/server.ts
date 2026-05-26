@@ -407,6 +407,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!orgId) {
       return reply.code(400).send({ ok: false, error: "org_id_required" });
     }
+    if (!requireOrgScope(auth, orgId, reply)) return;
 
     const registered = await store.registerCollectorDevice({
       orgId,
@@ -440,6 +441,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!orgId) {
       return reply.code(400).send({ ok: false, error: "org_id_required" });
     }
+    if (!requireOrgScope(auth, orgId, reply)) return;
 
     return {
       ok: true,
@@ -456,6 +458,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!orgId || !deviceId) {
       return reply.code(400).send({ ok: false, error: "collector_device_scope_required" });
     }
+    if (!requireOrgScope(auth, orgId, reply)) return;
 
     try {
       const device = await store.revokeCollectorDevice({ orgId, deviceId });
@@ -490,6 +493,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!orgId) {
       return reply.code(400).send({ ok: false, error: "org_id_required" });
     }
+    if (!requireOrgScope(auth, orgId, reply)) return;
 
     return {
       ok: true,
@@ -505,6 +509,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!orgId) {
       return reply.code(400).send({ ok: false, error: "org_id_required" });
     }
+    if (!requireOrgScope(auth, orgId, reply)) return;
 
     return {
       ok: true,
@@ -520,6 +525,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!orgId) {
       return reply.code(400).send({ ok: false, error: "org_id_required" });
     }
+    if (!requireOrgScope(auth, orgId, reply)) return;
 
     const params = request.params as { externalConversationId?: string };
     return {
@@ -536,6 +542,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
+    if (!requireOrgScope(auth, scope.orgId, reply)) return;
 
     const bundle = await loadCustomerMessageBundle(store, scope);
     if (!bundle.customer) {
@@ -575,6 +582,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
+    if (!requireOrgScope(auth, scope.orgId, reply)) return;
 
     return {
       ok: true,
@@ -585,6 +593,12 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   app.post("/internal/v1/conversations/:externalConversationId/reply-suggestions", async (request, reply) => {
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
+
+    const orgId = queryOrgId(request.query);
+    if (!orgId) {
+      return reply.code(400).send({ ok: false, error: "conversation_scope_required" });
+    }
+    if (!requireOrgScope(auth, orgId, reply)) return;
 
     const conversationScope = await resolveConversationScope(store, request.query, request.params);
     if (!conversationScope) {
@@ -626,6 +640,12 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
     if (!auth) return;
 
+    const orgId = queryOrgId(request.query);
+    if (!orgId) {
+      return reply.code(400).send({ ok: false, error: "conversation_scope_required" });
+    }
+    if (!requireOrgScope(auth, orgId, reply)) return;
+
     const conversationScope = await resolveConversationScope(store, request.query, request.params);
     if (!conversationScope) {
       return reply.code(400).send({ ok: false, error: "conversation_scope_required" });
@@ -645,6 +665,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
+    if (!requireOrgScope(auth, scope.orgId, reply)) return;
 
     const body = bodyStringField(request.body, "body");
     if (!body) {
@@ -665,6 +686,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
+    if (!requireOrgScope(auth, scope.orgId, reply)) return;
 
     return {
       ok: true,
@@ -680,6 +702,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
+    if (!requireOrgScope(auth, scope.orgId, reply)) return;
 
     const tag = bodyStringField(request.body, "tag");
     if (!tag) {
@@ -700,6 +723,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
+    if (!requireOrgScope(auth, scope.orgId, reply)) return;
 
     return {
       ok: true,
@@ -715,6 +739,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
+    if (!requireOrgScope(auth, scope.orgId, reply)) return;
 
     const assignedToUserId = bodyStringField(request.body, "assignedToUserId");
     if (!assignedToUserId) {
@@ -753,6 +778,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
+    if (!requireOrgScope(auth, scope.orgId, reply)) return;
 
     return {
       ok: true,
@@ -768,6 +794,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
+    if (!requireOrgScope(auth, scope.orgId, reply)) return;
 
     const title = bodyStringField(request.body, "title");
     if (!title) {
@@ -794,6 +821,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!scope) {
       return reply.code(400).send({ ok: false, error: "customer_scope_required" });
     }
+    if (!requireOrgScope(auth, scope.orgId, reply)) return;
 
     return {
       ok: true,
@@ -810,6 +838,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!orgId) {
       return reply.code(400).send({ ok: false, error: "org_id_required" });
     }
+    if (!requireOrgScope(auth, orgId, reply)) return;
     if (!taskId) {
       return reply.code(400).send({ ok: false, error: "follow_up_task_required" });
     }
@@ -953,6 +982,12 @@ async function requireInternalAuth(
 
 function requireRole(auth: InternalAuthContext, allowedRoles: InternalRole[]): boolean {
   return allowedRoles.some((role) => auth.roles.includes(role));
+}
+
+function requireOrgScope(auth: InternalAuthContext, orgId: string, reply: FastifyReply): boolean {
+  if (auth.user.orgId === orgId) return true;
+  reply.code(403).send({ ok: false, error: "forbidden" });
+  return false;
 }
 
 async function sessionAuthContext(store: SyncStore, token: string): Promise<InternalAuthContext | null> {

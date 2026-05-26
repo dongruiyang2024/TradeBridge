@@ -125,6 +125,31 @@ test("POST and GET follow-up tasks return open tasks by default", async () => {
   assert.deepEqual(listResponse.json().tasks, [createResponse.json().task]);
 });
 
+test("customer collaboration routes reject orgId outside the authenticated user's org", async () => {
+  const app = await createSeededApp();
+  const authHeaders = await createInternalAuthHeaders(app);
+  const crossOrgQuery = "orgId=org_other&sellerAccountExternalId=seller-1";
+  const requests = [
+    { method: "POST", url: `${customerPath}/notes?${crossOrgQuery}`, headers: authHeaders, payload: { body: "Nope." } },
+    { method: "GET", url: `${customerPath}/notes?${crossOrgQuery}`, headers: authHeaders },
+    { method: "POST", url: `${customerPath}/tags?${crossOrgQuery}`, headers: authHeaders, payload: { tag: "hot-lead" } },
+    { method: "GET", url: `${customerPath}/tags?${crossOrgQuery}`, headers: authHeaders },
+    {
+      method: "POST",
+      url: `${customerPath}/follow-up-tasks?${crossOrgQuery}`,
+      headers: authHeaders,
+      payload: { title: "Send revised quotation" }
+    },
+    { method: "GET", url: `${customerPath}/follow-up-tasks?${crossOrgQuery}`, headers: authHeaders }
+  ] as const;
+
+  for (const request of requests) {
+    const response = await app.inject(request);
+    assert.equal(response.statusCode, 403);
+    assert.deepEqual(response.json(), { ok: false, error: "forbidden" });
+  }
+});
+
 test("customer collaboration routes reject collector device tokens", async () => {
   const app = await createSeededApp();
   const response = await app.inject({

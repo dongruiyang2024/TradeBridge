@@ -130,6 +130,50 @@ test("PATCH /internal/v1/follow-up-tasks/:id updates mutable fields and writes a
   });
 });
 
+test("PATCH /internal/v1/follow-up-tasks/:id rejects orgId outside the authenticated user's org", async () => {
+  const { app } = await createSeededApp();
+  const authHeaders = await createInternalAuthHeaders(app);
+  const createTaskResponse = await app.inject({
+    method: "POST",
+    url: `${customerPath}/follow-up-tasks?${customerQuery}`,
+    headers: authHeaders,
+    payload: { title: "Send revised quotation" }
+  });
+  const response = await app.inject({
+    method: "PATCH",
+    url: `/internal/v1/follow-up-tasks/${createTaskResponse.json().task.id}`,
+    headers: authHeaders,
+    payload: {
+      orgId: "org_other",
+      status: "done"
+    }
+  });
+
+  assert.equal(response.statusCode, 403);
+  assert.deepEqual(response.json(), { ok: false, error: "forbidden" });
+});
+
+test("customer assignment routes reject orgId outside the authenticated user's org", async () => {
+  const { app } = await createSeededApp();
+  const authHeaders = await createInternalAuthHeaders(app);
+  const crossOrgQuery = "orgId=org_other&sellerAccountExternalId=seller-1";
+  const requests = [
+    {
+      method: "POST",
+      url: `${customerPath}/assignment?${crossOrgQuery}`,
+      headers: authHeaders,
+      payload: { assignedToUserId: "user-2" }
+    },
+    { method: "GET", url: `${customerPath}/assignment?${crossOrgQuery}`, headers: authHeaders }
+  ] as const;
+
+  for (const request of requests) {
+    const response = await app.inject(request);
+    assert.equal(response.statusCode, 403);
+    assert.deepEqual(response.json(), { ok: false, error: "forbidden" });
+  }
+});
+
 test("assignment and follow-up update routes reject invalid scopes", async () => {
   const { app } = await createSeededApp();
   const authHeaders = await createInternalAuthHeaders(app);

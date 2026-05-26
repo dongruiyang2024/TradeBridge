@@ -149,6 +149,43 @@ test("static collector device tokens remain available as a development fallback"
   assert.equal(response.json().ok, true);
 });
 
+test("collector device routes reject orgId outside the authenticated user's org", async () => {
+  const { app, store } = await createDeviceAdminApp();
+  const authHeaders = await createInternalAuthHeaders(app);
+  const otherDevice = await store.registerCollectorDevice({
+    orgId: "org_other",
+    deviceName: "Other Org Device"
+  });
+  const requests = [
+    {
+      method: "POST",
+      url: "/internal/v1/collector-devices",
+      headers: authHeaders,
+      payload: {
+        orgId: "org_other",
+        deviceName: "MacBook"
+      }
+    },
+    {
+      method: "GET",
+      url: "/internal/v1/collector-devices?orgId=org_other",
+      headers: authHeaders
+    },
+    {
+      method: "POST",
+      url: `/internal/v1/collector-devices/${otherDevice.id}/revoke`,
+      headers: authHeaders,
+      payload: { orgId: "org_other" }
+    }
+  ] as const;
+
+  for (const request of requests) {
+    const response = await app.inject(request);
+    assert.equal(response.statusCode, 403);
+    assert.deepEqual(response.json(), { ok: false, error: "forbidden" });
+  }
+});
+
 test("sales users cannot manage collector devices", async () => {
   const { app } = await createDeviceAdminApp();
   const loginResponse = await app.inject({

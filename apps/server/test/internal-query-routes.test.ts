@@ -135,6 +135,22 @@ test("GET /internal/v1/conversations/:id/messages returns conversation messages"
   assert.equal(response.json().messages[0].content, "hello");
 });
 
+test("internal query APIs reject orgId outside the authenticated user's org", async () => {
+  const app = await createSeededApp();
+  const authHeaders = await createInternalAuthHeaders(app);
+  const requests = [
+    { method: "GET", url: "/internal/v1/customers?orgId=org_other", headers: authHeaders },
+    { method: "GET", url: "/internal/v1/conversations?orgId=org_other", headers: authHeaders },
+    { method: "GET", url: "/internal/v1/conversations/conv-1/messages?orgId=org_other", headers: authHeaders }
+  ] as const;
+
+  for (const request of requests) {
+    const response = await app.inject(request);
+    assert.equal(response.statusCode, 403);
+    assert.deepEqual(response.json(), { ok: false, error: "forbidden" });
+  }
+});
+
 test("collector device tokens cannot read internal query APIs", async () => {
   const app = await createSeededApp();
   const response = await app.inject({
