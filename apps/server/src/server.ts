@@ -6,6 +6,8 @@ import {
   createNodePostgresClient,
   runMigrations,
   type AddCustomerTagInput,
+  type AcceptUserInvitationInput,
+  type AcceptUserInvitationResult,
   type AssignCustomerInput,
   type CollectorDevice,
   type ConversationCustomerScope,
@@ -16,6 +18,7 @@ import {
   type RevokeCollectorDeviceInput,
   type RevokeInternalSessionInput,
   type CreateInternalUserInput,
+  type CreateUserInvitationInput,
   type CreateCustomerNoteInput,
   type CreateFollowUpTaskInput,
   type CreateReplySuggestionInput,
@@ -36,9 +39,11 @@ import {
   type StoredFollowUpTask,
   type StoredMessage,
   type StoredReplySuggestion,
+  type StoredUserInvitation,
   type SqlClient,
   type SyncBatch,
   type SyncBatchResult,
+  type UpdateInternalUserInput,
   type UpdateFollowUpTaskInput
 } from "@wangwang/database";
 import {
@@ -48,11 +53,12 @@ import {
   type AiJobQueue
 } from "./ai-queue.js";
 import { createDeterministicAiProvider, type AiProvider } from "./ai-service.js";
-import { verifyPassword } from "./auth.js";
+import { hashPassword, verifyPassword } from "./auth.js";
 
 export interface CreateServerOptions {
   store?: SyncStore;
   deviceTokens?: string[];
+  setupToken?: string;
   aiProvider?: AiProvider;
   aiJobQueue?: AiJobQueue;
   logger?: boolean;
@@ -61,6 +67,7 @@ export interface CreateServerOptions {
 export interface CreateServerFromEnvOptions {
   env?: Record<string, string | undefined>;
   deviceTokens?: string[];
+  setupToken?: string;
   logger?: boolean;
   sqlClientFactory?: (databaseUrl: string) => Promise<SqlClient> | SqlClient;
   aiJobQueueFactory?: (env: Record<string, string | undefined>) => Promise<AiJobQueue | undefined> | AiJobQueue | undefined;
@@ -86,10 +93,15 @@ export interface SyncStore {
   createReplySuggestion(input: CreateReplySuggestionInput): Promise<StoredReplySuggestion> | StoredReplySuggestion;
   listReplySuggestions(scope: ConversationCustomerScope): Promise<StoredReplySuggestion[]> | StoredReplySuggestion[];
   createInternalUser(input: CreateInternalUserInput): Promise<InternalUser> | InternalUser;
+  listInternalUsers(orgId: string): Promise<InternalUser[]> | InternalUser[];
   getInternalUserCredentials(input: GetInternalUserCredentialsInput): Promise<InternalUserCredentials | null> | InternalUserCredentials | null;
+  updateInternalUser(input: UpdateInternalUserInput): Promise<InternalUser> | InternalUser;
   issueInternalSession(input: IssueInternalSessionInput): Promise<InternalSession> | InternalSession;
   getInternalSession(token: string): Promise<InternalSession | null> | InternalSession | null;
   revokeInternalSession(input: RevokeInternalSessionInput): Promise<boolean> | boolean;
+  createUserInvitation(input: CreateUserInvitationInput): Promise<StoredUserInvitation> | StoredUserInvitation;
+  getUserInvitation(token: string): Promise<StoredUserInvitation | null> | StoredUserInvitation | null;
+  acceptUserInvitation(input: AcceptUserInvitationInput): Promise<AcceptUserInvitationResult> | AcceptUserInvitationResult;
   registerCollectorDevice(input: RegisterCollectorDeviceInput): Promise<RegisteredCollectorDevice> | RegisteredCollectorDevice;
   listCollectorDevices(orgId: string): Promise<CollectorDevice[]> | CollectorDevice[];
   revokeCollectorDevice(input: RevokeCollectorDeviceInput): Promise<CollectorDevice> | CollectorDevice;
@@ -103,6 +115,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   const aiJobQueue = options.aiJobQueue || createSyncAiJobQueue();
   const internalAccessRoles: InternalRole[] = ["admin", "supervisor", "sales"];
   const adminRoles: InternalRole[] = ["admin"];
+  const setupOrgLocks = new Set<string>();
   const app = Fastify({
     logger: options.logger ?? false
   });
@@ -173,6 +186,49 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     };
   });
 
+  app.post("/internal/v1/setup/admin", async (request, reply) => {
+    const setupToken = options.setupToken || "";
+    if (!setupToken || bearerToken(request.headers.authorization || "") !== setupToken) {
+      return reply.code(401).send({ ok: false, error: "setup_unauthorized" });
+    }
+
+    const orgId = bodyStringField(request.body, "orgId");
+    const email = bodyStringField(request.body, "email");
+    const displayName = bodyStringField(request.body, "displayName");
+    const password = bodyStringField(request.body, "password");
+    if (!orgId || !email || !displayName || !password) {
+      return reply.code(400).send({ ok: false, error: "invalid_setup_request" });
+    }
+
+    if (setupOrgLocks.has(orgId)) {
+      return reply.code(409).send({ ok: false, error: "setup_in_progress" });
+    }
+
+    setupOrgLocks.add(orgId);
+    try {
+      const existingUsers = await store.listInternalUsers(orgId);
+      const existingAdmins = existingUsers.filter((user) => user.roles.includes("admin"));
+      if (existingAdmins.length > 0) {
+        return reply.code(409).send({ ok: false, error: "admin_already_exists" });
+      }
+      if (existingUsers.some((user) => user.email === email.trim().toLowerCase())) {
+        return reply.code(409).send({ ok: false, error: "user_already_exists" });
+      }
+
+      const user = await store.createInternalUser({
+        orgId,
+        email,
+        displayName,
+        passwordHash: await hashPassword(password),
+        roles: ["admin"],
+        status: "active"
+      });
+      return { ok: true, user };
+    } finally {
+      setupOrgLocks.delete(orgId);
+    }
+  });
+
   app.get("/internal/v1/me", async (request, reply) => {
     const auth = await requireInternalAuth(request, reply, store);
     if (!auth) return;
@@ -198,6 +254,149 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     });
 
     return { ok: true };
+  });
+
+  app.get("/internal/v1/users", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, adminRoles);
+    if (!auth) return;
+
+    const orgId = queryOrgId(request.query);
+    if (!orgId) return reply.code(400).send({ ok: false, error: "org_id_required" });
+    if (auth.user.orgId !== orgId) return reply.code(403).send({ ok: false, error: "forbidden" });
+
+    return { ok: true, users: await store.listInternalUsers(orgId) };
+  });
+
+  app.post("/internal/v1/users", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, adminRoles);
+    if (!auth) return;
+
+    const orgId = bodyStringField(request.body, "orgId");
+    const email = bodyStringField(request.body, "email");
+    const displayName = bodyStringField(request.body, "displayName");
+    const password = bodyStringField(request.body, "password");
+    const roles = bodyRolesField(request.body);
+    if (!orgId || !email || !displayName || !password || roles.length === 0) {
+      return reply.code(400).send({ ok: false, error: "invalid_user_request" });
+    }
+    if (auth.user.orgId !== orgId) return reply.code(403).send({ ok: false, error: "forbidden" });
+
+    const user = await store.createInternalUser({
+      orgId,
+      email,
+      displayName,
+      passwordHash: await hashPassword(password),
+      roles,
+      status: "active"
+    });
+    return { ok: true, user };
+  });
+
+  app.post("/internal/v1/users/:userId/disable", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, adminRoles);
+    if (!auth) return;
+
+    const orgId = bodyStringField(request.body, "orgId");
+    const userId = queryStringField(request.params, "userId");
+    if (!orgId || !userId) return reply.code(400).send({ ok: false, error: "invalid_user_request" });
+    if (auth.user.orgId !== orgId) return reply.code(403).send({ ok: false, error: "forbidden" });
+
+    try {
+      const user = await store.updateInternalUser({ orgId, userId, status: "disabled" });
+      return { ok: true, user };
+    } catch (error) {
+      if (isNotFoundError(error, "internal_user")) {
+        return reply.code(404).send({ ok: false, error: "user_not_found" });
+      }
+      throw error;
+    }
+  });
+
+  app.post("/internal/v1/users/:userId/reset-password", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, adminRoles);
+    if (!auth) return;
+
+    const orgId = bodyStringField(request.body, "orgId");
+    const userId = queryStringField(request.params, "userId");
+    const password = bodyStringField(request.body, "password");
+    if (!orgId || !userId || !password) return reply.code(400).send({ ok: false, error: "invalid_user_request" });
+    if (auth.user.orgId !== orgId) return reply.code(403).send({ ok: false, error: "forbidden" });
+
+    try {
+      const user = await store.updateInternalUser({
+        orgId,
+        userId,
+        passwordHash: await hashPassword(password),
+        status: "active"
+      });
+      return { ok: true, user };
+    } catch (error) {
+      if (isNotFoundError(error, "internal_user")) {
+        return reply.code(404).send({ ok: false, error: "user_not_found" });
+      }
+      throw error;
+    }
+  });
+
+  app.post("/internal/v1/invitations", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, adminRoles);
+    if (!auth) return;
+
+    const orgId = bodyStringField(request.body, "orgId");
+    const email = bodyStringField(request.body, "email");
+    const displayName = bodyStringField(request.body, "displayName");
+    const roles = bodyRolesField(request.body);
+    if (!orgId || !email || !displayName || roles.length === 0) {
+      return reply.code(400).send({ ok: false, error: "invalid_invitation_request" });
+    }
+    if (auth.user.orgId !== orgId) return reply.code(403).send({ ok: false, error: "forbidden" });
+
+    const invitation = await store.createUserInvitation({
+      orgId,
+      email,
+      displayName,
+      roles,
+      createdByUserId: auth.user.id
+    });
+    return { ok: true, invitation };
+  });
+
+  app.get("/internal/v1/invitations/:token", async (request, reply) => {
+    const token = queryStringField(request.params, "token");
+    if (!token) return reply.code(400).send({ ok: false, error: "invalid_invitation_request" });
+
+    const invitation = await store.getUserInvitation(token);
+    if (!invitation) return reply.code(404).send({ ok: false, error: "invitation_not_found" });
+
+    return { ok: true, invitation };
+  });
+
+  app.post("/internal/v1/invitations/:token/accept", async (request, reply) => {
+    const token = queryStringField(request.params, "token");
+    const password = bodyStringField(request.body, "password");
+    if (!token || !password) return reply.code(400).send({ ok: false, error: "invalid_invitation_request" });
+
+    const passwordHash = await hashPassword(password);
+    try {
+      const result = await store.acceptUserInvitation({ token, passwordHash });
+      const session = await store.issueInternalSession({
+        orgId: result.user.orgId,
+        email: result.user.email,
+        passwordHash
+      });
+
+      return {
+        ok: true,
+        invitation: result.invitation,
+        user: result.user,
+        token: session.token,
+        expiresAt: session.expiresAt
+      };
+    } catch (error) {
+      const response = invitationErrorResponse(error);
+      if (response) return reply.code(response.statusCode).send({ ok: false, error: response.error });
+      throw error;
+    }
   });
 
   app.post("/internal/v1/collector-devices", async (request, reply) => {
@@ -668,6 +867,7 @@ export async function createServerFromEnv(options: CreateServerFromEnvOptions = 
   return createServer({
     store,
     deviceTokens: options.deviceTokens || envDeviceTokens(env),
+    setupToken: options.setupToken || env.WANGWANG_SETUP_TOKEN,
     aiJobQueue,
     logger: options.logger
   });
@@ -920,6 +1120,14 @@ function isNotFoundError(error: unknown, source: string): boolean {
   return message === `${source}_not_found`;
 }
 
+function invitationErrorResponse(error: unknown): { statusCode: number; error: string } | null {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message === "invitation_not_found") return { statusCode: 404, error: "invitation_not_found" };
+  if (message === "invitation_already_accepted") return { statusCode: 409, error: "invitation_already_accepted" };
+  if (message === "invitation_expired") return { statusCode: 410, error: "invitation_expired" };
+  return null;
+}
+
 function queryOrgId(query: unknown): string | null {
   const value = (query as { orgId?: unknown }).orgId;
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -946,6 +1154,17 @@ function queryStringField(source: unknown, field: string): string | null {
 function bodyStringField(source: unknown, field: string): string | null {
   const value = (source as Record<string, unknown> | null | undefined)?.[field];
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function bodyRolesField(source: unknown): InternalRole[] {
+  const roles = (source as Record<string, unknown> | null | undefined)?.roles;
+  if (!Array.isArray(roles)) return [];
+  const allowedRoles = new Set<InternalRole>(["admin", "supervisor", "sales"]);
+  if (roles.length === 0 || !roles.every((role) => typeof role === "string" && allowedRoles.has(role as InternalRole))) {
+    return [];
+  }
+  if (new Set(roles).size !== roles.length) return [];
+  return roles as InternalRole[];
 }
 
 function isValidSyncBatch(value: unknown): value is SyncBatch {
