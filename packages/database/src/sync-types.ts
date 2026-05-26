@@ -214,6 +214,61 @@ export interface CreateInternalUserInput {
   status?: string;
 }
 
+export interface InternalUserCredentials extends InternalUser {
+  passwordHash: string;
+}
+
+export interface GetInternalUserCredentialsInput {
+  orgId: string;
+  email: string;
+}
+
+export interface UpdateInternalUserInput {
+  orgId: string;
+  userId: string;
+  displayName?: string;
+  passwordHash?: string;
+  roles?: InternalRole[];
+  status?: "pending" | "active" | "disabled";
+}
+
+export interface RevokeInternalSessionInput {
+  token: string;
+}
+
+export interface CreateUserInvitationInput {
+  orgId: string;
+  email: string;
+  displayName: string;
+  roles: InternalRole[];
+  createdByUserId?: string;
+  token?: string;
+  expiresAt?: string;
+}
+
+export interface StoredUserInvitation {
+  id: string;
+  orgId: string;
+  email: string;
+  displayName: string;
+  roles: InternalRole[];
+  token?: string;
+  createdByUserId?: string;
+  expiresAt: string;
+  acceptedAt?: string;
+  createdAt: string;
+}
+
+export interface AcceptUserInvitationInput {
+  token: string;
+  passwordHash: string;
+}
+
+export interface AcceptUserInvitationResult {
+  invitation: StoredUserInvitation;
+  user: InternalUser;
+}
+
 export interface IssueInternalSessionInput {
   orgId: string;
   email: string;

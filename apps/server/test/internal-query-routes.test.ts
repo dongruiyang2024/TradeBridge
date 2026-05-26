@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { InMemorySyncStore } from "@wangwang/database";
+import { hashPassword } from "../src/auth.js";
 import { createServer } from "../src/server.js";
 
 const syncPayload = {
@@ -37,10 +38,17 @@ const syncPayload = {
 };
 
 async function createSeededApp() {
+  const store = new InMemorySyncStore();
+  await store.createInternalUser({
+    orgId: "org_internal",
+    email: "admin@example.com",
+    displayName: "Admin User",
+    passwordHash: await hashPassword("secret"),
+    roles: ["admin"]
+  });
   const app = await createServer({
-    store: new InMemorySyncStore(),
-    deviceTokens: ["device-token"],
-    internalTokens: ["internal-token"]
+    store,
+    deviceTokens: ["device-token"]
   });
 
   await app.inject({
@@ -53,12 +61,26 @@ async function createSeededApp() {
   return app;
 }
 
+async function createInternalAuthHeaders(app: Awaited<ReturnType<typeof createServer>>) {
+  const loginResponse = await app.inject({
+    method: "POST",
+    url: "/internal/v1/auth/login",
+    payload: {
+      orgId: "org_internal",
+      email: "admin@example.com",
+      password: "secret"
+    }
+  });
+  assert.equal(loginResponse.statusCode, 200);
+  return { authorization: `Bearer ${loginResponse.json().token}` };
+}
+
 test("GET /internal/v1/customers returns customers for an authorized internal token", async () => {
   const app = await createSeededApp();
   const response = await app.inject({
     method: "GET",
     url: "/internal/v1/customers?orgId=org_internal",
-    headers: { authorization: "Bearer internal-token" }
+    headers: await createInternalAuthHeaders(app)
   });
 
   assert.equal(response.statusCode, 200);
@@ -81,7 +103,7 @@ test("GET /internal/v1/conversations returns conversations for an authorized int
   const response = await app.inject({
     method: "GET",
     url: "/internal/v1/conversations?orgId=org_internal",
-    headers: { authorization: "Bearer internal-token" }
+    headers: await createInternalAuthHeaders(app)
   });
 
   assert.equal(response.statusCode, 200);
@@ -102,7 +124,7 @@ test("GET /internal/v1/conversations/:id/messages returns conversation messages"
   const response = await app.inject({
     method: "GET",
     url: "/internal/v1/conversations/conv-1/messages?orgId=org_internal",
-    headers: { authorization: "Bearer internal-token" }
+    headers: await createInternalAuthHeaders(app)
   });
 
   assert.equal(response.statusCode, 200);
@@ -111,6 +133,22 @@ test("GET /internal/v1/conversations/:id/messages returns conversation messages"
   assert.equal(response.json().messages[0].externalConversationId, "conv-1");
   assert.equal(response.json().messages[0].externalMessageId, "msg-1");
   assert.equal(response.json().messages[0].content, "hello");
+});
+
+test("internal query APIs reject orgId outside the authenticated user's org", async () => {
+  const app = await createSeededApp();
+  const authHeaders = await createInternalAuthHeaders(app);
+  const requests = [
+    { method: "GET", url: "/internal/v1/customers?orgId=org_other", headers: authHeaders },
+    { method: "GET", url: "/internal/v1/conversations?orgId=org_other", headers: authHeaders },
+    { method: "GET", url: "/internal/v1/conversations/conv-1/messages?orgId=org_other", headers: authHeaders }
+  ] as const;
+
+  for (const request of requests) {
+    const response = await app.inject(request);
+    assert.equal(response.statusCode, 403);
+    assert.deepEqual(response.json(), { ok: false, error: "forbidden" });
+  }
 });
 
 test("collector device tokens cannot read internal query APIs", async () => {
@@ -130,7 +168,7 @@ test("internal query APIs require orgId", async () => {
   const response = await app.inject({
     method: "GET",
     url: "/internal/v1/customers",
-    headers: { authorization: "Bearer internal-token" }
+    headers: await createInternalAuthHeaders(app)
   });
 
   assert.equal(response.statusCode, 400);

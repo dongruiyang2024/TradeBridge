@@ -1,20 +1,22 @@
 import {
+  Ban,
   CheckCircle2,
   Clock3,
-  KeyRound,
   LogIn,
   LogOut,
   MessageSquareText,
   RefreshCcw,
   Search,
   Send,
+  ShieldCheck,
   StickyNote,
   Tag,
+  UserPlus,
   UserRound
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createInternalApiClient } from "./api";
-import type { WorkspaceState } from "./types";
+import type { CreateInternalUserInput, InternalRole, InternalUser, WorkspaceState } from "./types";
 import {
   addTagToSelectedCustomer,
   createInitialWorkspaceState,
@@ -27,21 +29,44 @@ import {
 
 const DEFAULT_ORG_ID = "org_internal";
 const STORAGE_KEYS = {
-  token: "wangwang.internalToken",
+  session: "wangwang.internalSession",
+  legacyToken: "wangwang.internalToken",
+  legacyCurrentUser: "wangwang.currentUser",
   orgId: "wangwang.orgId",
   serverBaseUrl: "wangwang.serverBaseUrl"
 };
 
+const ROLE_OPTIONS: InternalRole[] = ["admin", "supervisor", "sales"];
+
+interface LoginSessionSnapshot {
+  token: string;
+  user: InternalUser;
+  orgId: string;
+  serverBaseUrl: string;
+}
+
 export function App() {
-  const [serverBaseUrl, setServerBaseUrl] = useState(() => readStorage(STORAGE_KEYS.serverBaseUrl, ""));
-  const [token, setToken] = useState(() => readStorage(STORAGE_KEYS.token, ""));
-  const [developerToken, setDeveloperToken] = useState("");
+  const initialServerBaseUrl = readStorage(STORAGE_KEYS.serverBaseUrl, "");
+  const initialOrgId = readStorage(STORAGE_KEYS.orgId, DEFAULT_ORG_ID);
+  const [serverBaseUrl, setServerBaseUrl] = useState(initialServerBaseUrl);
+  const [orgId, setOrgId] = useState(initialOrgId);
+  const [session, setSession] = useState<LoginSessionSnapshot | null>(() =>
+    readSessionStorage({ orgId: initialOrgId, serverBaseUrl: initialServerBaseUrl })
+  );
+  const [setupMode, setSetupMode] = useState(false);
+  const [setupToken, setSetupToken] = useState("");
   const [email, setEmail] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
-  const [orgId, setOrgId] = useState(() => readStorage(STORAGE_KEYS.orgId, DEFAULT_ORG_ID));
   const [state, setState] = useState<WorkspaceState>(() => createInitialWorkspaceState({ orgId }));
+  const [users, setUsers] = useState<InternalUser[]>([]);
+  const [userManagementMode, setUserManagementMode] = useState(false);
+  const [userManagementError, setUserManagementError] = useState("");
   const [loading, setLoading] = useState(false);
   const [authError, setAuthError] = useState("");
+  const token = session?.token || "";
+  const currentUser = session?.user || null;
+  const isCurrentAdmin = Boolean(currentUser?.orgId === orgId && currentUser.roles.includes("admin"));
 
   const apiClient = useMemo(
     () => createInternalApiClient({ baseUrl: serverBaseUrl, token }),
@@ -53,12 +78,14 @@ export function App() {
   }, [serverBaseUrl]);
 
   useEffect(() => {
-    writeStorage(STORAGE_KEYS.token, token);
-  }, [token]);
+    writeSessionStorage(session);
+  }, [session]);
 
   useEffect(() => {
     writeStorage(STORAGE_KEYS.orgId, orgId);
     setState(createInitialWorkspaceState({ orgId }));
+    setUsers([]);
+    setUserManagementMode(false);
   }, [orgId]);
 
   useEffect(() => {
@@ -84,7 +111,7 @@ export function App() {
 
   async function runWorkflow(workflow: (current: WorkspaceState) => Promise<WorkspaceState>) {
     if (!token.trim()) {
-      setState((current) => ({ ...current, status: "等待开发 Token", error: "internal_token_required" }));
+      setState((current) => ({ ...current, status: "等待登录", error: "internal_token_required" }));
       return;
     }
     setLoading(true);
@@ -98,12 +125,14 @@ export function App() {
     }
   }
 
-  async function runLogin(login: () => Promise<string>) {
+  async function runLogin(login: () => Promise<{ token: string; user: InternalUser }>) {
     setLoading(true);
     setAuthError("");
     try {
-      const nextToken = await login();
-      setToken(nextToken);
+      const result = await login();
+      setSession({ token: result.token, user: result.user, orgId, serverBaseUrl });
+      setSetupMode(false);
+      setUserManagementMode(false);
     } catch (error) {
       setAuthError(errorMessage(error));
     } finally {
@@ -122,42 +151,170 @@ export function App() {
         email: email.trim(),
         password
       });
-      return result.token;
+      return { token: result.token, user: result.user };
     });
   }
 
-  function handleDeveloperTokenLogin() {
-    const nextToken = developerToken.trim();
-    if (!nextToken) {
-      setAuthError("internal_token_required");
+  function handleSetupAdmin() {
+    if (!setupToken.trim() || !email.trim() || !displayName.trim() || !password.trim()) {
+      setAuthError("setup_admin_fields_required");
       return;
     }
+    setLoading(true);
     setAuthError("");
-    setToken(nextToken);
+    void (async () => {
+      const client = createInternalApiClient({ baseUrl: serverBaseUrl, token: "" });
+      try {
+        await client.setupAdmin({
+          orgId,
+          email: email.trim(),
+          displayName: displayName.trim(),
+          password,
+          setupToken: setupToken.trim()
+        });
+      } catch (error) {
+        setAuthError(errorMessage(error));
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const result = await client.login({ orgId, email: email.trim(), password });
+        setSession({ token: result.token, user: result.user, orgId, serverBaseUrl });
+        setSetupMode(false);
+        setUserManagementMode(false);
+      } catch (error) {
+        setSetupMode(false);
+        setAuthError(`管理员已创建，请使用邮箱密码登录。登录错误：${errorMessage(error)}`);
+      } finally {
+        setLoading(false);
+      }
+    })();
   }
 
   function handleLogout() {
-    setToken("");
-    setState(createInitialWorkspaceState({ orgId }));
+    if (token.trim()) void apiClient.logout().catch(() => undefined);
+    clearLocalSession(orgId);
+  }
+
+  function clearLocalSession(nextOrgId: string) {
+    setSession(null);
+    setUserManagementMode(false);
+    setUsers([]);
+    setUserManagementError("");
+    setState(createInitialWorkspaceState({ orgId: nextOrgId }));
+  }
+
+  function handleOrgIdChange(value: string) {
+    setOrgId(value);
+    setAuthError("");
+    clearLocalSession(value);
+  }
+
+  function handleServerBaseUrlChange(value: string) {
+    setServerBaseUrl(value);
+    setAuthError("");
+    clearLocalSession(orgId);
+  }
+
+  async function runUserManagement(action: () => Promise<void>): Promise<boolean> {
+    setLoading(true);
+    setUserManagementError("");
+    try {
+      await action();
+      setUsers(await apiClient.listInternalUsers(orgId));
+      return true;
+    } catch (error) {
+      setUserManagementError(errorMessage(error));
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleOpenUserManagement() {
+    setUserManagementMode(true);
+    void runUserManagement(async () => undefined);
+  }
+
+  function handleCreateUser(input: Omit<CreateInternalUserInput, "orgId">): Promise<boolean> {
+    return runUserManagement(async () => {
+      await apiClient.createInternalUser({ orgId, ...input });
+    });
+  }
+
+  function handleDisableUser(userId: string) {
+    void runUserManagement(async () => {
+      await apiClient.disableInternalUser({ orgId, userId });
+    });
+  }
+
+  function handleResetUserPassword(userId: string, password: string): Promise<boolean> {
+    return runUserManagement(async () => {
+      await apiClient.resetInternalUserPassword({ orgId, userId, password });
+    });
   }
 
   if (!token.trim()) {
+    if (setupMode) {
+      return (
+        <SetupAdminView
+          orgId={orgId}
+          serverBaseUrl={serverBaseUrl}
+          setupToken={setupToken}
+          email={email}
+          displayName={displayName}
+          password={password}
+          loading={loading}
+          error={authError}
+          onOrgIdChange={handleOrgIdChange}
+          onServerBaseUrlChange={handleServerBaseUrlChange}
+          onSetupTokenChange={setSetupToken}
+          onEmailChange={setEmail}
+          onDisplayNameChange={setDisplayName}
+          onPasswordChange={setPassword}
+          onSetupAdmin={handleSetupAdmin}
+          onLoginMode={() => {
+            setAuthError("");
+            setSetupMode(false);
+          }}
+        />
+      );
+    }
+
     return (
       <LoginView
         orgId={orgId}
         serverBaseUrl={serverBaseUrl}
         email={email}
         password={password}
-        developerToken={developerToken}
         loading={loading}
         error={authError}
-        onOrgIdChange={setOrgId}
-        onServerBaseUrlChange={setServerBaseUrl}
+        onOrgIdChange={handleOrgIdChange}
+        onServerBaseUrlChange={handleServerBaseUrlChange}
         onEmailChange={setEmail}
         onPasswordChange={setPassword}
-        onDeveloperTokenChange={setDeveloperToken}
         onPasswordLogin={handlePasswordLogin}
-        onDeveloperTokenLogin={handleDeveloperTokenLogin}
+        onSetupMode={() => {
+          setAuthError("");
+          setSetupMode(true);
+        }}
+      />
+    );
+  }
+
+  if (userManagementMode && isCurrentAdmin) {
+    return (
+      <UserManagementView
+        orgId={orgId}
+        users={users}
+        loading={loading}
+        error={userManagementError}
+        onBack={() => setUserManagementMode(false)}
+        onRefreshUsers={() => void runUserManagement(async () => undefined)}
+        onCreateUser={handleCreateUser}
+        onDisableUser={handleDisableUser}
+        onResetPassword={handleResetUserPassword}
       />
     );
   }
@@ -167,10 +324,12 @@ export function App() {
       state={state}
       serverBaseUrl={serverBaseUrl}
       orgId={orgId}
+      currentUser={currentUser}
       loading={loading}
-      onServerBaseUrlChange={setServerBaseUrl}
-      onOrgIdChange={setOrgId}
+      onServerBaseUrlChange={handleServerBaseUrlChange}
+      onOrgIdChange={handleOrgIdChange}
       onLogout={handleLogout}
+      onOpenUserManagement={isCurrentAdmin ? handleOpenUserManagement : undefined}
       onRefresh={() => void runWorkflow(() => loadCustomerList(createInitialWorkspaceState({ orgId }), apiClient))}
       onSelectCustomer={(customerId) => void runWorkflow((current) => selectCustomer(current, apiClient, customerId))}
       onSelectConversation={(conversationId) =>
@@ -188,16 +347,14 @@ interface LoginViewProps {
   serverBaseUrl: string;
   email: string;
   password: string;
-  developerToken: string;
   loading: boolean;
   error: string;
   onOrgIdChange(value: string): void;
   onServerBaseUrlChange(value: string): void;
   onEmailChange(value: string): void;
   onPasswordChange(value: string): void;
-  onDeveloperTokenChange(value: string): void;
   onPasswordLogin(): void;
-  onDeveloperTokenLogin(): void;
+  onSetupMode(): void;
 }
 
 export function LoginView(props: LoginViewProps) {
@@ -253,30 +410,101 @@ export function LoginView(props: LoginViewProps) {
           </button>
         </form>
 
-        <div className="auth-divider">
-          <span>或</span>
+        <button className="text-button" type="button" onClick={props.onSetupMode}>
+          <ShieldCheck size={16} />
+          <span>初始化首个管理员</span>
+        </button>
+
+        {props.error && <p className="auth-error">{props.error}</p>}
+      </section>
+    </main>
+  );
+}
+
+interface SetupAdminViewProps {
+  orgId: string;
+  serverBaseUrl: string;
+  setupToken: string;
+  email: string;
+  displayName: string;
+  password: string;
+  loading: boolean;
+  error: string;
+  onOrgIdChange(value: string): void;
+  onServerBaseUrlChange(value: string): void;
+  onSetupTokenChange(value: string): void;
+  onEmailChange(value: string): void;
+  onDisplayNameChange(value: string): void;
+  onPasswordChange(value: string): void;
+  onSetupAdmin(): void;
+  onLoginMode(): void;
+}
+
+export function SetupAdminView(props: SetupAdminViewProps) {
+  return (
+    <main className="auth-shell">
+      <section className="auth-panel setup-panel">
+        <div className="auth-brand">
+          <span className="brand-mark">TB</span>
+          <div>
+            <h1>初始化首个管理员</h1>
+            <p>为内部销售工作台创建第一个账号</p>
+          </div>
         </div>
 
         <form
-          className="auth-form compact"
+          className="auth-form"
           onSubmit={(event) => {
             event.preventDefault();
-            props.onDeveloperTokenLogin();
+            props.onSetupAdmin();
           }}
         >
           <label>
-            开发 Token
+            Org
+            <input value={props.orgId} onChange={(event) => props.onOrgIdChange(event.target.value)} />
+          </label>
+          <label>
+            API
+            <input
+              placeholder="/internal 代理"
+              value={props.serverBaseUrl}
+              onChange={(event) => props.onServerBaseUrlChange(event.target.value)}
+            />
+          </label>
+          <label>
+            初始化 Token
             <input
               type="password"
-              value={props.developerToken}
-              onChange={(event) => props.onDeveloperTokenChange(event.target.value)}
+              value={props.setupToken}
+              onChange={(event) => props.onSetupTokenChange(event.target.value)}
+            />
+          </label>
+          <label>
+            邮箱
+            <input type="email" value={props.email} onChange={(event) => props.onEmailChange(event.target.value)} />
+          </label>
+          <label>
+            显示名称
+            <input value={props.displayName} onChange={(event) => props.onDisplayNameChange(event.target.value)} />
+          </label>
+          <label>
+            密码
+            <input
+              type="password"
+              value={props.password}
+              onChange={(event) => props.onPasswordChange(event.target.value)}
             />
           </label>
           <button type="submit" disabled={props.loading}>
-            <KeyRound size={16} />
-            <span>进入</span>
+            <ShieldCheck size={16} />
+            <span>创建管理员</span>
           </button>
         </form>
+
+        <button className="text-button" type="button" onClick={props.onLoginMode}>
+          <LogIn size={16} />
+          <span>返回登录</span>
+        </button>
 
         {props.error && <p className="auth-error">{props.error}</p>}
       </section>
@@ -288,10 +516,12 @@ interface WorkspaceViewProps {
   state: WorkspaceState;
   serverBaseUrl: string;
   orgId: string;
+  currentUser?: InternalUser | null;
   loading: boolean;
   onServerBaseUrlChange(value: string): void;
   onOrgIdChange(value: string): void;
   onLogout?(): void;
+  onOpenUserManagement?(): void;
   onRefresh(): void;
   onSelectCustomer(externalCustomerId: string): void;
   onSelectConversation(externalConversationId: string): void;
@@ -326,7 +556,11 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           <span className="brand-mark">TB</span>
           <div>
             <h1>TradeBridge 销售工作台</h1>
-            <p>{props.state.status}</p>
+            <p>
+              {props.currentUser
+                ? `${props.currentUser.displayName || props.currentUser.email} · ${props.state.status}`
+                : props.state.status}
+            </p>
           </div>
         </div>
         <div className="connection-bar" aria-label="内部接口连接">
@@ -346,6 +580,12 @@ export function WorkspaceView(props: WorkspaceViewProps) {
             <RefreshCcw size={17} />
             <span>刷新</span>
           </button>
+          {props.onOpenUserManagement && (
+            <button className="icon-button" type="button" onClick={props.onOpenUserManagement}>
+              <UserRound size={17} />
+              <span>用户</span>
+            </button>
+          )}
           {props.onLogout && (
             <button className="icon-button" type="button" onClick={props.onLogout}>
               <LogOut size={17} />
@@ -558,6 +798,164 @@ export function WorkspaceView(props: WorkspaceViewProps) {
   );
 }
 
+interface UserManagementViewProps {
+  orgId: string;
+  users: InternalUser[];
+  loading: boolean;
+  error: string;
+  onBack(): void;
+  onRefreshUsers(): void;
+  onCreateUser(input: Omit<CreateInternalUserInput, "orgId">): Promise<boolean>;
+  onDisableUser(userId: string): void;
+  onResetPassword(userId: string, password: string): Promise<boolean>;
+}
+
+export function UserManagementView(props: UserManagementViewProps) {
+  const [email, setEmail] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<InternalRole>("sales");
+  const [resetDrafts, setResetDrafts] = useState<Record<string, string>>({});
+
+  return (
+    <main className="crm-shell admin-shell">
+      <header className="topbar admin-topbar">
+        <div className="brand-block">
+          <span className="brand-mark">TB</span>
+          <div>
+            <h1>用户管理</h1>
+            <p>{props.orgId} · {props.users.length} 个内部用户</p>
+          </div>
+        </div>
+        <div className="admin-actions">
+          <button className="icon-button primary" type="button" onClick={props.onRefreshUsers} disabled={props.loading}>
+            <RefreshCcw size={17} />
+            <span>刷新</span>
+          </button>
+          <button className="icon-button" type="button" onClick={props.onBack}>
+            <LogIn size={17} />
+            <span>返回工作台</span>
+          </button>
+        </div>
+      </header>
+
+      <section className="admin-panel">
+        <form
+          className="create-user-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void props
+              .onCreateUser({
+                email: email.trim(),
+                displayName: displayName.trim(),
+                password,
+                roles: [role]
+              })
+              .then((success) => {
+                if (!success) return;
+                setEmail("");
+                setDisplayName("");
+                setPassword("");
+                setRole("sales");
+              });
+          }}
+        >
+          <div className="panel-heading">
+            <div>
+              <h2>创建用户</h2>
+              <p>管理员可创建内部销售、主管或管理员账号</p>
+            </div>
+            <UserPlus size={18} />
+          </div>
+          <label>
+            邮箱
+            <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+          </label>
+          <label>
+            显示名称
+            <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+          </label>
+          <label>
+            密码
+            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+          </label>
+          <label>
+            角色
+            <select value={role} onChange={(event) => setRole(event.target.value as InternalRole)}>
+              {ROLE_OPTIONS.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="submit" disabled={props.loading || !email.trim() || !displayName.trim() || !password.trim()}>
+            <UserPlus size={16} />
+            <span>创建用户</span>
+          </button>
+        </form>
+
+        <section className="user-table" aria-label="内部用户列表">
+          <div className="user-row user-row-head">
+            <span>邮箱</span>
+            <span>名称</span>
+            <span>角色</span>
+            <span>状态</span>
+            <span>操作</span>
+          </div>
+          {props.users.map((user) => {
+            const resetPassword = resetDrafts[user.id] || "";
+            return (
+              <article className="user-row" key={user.id}>
+                <strong>{user.email}</strong>
+                <span>{user.displayName || "-"}</span>
+                <span>{user.roles.join(", ")}</span>
+                <span className={`status-pill ${user.status}`}>{user.status}</span>
+                <div className="user-actions">
+                  <button
+                    className="icon-button"
+                    type="button"
+                    onClick={() => props.onDisableUser(user.id)}
+                    disabled={props.loading || user.status === "disabled"}
+                  >
+                    <Ban size={15} />
+                    <span>禁用</span>
+                  </button>
+                  <input
+                    type="password"
+                    placeholder="新密码"
+                    value={resetPassword}
+                    onChange={(event) =>
+                      setResetDrafts((current) => ({ ...current, [user.id]: event.target.value }))
+                    }
+                  />
+                  <button
+                    className="icon-button"
+                    type="button"
+                    onClick={() => {
+                      void props.onResetPassword(user.id, resetPassword).then((success) => {
+                        if (!success) return;
+                        setResetDrafts((current) => ({ ...current, [user.id]: "" }));
+                      });
+                    }}
+                    disabled={props.loading || !resetPassword.trim()}
+                  >
+                    <RefreshCcw size={15} />
+                    <span>重置密码</span>
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+          {!props.users.length && <div className="empty-state large">暂无内部用户</div>}
+        </section>
+
+        {props.error && <p className="auth-error admin-error">{props.error}</p>}
+      </section>
+    </main>
+  );
+}
+
 function Metric({ label, value }: { label: string; value: number }) {
   return (
     <div className="metric">
@@ -601,4 +999,41 @@ function readStorage(key: string, fallback: string): string {
 function writeStorage(key: string, value: string): void {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(key, value);
+}
+
+export function isSessionForConfig(
+  session: LoginSessionSnapshot | null,
+  config: { orgId: string; serverBaseUrl: string }
+): boolean {
+  return Boolean(
+    session?.token.trim() &&
+      session.orgId === config.orgId &&
+      session.serverBaseUrl === config.serverBaseUrl &&
+      session.user.orgId === config.orgId
+  );
+}
+
+function readSessionStorage(config: { orgId: string; serverBaseUrl: string }): LoginSessionSnapshot | null {
+  if (typeof window === "undefined") return null;
+  window.localStorage.removeItem(STORAGE_KEYS.legacyToken);
+  window.localStorage.removeItem(STORAGE_KEYS.legacyCurrentUser);
+  const value = window.localStorage.getItem(STORAGE_KEYS.session);
+  if (!value) return null;
+  try {
+    const session = JSON.parse(value) as LoginSessionSnapshot;
+    if (isSessionForConfig(session, config)) return session;
+  } catch {
+    // Invalid snapshots are discarded below.
+  }
+  window.localStorage.removeItem(STORAGE_KEYS.session);
+  return null;
+}
+
+function writeSessionStorage(session: LoginSessionSnapshot | null): void {
+  if (typeof window === "undefined") return;
+  if (!session) {
+    window.localStorage.removeItem(STORAGE_KEYS.session);
+    return;
+  }
+  window.localStorage.setItem(STORAGE_KEYS.session, JSON.stringify(session));
 }

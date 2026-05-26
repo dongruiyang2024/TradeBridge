@@ -260,6 +260,40 @@ test("AI summaries and reply suggestions are scoped and retrievable", async () =
   );
 });
 
+test("internal user invitations can be created, inspected, and accepted once", async () => {
+  const store = new InMemorySyncStore();
+  const invitation = await store.createUserInvitation({
+    orgId: "org_internal",
+    email: "Invitee@Example.com",
+    displayName: "Invitee",
+    roles: ["sales"],
+    createdByUserId: "admin-1",
+    token: "invite-token",
+    expiresAt: "2030-01-01T00:00:00.000Z"
+  });
+
+  assert.equal(invitation.email, "invitee@example.com");
+  assert.equal(invitation.token, "invite-token");
+  assert.equal("tokenHash" in invitation, false);
+
+  const inspected = await store.getUserInvitation("invite-token");
+  assert.equal(inspected?.email, "invitee@example.com");
+  assert.equal(inspected && "token" in inspected, false);
+
+  const accepted = await store.acceptUserInvitation({
+    token: "invite-token",
+    passwordHash: "scrypt$password"
+  });
+  assert.equal(accepted.user.email, "invitee@example.com");
+  assert.equal(accepted.invitation.acceptedAt !== undefined, true);
+  assert.equal("token" in accepted.invitation, false);
+
+  await assert.rejects(
+    () => store.acceptUserInvitation({ token: "invite-token", passwordHash: "scrypt$password" }),
+    /invitation_already_accepted/
+  );
+});
+
 test("internal users can issue and resolve sessions", async () => {
   const store = new InMemorySyncStore();
   const futureExpiresAt = new Date(Date.now() + 60_000).toISOString();
@@ -295,6 +329,77 @@ test("internal users can issue and resolve sessions", async () => {
       }),
     /invalid_credentials/
   );
+});
+
+test("internal users can be listed, updated, disabled, reset, and resolved for credential checks", async () => {
+  const store = new InMemorySyncStore();
+  const created = await store.createInternalUser({
+    orgId: "org_internal",
+    email: "Admin@Example.com",
+    displayName: "Admin User",
+    passwordHash: "scrypt$hash-1",
+    roles: ["admin"]
+  });
+
+  assert.equal(created.email, "admin@example.com");
+
+  const credentials = await store.getInternalUserCredentials({
+    orgId: "org_internal",
+    email: "ADMIN@example.com"
+  });
+  assert.equal(credentials?.passwordHash, "scrypt$hash-1");
+
+  const users = await store.listInternalUsers("org_internal");
+  assert.equal(users.length, 1);
+  assert.equal(users[0].email, "admin@example.com");
+  assert.equal("passwordHash" in users[0], false);
+
+  const disabled = await store.updateInternalUser({
+    orgId: "org_internal",
+    userId: created.id,
+    status: "disabled"
+  });
+  assert.equal(disabled.status, "disabled");
+
+  await assert.rejects(
+    () =>
+      store.issueInternalSession({
+        orgId: "org_internal",
+        email: "admin@example.com",
+        passwordHash: "scrypt$hash-1"
+      }),
+    /invalid_credentials/
+  );
+
+  const reset = await store.updateInternalUser({
+    orgId: "org_internal",
+    userId: created.id,
+    passwordHash: "scrypt$hash-2",
+    status: "active",
+    roles: ["supervisor", "sales"]
+  });
+  assert.deepEqual(reset.roles, ["supervisor", "sales"]);
+  assert.equal(
+    (await store.getInternalUserCredentials({ orgId: "org_internal", email: "admin@example.com" }))?.passwordHash,
+    "scrypt$hash-2"
+  );
+
+  const session = await store.issueInternalSession({
+    orgId: "org_internal",
+    email: " ADMIN@example.com ",
+    passwordHash: "scrypt$hash-2",
+    token: "session-token"
+  });
+  assert.equal(session.token, "session-token");
+  await store.updateInternalUser({
+    orgId: "org_internal",
+    userId: created.id,
+    status: "disabled"
+  });
+  assert.equal(await store.getInternalSession("session-token"), null);
+  assert.equal(await store.revokeInternalSession({ token: "session-token" }), true);
+  assert.equal(await store.revokeInternalSession({ token: "session-token" }), false);
+  assert.equal(await store.getInternalSession("session-token"), null);
 });
 
 test("collector devices authenticate by one-time tokens and can be revoked", async () => {

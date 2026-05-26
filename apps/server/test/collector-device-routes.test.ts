@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import crypto from "node:crypto";
 import { test } from "node:test";
 import { InMemorySyncStore } from "@wangwang/database";
+import { hashPassword } from "../src/auth.js";
 import { createServer } from "../src/server.js";
 
 const syncPayload = {
@@ -11,34 +11,36 @@ const syncPayload = {
   customers: [{ externalCustomerId: "customer-1", displayName: "Buyer One" }]
 };
 
-function passwordHash(password: string): string {
-  return crypto.createHash("sha256").update(password).digest("hex");
-}
-
 async function createDeviceAdminApp() {
   const store = new InMemorySyncStore();
+  const admin = await store.createInternalUser({
+    orgId: "org_internal",
+    email: "admin@example.com",
+    displayName: "Admin User",
+    passwordHash: await hashPassword("secret"),
+    roles: ["admin"]
+  });
   await store.createInternalUser({
     orgId: "org_internal",
     email: "sales@example.com",
     displayName: "Sales User",
-    passwordHash: passwordHash("secret"),
+    passwordHash: await hashPassword("secret"),
     roles: ["sales"]
   });
 
   const app = await createServer({
     store,
-    deviceTokens: ["static-device-token"],
-    internalTokens: ["bootstrap-token"]
+    deviceTokens: ["static-device-token"]
   });
 
-  return { app, store };
+  return { app, store, admin };
 }
 
 async function registerDevice(app: Awaited<ReturnType<typeof createServer>>) {
   return app.inject({
     method: "POST",
     url: "/internal/v1/collector-devices",
-    headers: { authorization: "Bearer bootstrap-token" },
+    headers: await createInternalAuthHeaders(app),
     payload: {
       orgId: "org_internal",
       deviceName: "MacBook"
@@ -46,9 +48,24 @@ async function registerDevice(app: Awaited<ReturnType<typeof createServer>>) {
   });
 }
 
+async function createInternalAuthHeaders(app: Awaited<ReturnType<typeof createServer>>) {
+  const loginResponse = await app.inject({
+    method: "POST",
+    url: "/internal/v1/auth/login",
+    payload: {
+      orgId: "org_internal",
+      email: "admin@example.com",
+      password: "secret"
+    }
+  });
+  assert.equal(loginResponse.statusCode, 200);
+  return { authorization: `Bearer ${loginResponse.json().token}` };
+}
+
 test("admin users can register, list, and revoke collector devices without exposing token hashes", async () => {
-  const { app, store } = await createDeviceAdminApp();
+  const { app, store, admin } = await createDeviceAdminApp();
   const createResponse = await registerDevice(app);
+  const authHeaders = await createInternalAuthHeaders(app);
 
   assert.equal(createResponse.statusCode, 200);
   const created = createResponse.json();
@@ -63,7 +80,7 @@ test("admin users can register, list, and revoke collector devices without expos
   const listResponse = await app.inject({
     method: "GET",
     url: "/internal/v1/collector-devices?orgId=org_internal",
-    headers: { authorization: "Bearer bootstrap-token" }
+    headers: authHeaders
   });
   assert.equal(listResponse.statusCode, 200);
   assert.deepEqual(listResponse.json().devices, [created.device]);
@@ -71,19 +88,20 @@ test("admin users can register, list, and revoke collector devices without expos
   const revokeResponse = await app.inject({
     method: "POST",
     url: `/internal/v1/collector-devices/${created.device.id}/revoke`,
-    headers: { authorization: "Bearer bootstrap-token" },
+    headers: authHeaders,
     payload: { orgId: "org_internal" }
   });
   assert.equal(revokeResponse.statusCode, 200);
   assert.equal(revokeResponse.json().device.status, "revoked");
 
   const auditLogs = await store.listAuditLogs("org_internal");
-  assert.equal(auditLogs.length, 2);
-  assert.equal(auditLogs[0].action, "collector_device.registered");
-  assert.equal(auditLogs[0].actorUserId, "bootstrap");
-  assert.equal(auditLogs[0].targetType, "collector_device");
-  assert.equal(auditLogs[1].action, "collector_device.revoked");
-  assert.equal(auditLogs[1].targetId, created.device.id);
+  const collectorDeviceAuditLogs = auditLogs.filter((log) => log.targetType === "collector_device");
+  assert.equal(collectorDeviceAuditLogs.length, 2);
+  assert.equal(collectorDeviceAuditLogs[0].action, "collector_device.registered");
+  assert.equal(collectorDeviceAuditLogs[0].actorUserId, admin.id);
+  assert.equal(collectorDeviceAuditLogs[0].targetType, "collector_device");
+  assert.equal(collectorDeviceAuditLogs[1].action, "collector_device.revoked");
+  assert.equal(collectorDeviceAuditLogs[1].targetId, created.device.id);
 });
 
 test("registered collector device tokens can upload sync batches until revoked", async () => {
@@ -104,7 +122,7 @@ test("registered collector device tokens can upload sync batches until revoked",
   await app.inject({
     method: "POST",
     url: `/internal/v1/collector-devices/${deviceId}/revoke`,
-    headers: { authorization: "Bearer bootstrap-token" },
+    headers: await createInternalAuthHeaders(app),
     payload: { orgId: "org_internal" }
   });
   const rejectedResponse = await app.inject({
@@ -129,6 +147,43 @@ test("static collector device tokens remain available as a development fallback"
 
   assert.equal(response.statusCode, 200);
   assert.equal(response.json().ok, true);
+});
+
+test("collector device routes reject orgId outside the authenticated user's org", async () => {
+  const { app, store } = await createDeviceAdminApp();
+  const authHeaders = await createInternalAuthHeaders(app);
+  const otherDevice = await store.registerCollectorDevice({
+    orgId: "org_other",
+    deviceName: "Other Org Device"
+  });
+  const requests = [
+    {
+      method: "POST",
+      url: "/internal/v1/collector-devices",
+      headers: authHeaders,
+      payload: {
+        orgId: "org_other",
+        deviceName: "MacBook"
+      }
+    },
+    {
+      method: "GET",
+      url: "/internal/v1/collector-devices?orgId=org_other",
+      headers: authHeaders
+    },
+    {
+      method: "POST",
+      url: `/internal/v1/collector-devices/${otherDevice.id}/revoke`,
+      headers: authHeaders,
+      payload: { orgId: "org_other" }
+    }
+  ] as const;
+
+  for (const request of requests) {
+    const response = await app.inject(request);
+    assert.equal(response.statusCode, 403);
+    assert.deepEqual(response.json(), { ok: false, error: "forbidden" });
+  }
 });
 
 test("sales users cannot manage collector devices", async () => {

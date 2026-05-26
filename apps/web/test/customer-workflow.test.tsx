@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import React from "react";
 import { renderToString } from "react-dom/server";
-import { LoginView, WorkspaceView } from "../src/App.tsx";
+import { isSessionForConfig, LoginView, SetupAdminView, UserManagementView, WorkspaceView } from "../src/App.tsx";
 import {
   addTagToSelectedCustomer,
   createInitialWorkspaceState,
@@ -13,30 +13,98 @@ import {
 } from "../src/workspace-state.ts";
 import type { InternalApiClient, WorkspaceState } from "../src/types.ts";
 
-test("login view renders account login and developer token fallback", () => {
+test("login view renders account login without developer token fallback", () => {
   const html = renderToString(
     <LoginView
       orgId="org_internal"
       serverBaseUrl=""
       email="admin@example.com"
       password=""
-      developerToken=""
       loading={false}
       error=""
       onOrgIdChange={() => undefined}
       onServerBaseUrlChange={() => undefined}
       onEmailChange={() => undefined}
       onPasswordChange={() => undefined}
-      onDeveloperTokenChange={() => undefined}
       onPasswordLogin={() => undefined}
-      onDeveloperTokenLogin={() => undefined}
+      onSetupMode={() => undefined}
     />
   );
 
   assert.match(html, /登录 TradeBridge/);
   assert.match(html, /邮箱/);
   assert.match(html, /密码/);
-  assert.match(html, /开发 Token/);
+  assert.match(html, /初始化首个管理员/);
+  assert.doesNotMatch(html, /开发 Token/);
+});
+
+test("setup admin view renders initialization fields", () => {
+  const html = renderToString(
+    <SetupAdminView
+      orgId="org_internal"
+      serverBaseUrl=""
+      setupToken=""
+      email="admin@example.com"
+      displayName="Admin User"
+      password=""
+      loading={false}
+      error=""
+      onOrgIdChange={() => undefined}
+      onServerBaseUrlChange={() => undefined}
+      onSetupTokenChange={() => undefined}
+      onEmailChange={() => undefined}
+      onDisplayNameChange={() => undefined}
+      onPasswordChange={() => undefined}
+      onSetupAdmin={() => undefined}
+      onLoginMode={() => undefined}
+    />
+  );
+
+  assert.match(html, /初始化首个管理员/);
+  assert.match(html, /初始化 Token/);
+  assert.match(html, /显示名称/);
+  assert.match(html, /创建管理员/);
+  assert.doesNotMatch(html, /开发 Token/);
+});
+
+test("user management view renders internal user list and actions", () => {
+  const html = renderToString(
+    <UserManagementView
+      orgId="org_internal"
+      users={[
+        {
+          id: "user-admin",
+          orgId: "org_internal",
+          email: "admin@example.com",
+          displayName: "Admin User",
+          roles: ["admin"],
+          status: "active"
+        },
+        {
+          id: "user-sales",
+          orgId: "org_internal",
+          email: "sales@example.com",
+          displayName: "Sales User",
+          roles: ["sales"],
+          status: "disabled"
+        }
+      ]}
+      loading={false}
+      error=""
+      onBack={() => undefined}
+      onRefreshUsers={() => undefined}
+      onCreateUser={async () => true}
+      onDisableUser={() => undefined}
+      onResetPassword={async () => true}
+    />
+  );
+
+  assert.match(html, /用户管理/);
+  assert.match(html, /创建用户/);
+  assert.match(html, /admin@example.com/);
+  assert.match(html, /Sales User/);
+  assert.match(html, /禁用/);
+  assert.match(html, /重置密码/);
 });
 
 test("workspace renders customer list, selected timeline, and collaboration panel", () => {
@@ -50,6 +118,15 @@ test("workspace renders customer list, selected timeline, and collaboration pane
       loading={false}
       onServerBaseUrlChange={() => undefined}
       onOrgIdChange={() => undefined}
+      currentUser={{
+        id: "user-1",
+        orgId: "org_internal",
+        email: "admin@example.com",
+        displayName: "Admin User",
+        roles: ["admin"],
+        status: "active"
+      }}
+      onOpenUserManagement={() => undefined}
       onRefresh={() => undefined}
       onSelectCustomer={() => undefined}
       onSelectConversation={() => undefined}
@@ -69,6 +146,62 @@ test("workspace renders customer list, selected timeline, and collaboration pane
   assert.match(html, /seller-1/);
   assert.match(html, /sales-user-42/);
   assert.match(html, /manager-user-7/);
+});
+
+test("workspace hides user management entry for non-admin users", () => {
+  const html = renderToString(
+    <WorkspaceView
+      state={sampleWorkspaceState()}
+      serverBaseUrl=""
+      orgId="org_internal"
+      loading={false}
+      onServerBaseUrlChange={() => undefined}
+      onOrgIdChange={() => undefined}
+      currentUser={{
+        id: "user-sales",
+        orgId: "org_internal",
+        email: "sales@example.com",
+        displayName: "Sales User",
+        roles: ["sales"],
+        status: "active"
+      }}
+      onRefresh={() => undefined}
+      onSelectCustomer={() => undefined}
+      onSelectConversation={() => undefined}
+      onAddNote={() => undefined}
+      onAddTag={() => undefined}
+      onAddTask={() => undefined}
+    />
+  );
+
+  assert.doesNotMatch(html, />用户</);
+});
+
+test("session snapshots are only valid for the current org, API, and user org", () => {
+  const session = {
+    token: "session-token",
+    orgId: "org_internal",
+    serverBaseUrl: "/api",
+    user: {
+      id: "user-admin",
+      orgId: "org_internal",
+      email: "admin@example.com",
+      displayName: "Admin User",
+      roles: ["admin" as const],
+      status: "active"
+    }
+  };
+
+  assert.equal(isSessionForConfig(session, { orgId: "org_internal", serverBaseUrl: "/api" }), true);
+  assert.equal(isSessionForConfig(session, { orgId: "org_other", serverBaseUrl: "/api" }), false);
+  assert.equal(isSessionForConfig(session, { orgId: "org_internal", serverBaseUrl: "/other" }), false);
+  assert.equal(
+    isSessionForConfig(
+      { ...session, user: { ...session.user, orgId: "org_other" } },
+      { orgId: "org_internal", serverBaseUrl: "/api" }
+    ),
+    false
+  );
 });
 
 test("customer workflow loads selected customer conversations and updates collaboration state", async () => {
@@ -194,7 +327,102 @@ function createFakeClient(): InternalApiClient {
           id: "user-1",
           orgId: "org_internal",
           email: "admin@example.com",
+          displayName: "Admin User",
+          status: "active",
           roles: ["admin"]
+        }
+      };
+    },
+    async logout() {
+      return undefined;
+    },
+    async setupAdmin() {
+      return {
+        id: "user-1",
+        orgId: "org_internal",
+        email: "admin@example.com",
+        displayName: "Admin User",
+        status: "active",
+        roles: ["admin"]
+      };
+    },
+    async listInternalUsers() {
+      return [];
+    },
+    async createInternalUser(input) {
+      return {
+        id: "user-created",
+        orgId: input.orgId,
+        email: input.email,
+        displayName: input.displayName,
+        status: "active",
+        roles: input.roles
+      };
+    },
+    async disableInternalUser(input) {
+      return {
+        id: input.userId,
+        orgId: input.orgId,
+        email: "disabled@example.com",
+        displayName: "Disabled User",
+        status: "disabled",
+        roles: ["sales"]
+      };
+    },
+    async resetInternalUserPassword(input) {
+      return {
+        id: input.userId,
+        orgId: input.orgId,
+        email: "reset@example.com",
+        displayName: "Reset User",
+        status: "active",
+        roles: ["sales"]
+      };
+    },
+    async createInvitation(input) {
+      return {
+        id: "invitation-1",
+        orgId: input.orgId,
+        email: input.email,
+        displayName: input.displayName,
+        roles: input.roles,
+        expiresAt: "2026-05-27T00:00:00.000Z",
+        createdAt: "2026-05-25T10:00:00.000Z"
+      };
+    },
+    async getInvitation(token) {
+      return {
+        id: "invitation-1",
+        orgId: "org_internal",
+        email: "invited@example.com",
+        displayName: "Invited User",
+        roles: ["sales"],
+        token,
+        expiresAt: "2026-05-27T00:00:00.000Z",
+        createdAt: "2026-05-25T10:00:00.000Z"
+      };
+    },
+    async acceptInvitation(input) {
+      return {
+        token: "accepted-token",
+        user: {
+          id: "user-invited",
+          orgId: "org_internal",
+          email: "invited@example.com",
+          displayName: "Invited User",
+          status: "active",
+          roles: ["sales"]
+        },
+        invitation: {
+          id: "invitation-1",
+          orgId: "org_internal",
+          email: "invited@example.com",
+          displayName: "Invited User",
+          roles: ["sales"],
+          token: input.token,
+          expiresAt: "2026-05-27T00:00:00.000Z",
+          acceptedAt: "2026-05-25T10:00:00.000Z",
+          createdAt: "2026-05-25T10:00:00.000Z"
         }
       };
     },

@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 import type { SqlClient } from "./sql-client.js";
 import type {
   AddCustomerTagInput,
+  AcceptUserInvitationInput,
+  AcceptUserInvitationResult,
   AssignCustomerInput,
   CollectorDevice,
   ConversationCustomerScope,
@@ -11,15 +13,19 @@ import type {
   CreateFollowUpTaskInput,
   CreateInternalUserInput,
   CreateReplySuggestionInput,
+  CreateUserInvitationInput,
   CustomerScope,
+  GetInternalUserCredentialsInput,
   InternalRole,
   InternalSession,
   InternalUser,
+  InternalUserCredentials,
   IssueInternalSessionInput,
   MessageDirection,
   RegisteredCollectorDevice,
   RegisterCollectorDeviceInput,
   RevokeCollectorDeviceInput,
+  RevokeInternalSessionInput,
   StoredAuditLog,
   StoredAiSummary,
   StoredCustomerAssignment,
@@ -31,10 +37,12 @@ import type {
   StoredMessage,
   StoredSellerAccount,
   StoredReplySuggestion,
+  StoredUserInvitation,
   SyncBatch,
   SyncBatchResult,
   SyncMessageInput,
-  UpdateFollowUpTaskInput
+  UpdateFollowUpTaskInput,
+  UpdateInternalUserInput
 } from "./sync-types.js";
 
 interface IdRow {
@@ -169,6 +177,10 @@ interface InternalUserRow {
   updatedAt: string | Date;
 }
 
+interface InternalUserCredentialsRow extends InternalUserRow {
+  passwordHash: string;
+}
+
 interface InternalSessionRow {
   tokenHash: string;
   orgId: string;
@@ -178,6 +190,29 @@ interface InternalSessionRow {
   roles: InternalRole[] | string;
   createdAt: string | Date;
   expiresAt: string | Date;
+}
+
+interface UserInvitationRow {
+  id: string;
+  orgId: string;
+  email: string;
+  displayName: string;
+  roles: InternalRole[] | string;
+  createdByUserId: string | null;
+  expiresAt: string | Date;
+  acceptedAt: string | Date | null;
+  createdAt: string | Date;
+}
+
+interface AcceptUserInvitationRow extends UserInvitationRow {
+  errorCode: string | null;
+  userId: string;
+  userEmail: string;
+  userDisplayName: string;
+  userStatus: string;
+  userRoles: InternalRole[] | string;
+  userCreatedAt: string | Date;
+  userUpdatedAt: string | Date;
 }
 
 interface CollectorDeviceRow {
@@ -896,12 +931,13 @@ export class PostgresSyncStore {
   async createInternalUser(input: CreateInternalUserInput): Promise<InternalUser> {
     await this.ensureOrg(input.orgId);
     const roles = input.roles ?? ["sales"];
+    const normalizedEmail = input.email.trim().toLowerCase();
     const result = await this.client.query<InternalUserRow>(
       `
       /* create_internal_user */
       WITH upsert_user AS (
         INSERT INTO app_user (org_id, email, display_name, password_hash, status)
-        VALUES ($1, lower($2), $3, $4, $6)
+        VALUES ($1, $2, $3, $4, $6)
         ON CONFLICT (org_id, email)
         DO UPDATE SET
           display_name = EXCLUDED.display_name,
@@ -910,8 +946,21 @@ export class PostgresSyncStore {
           updated_at = now()
         RETURNING id, org_id, email, display_name, status, created_at, updated_at
       ),
+      removed_roles AS (
+        DELETE FROM user_role
+        WHERE org_id = $1
+          AND user_id = (SELECT id FROM upsert_user)
+        RETURNING 1
+      ),
+      roles_removed AS (
+        SELECT 1 AS ready FROM (SELECT 1 FROM removed_roles LIMIT 1) removed_any
+        UNION ALL
+        SELECT 1 AS ready WHERE NOT EXISTS (SELECT 1 FROM removed_roles)
+      ),
       requested_roles AS (
-        SELECT unnest($5::text[]) AS name
+        SELECT role_name AS name
+        FROM upsert_user
+        CROSS JOIN LATERAL unnest($5::text[]) AS role_name
       ),
       upsert_roles AS (
         INSERT INTO role (org_id, name)
@@ -924,6 +973,7 @@ export class PostgresSyncStore {
         SELECT $1, upsert_user.id, upsert_roles.id
         FROM upsert_user
         CROSS JOIN upsert_roles
+        CROSS JOIN roles_removed
         ON CONFLICT DO NOTHING
       )
       SELECT
@@ -939,7 +989,7 @@ export class PostgresSyncStore {
       `,
       [
         input.orgId,
-        input.email,
+        normalizedEmail,
         input.displayName,
         input.passwordHash,
         roles,
@@ -949,8 +999,313 @@ export class PostgresSyncStore {
     return mapInternalUser(requiredRow(result.rows[0], "internal_user"));
   }
 
+  async listInternalUsers(orgId: string): Promise<InternalUser[]> {
+    const result = await this.client.query<InternalUserRow>(
+      `
+      /* list_internal_users */
+      SELECT
+        u.id::text AS "id",
+        u.org_id AS "orgId",
+        u.email AS "email",
+        u.display_name AS "displayName",
+        u.status AS "status",
+        COALESCE(array_agg(r.name ORDER BY r.name) FILTER (WHERE r.name IS NOT NULL), '{}'::text[]) AS "roles",
+        u.created_at AS "createdAt",
+        u.updated_at AS "updatedAt"
+      FROM app_user u
+      LEFT JOIN user_role ur ON ur.user_id = u.id AND ur.org_id = u.org_id
+      LEFT JOIN role r ON r.id = ur.role_id
+      WHERE u.org_id = $1
+      GROUP BY u.id
+      ORDER BY u.email ASC
+      `,
+      [orgId]
+    );
+    return result.rows.map(mapInternalUser);
+  }
+
+  async getInternalUserCredentials(input: GetInternalUserCredentialsInput): Promise<InternalUserCredentials | null> {
+    const normalizedEmail = input.email.trim().toLowerCase();
+    const result = await this.client.query<InternalUserCredentialsRow>(
+      `
+      /* get_internal_user_credentials */
+      SELECT
+        u.id::text AS "id",
+        u.org_id AS "orgId",
+        u.email AS "email",
+        u.display_name AS "displayName",
+        u.status AS "status",
+        COALESCE(array_agg(r.name ORDER BY r.name) FILTER (WHERE r.name IS NOT NULL), '{}'::text[]) AS "roles",
+        u.created_at AS "createdAt",
+        u.updated_at AS "updatedAt",
+        u.password_hash AS "passwordHash"
+      FROM app_user u
+      LEFT JOIN user_role ur ON ur.user_id = u.id AND ur.org_id = u.org_id
+      LEFT JOIN role r ON r.id = ur.role_id
+      WHERE u.org_id = $1
+        AND u.email = $2
+      GROUP BY u.id
+      `,
+      [input.orgId, normalizedEmail]
+    );
+    const row = result.rows[0];
+    return row ? { ...mapInternalUser(row), passwordHash: row.passwordHash } : null;
+  }
+
+  async updateInternalUser(input: UpdateInternalUserInput): Promise<InternalUser> {
+    const roles = input.roles ?? null;
+    const result = await this.client.query<InternalUserRow>(
+      `
+      /* update_internal_user */
+      WITH updated_user AS (
+        UPDATE app_user
+        SET
+          display_name = COALESCE($3, display_name),
+          password_hash = COALESCE($4, password_hash),
+          status = COALESCE($6, status),
+          updated_at = now()
+        WHERE org_id = $1
+          AND id = $2
+        RETURNING id, org_id, email, display_name, status, created_at, updated_at
+      ),
+      removed_roles AS (
+        DELETE FROM user_role
+        WHERE org_id = $1
+          AND user_id = $2
+          AND $5::text[] IS NOT NULL
+        RETURNING 1
+      ),
+      roles_removed AS (
+        SELECT 1 AS ready FROM (SELECT 1 FROM removed_roles LIMIT 1) removed_any
+        UNION ALL
+        SELECT 1 AS ready WHERE NOT EXISTS (SELECT 1 FROM removed_roles)
+      ),
+      requested_roles AS (
+        SELECT role_name AS name
+        FROM updated_user
+        CROSS JOIN LATERAL unnest(COALESCE($5::text[], '{}'::text[])) AS role_name
+      ),
+      upsert_roles AS (
+        INSERT INTO role (org_id, name)
+        SELECT $1, name FROM requested_roles
+        ON CONFLICT (org_id, name) DO UPDATE SET name = EXCLUDED.name
+        RETURNING id, name
+      ),
+      linked_roles AS (
+        INSERT INTO user_role (org_id, user_id, role_id)
+        SELECT $1, updated_user.id, upsert_roles.id
+        FROM updated_user
+        CROSS JOIN upsert_roles
+        CROSS JOIN roles_removed
+        ON CONFLICT DO NOTHING
+      )
+      SELECT
+        u.id::text AS "id",
+        u.org_id AS "orgId",
+        u.email AS "email",
+        u.display_name AS "displayName",
+        u.status AS "status",
+        COALESCE($5::text[], array_agg(r.name ORDER BY r.name) FILTER (WHERE r.name IS NOT NULL), '{}'::text[]) AS "roles",
+        u.created_at AS "createdAt",
+        u.updated_at AS "updatedAt"
+      FROM updated_user u
+      LEFT JOIN user_role ur ON ur.user_id = u.id AND ur.org_id = u.org_id
+      LEFT JOIN role r ON r.id = ur.role_id
+      GROUP BY u.id, u.org_id, u.email, u.display_name, u.status, u.created_at, u.updated_at
+      `,
+      [
+        input.orgId,
+        input.userId,
+        input.displayName || null,
+        input.passwordHash || null,
+        roles,
+        input.status || null
+      ]
+    );
+    return mapInternalUser(requiredRow(result.rows[0], "internal_user"));
+  }
+
+  async revokeInternalSession(input: RevokeInternalSessionInput): Promise<boolean> {
+    const result = await this.client.query(
+      `
+      /* revoke_internal_session */
+      UPDATE internal_session
+      SET revoked_at = now()
+      WHERE token_hash = $1
+        AND revoked_at IS NULL
+      `,
+      [hashContent(input.token)]
+    );
+    return result.rowCount > 0;
+  }
+
+  async createUserInvitation(input: CreateUserInvitationInput): Promise<StoredUserInvitation> {
+    await this.ensureOrg(input.orgId);
+    const token = input.token || crypto.randomBytes(32).toString("hex");
+    const normalizedEmail = input.email.trim().toLowerCase();
+    const expiresAt = input.expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const result = await this.client.query<UserInvitationRow>(
+      `
+      /* create_user_invitation */
+      INSERT INTO user_invitation (org_id, email, display_name, roles, token_hash, created_by, expires_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING
+        id::text AS "id",
+        org_id AS "orgId",
+        email AS "email",
+        display_name AS "displayName",
+        roles AS "roles",
+        created_by::text AS "createdByUserId",
+        expires_at AS "expiresAt",
+        accepted_at AS "acceptedAt",
+        created_at AS "createdAt"
+      `,
+      [
+        input.orgId,
+        normalizedEmail,
+        input.displayName,
+        input.roles,
+        hashContent(token),
+        input.createdByUserId || null,
+        expiresAt
+      ]
+    );
+    return { ...mapUserInvitation(requiredRow(result.rows[0], "user_invitation")), token };
+  }
+
+  async getUserInvitation(token: string): Promise<StoredUserInvitation | null> {
+    const result = await this.client.query<UserInvitationRow>(
+      `
+      /* get_user_invitation */
+      SELECT
+        id::text AS "id",
+        org_id AS "orgId",
+        email AS "email",
+        display_name AS "displayName",
+        roles AS "roles",
+        created_by::text AS "createdByUserId",
+        expires_at AS "expiresAt",
+        accepted_at AS "acceptedAt",
+        created_at AS "createdAt"
+      FROM user_invitation
+      WHERE token_hash = $1
+        AND accepted_at IS NULL
+        AND expires_at > now()
+      `,
+      [hashContent(token)]
+    );
+    const row = result.rows[0];
+    return row ? mapUserInvitation(row) : null;
+  }
+
+  async acceptUserInvitation(input: AcceptUserInvitationInput): Promise<AcceptUserInvitationResult> {
+    const result = await this.client.query<AcceptUserInvitationRow>(
+      `
+      /* accept_user_invitation */
+      WITH source_invitation AS (
+        SELECT *
+        FROM user_invitation
+        WHERE token_hash = $1
+      ),
+      claimed_invitation AS (
+        UPDATE user_invitation
+        SET accepted_at = now()
+        WHERE token_hash = $1
+          AND accepted_at IS NULL
+          AND expires_at > now()
+        RETURNING id, org_id, email, display_name, roles, created_by, expires_at, accepted_at, created_at
+      ),
+      upsert_user AS (
+        INSERT INTO app_user (org_id, email, display_name, password_hash, status)
+        SELECT org_id, email, display_name, $2, 'active'
+        FROM claimed_invitation
+        ON CONFLICT (org_id, email)
+        DO UPDATE SET
+          display_name = EXCLUDED.display_name,
+          password_hash = EXCLUDED.password_hash,
+          status = 'active',
+          updated_at = now()
+        RETURNING id, org_id, email, display_name, status, created_at, updated_at
+      ),
+      removed_roles AS (
+        DELETE FROM user_role
+        WHERE org_id = (SELECT org_id FROM upsert_user)
+          AND user_id = (SELECT id FROM upsert_user)
+        RETURNING 1
+      ),
+      roles_removed AS (
+        SELECT 1 AS ready FROM (SELECT 1 FROM removed_roles LIMIT 1) removed_any
+        UNION ALL
+        SELECT 1 AS ready WHERE NOT EXISTS (SELECT 1 FROM removed_roles)
+      ),
+      requested_roles AS (
+        SELECT unnest((SELECT roles FROM claimed_invitation)) AS name
+      ),
+      upsert_roles AS (
+        INSERT INTO role (org_id, name)
+        SELECT (SELECT org_id FROM claimed_invitation), name FROM requested_roles
+        ON CONFLICT (org_id, name) DO UPDATE SET name = EXCLUDED.name
+        RETURNING id, name
+      ),
+      linked_roles AS (
+        INSERT INTO user_role (org_id, user_id, role_id)
+        SELECT upsert_user.org_id, upsert_user.id, upsert_roles.id
+        FROM upsert_user
+        CROSS JOIN upsert_roles
+        CROSS JOIN roles_removed
+        ON CONFLICT DO NOTHING
+      )
+      SELECT
+        CASE
+          WHEN i.id IS NOT NULL THEN NULL
+          WHEN source.id IS NULL THEN 'invitation_not_found'
+          WHEN source.accepted_at IS NOT NULL THEN 'invitation_already_accepted'
+          WHEN source.expires_at <= now() THEN 'invitation_expired'
+          ELSE 'invitation_already_accepted'
+        END AS "errorCode",
+        i.id::text AS "id",
+        i.org_id AS "orgId",
+        i.email AS "email",
+        i.display_name AS "displayName",
+        i.roles AS "roles",
+        i.created_by::text AS "createdByUserId",
+        i.expires_at AS "expiresAt",
+        i.accepted_at AS "acceptedAt",
+        i.created_at AS "createdAt",
+        u.id::text AS "userId",
+        u.email AS "userEmail",
+        u.display_name AS "userDisplayName",
+        u.status AS "userStatus",
+        i.roles AS "userRoles",
+        u.created_at AS "userCreatedAt",
+        u.updated_at AS "userUpdatedAt"
+      FROM (SELECT 1) marker
+      LEFT JOIN source_invitation source ON true
+      LEFT JOIN claimed_invitation i ON true
+      LEFT JOIN upsert_user u ON true
+      `,
+      [hashContent(input.token), input.passwordHash]
+    );
+    const row = requiredRow(result.rows[0], "user_invitation");
+    if (row.errorCode) throw new Error(row.errorCode);
+    return {
+      invitation: mapUserInvitation(row),
+      user: mapInternalUser({
+        id: row.userId,
+        orgId: row.orgId,
+        email: row.userEmail,
+        displayName: row.userDisplayName,
+        status: row.userStatus,
+        roles: row.userRoles,
+        createdAt: row.userCreatedAt,
+        updatedAt: row.userUpdatedAt
+      })
+    };
+  }
+
   async issueInternalSession(input: IssueInternalSessionInput): Promise<InternalSession> {
     const token = input.token || crypto.randomBytes(32).toString("hex");
+    const normalizedEmail = input.email.trim().toLowerCase();
     const expiresAt = input.expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const result = await this.client.query<InternalSessionRow>(
       `
@@ -966,7 +1321,7 @@ export class PostgresSyncStore {
         LEFT JOIN user_role ur ON ur.user_id = u.id AND ur.org_id = u.org_id
         LEFT JOIN role r ON r.id = ur.role_id
         WHERE u.org_id = $1
-          AND u.email = lower($2)
+          AND u.email = $2
           AND u.password_hash = $3
           AND u.status = 'active'
         GROUP BY u.id
@@ -991,7 +1346,7 @@ export class PostgresSyncStore {
       `,
       [
         input.orgId,
-        input.email,
+        normalizedEmail,
         input.passwordHash,
         hashContent(token),
         expiresAt
@@ -1595,6 +1950,22 @@ function mapInternalSession(row: InternalSessionRow, token: string): InternalSes
     roles: normalizeRoles(row.roles),
     createdAt: isoString(row.createdAt) || "",
     expiresAt: isoString(row.expiresAt) || ""
+  };
+}
+
+function mapUserInvitation(row: UserInvitationRow): StoredUserInvitation {
+  return {
+    id: row.id,
+    orgId: row.orgId,
+    email: row.email,
+    displayName: row.displayName,
+    roles: normalizeRoles(row.roles),
+    expiresAt: isoString(row.expiresAt) || "",
+    createdAt: isoString(row.createdAt) || "",
+    ...optionalProps({
+      createdByUserId: row.createdByUserId,
+      acceptedAt: isoString(row.acceptedAt)
+    })
   };
 }
 

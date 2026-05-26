@@ -23,7 +23,7 @@ Node 启动入口会自动读取项目根目录下的 `.env.local` 和 `.env`，
 ```bash
 WANGWANG_SERVER_HOST=127.0.0.1
 WANGWANG_SERVER_PORT=5032
-WANGWANG_INTERNAL_API_TOKENS=dev-admin-token
+WANGWANG_SETUP_TOKEN=change-me-setup-token
 WANGWANG_DEVICE_TOKENS=dev-device-token
 WANGWANG_ORG_ID=org_internal
 WANGWANG_SERVER_URL=http://127.0.0.1:5032
@@ -81,35 +81,63 @@ npm run dev
 curl http://127.0.0.1:5032/health
 ```
 
-## 5. 管理 token 和内部用户
+## 5. 初始化管理员和内部登录
 
-当前内部试运行使用 bootstrap 管理 token：
+首次启动新环境时，在 `.env.local` 设置一次性初始化 token：
 
 ```bash
-WANGWANG_INTERNAL_API_TOKENS=dev-admin-token
+WANGWANG_SETUP_TOKEN=change-me-setup-token
+```
+
+可以在 Web 工作台切换到初始化模式创建首个管理员，也可以直接调用初始化接口：
+
+```bash
+curl -X POST http://127.0.0.1:5032/internal/v1/setup/admin \
+  -H 'Authorization: Bearer change-me-setup-token' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "orgId": "org_internal",
+    "email": "admin@example.com",
+    "displayName": "Admin User",
+    "password": "change-me-password"
+  }'
 ```
 
 Web 工作台顶部输入：
 
 - Org：`org_internal`
 - API：留空
-- Token：`dev-admin-token`
+- 邮箱：`admin@example.com`
+- 密码：`change-me-password`
 
 说明：
 
-- bootstrap token 拥有本地开发管理员权限。
-- `POST /internal/v1/auth/login` 已支持内部会话登录，但当前仓库还没有面向管理员的创建用户 UI/API。
-- 试运行阶段优先使用 bootstrap token；正式内部用户创建可以后续通过 seed 脚本、管理员 API 或后台管理页面补齐。
+- 内部工作台只支持邮箱密码登录。
+- 初始化 token 只用于创建首个管理员。
+- 首个管理员创建完成后，请从 `.env.local` 删除 `WANGWANG_SETUP_TOKEN` 或将它置空。
+- 后续管理员和普通内部用户由已登录管理员在工作台中创建。
 
 ## 6. 注册采集设备
 
 本地开发可以直接使用 `WANGWANG_DEVICE_TOKENS=dev-device-token` 作为采集端兜底 token。
 
-如果要走设备注册路径，使用 bootstrap 管理 token 注册：
+如果要走设备注册路径，先用邮箱密码登录获取内部 session token：
+
+```bash
+curl -X POST http://127.0.0.1:5032/internal/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "orgId": "org_internal",
+    "email": "admin@example.com",
+    "password": "change-me-password"
+  }'
+```
+
+再使用登录响应中的 `token` 注册采集设备：
 
 ```bash
 curl -X POST http://127.0.0.1:5032/internal/v1/collector-devices \
-  -H 'Authorization: Bearer dev-admin-token' \
+  -H 'Authorization: Bearer <登录返回 token>' \
   -H 'Content-Type: application/json' \
   -d '{
     "orgId": "org_internal",
@@ -218,10 +246,13 @@ DATABASE_URL=postgres://wait9yan:Weite123@127.0.0.1:5432/tradebridge
 
 ### Web 显示未授权
 
-确认页面 Token 输入的是内部管理 token：
+确认页面使用的是内部用户账号：
 
 ```text
-dev-admin-token
+Org: org_internal
+API: 留空
+邮箱: admin@example.com
+密码: change-me-password
 ```
 
 不要把采集端 token 填到 Web 工作台。

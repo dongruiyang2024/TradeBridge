@@ -9,6 +9,7 @@ import type {
   CollectorStateStore,
   QueuedFailedBatch
 } from "../../apps/collector-desktop/src/local-state.js";
+import { hashPassword } from "../../apps/server/src/auth.js";
 import { createServer } from "../../apps/server/src/server.js";
 import { createInternalApiClient } from "../../apps/web/src/internal-api";
 import {
@@ -22,18 +23,30 @@ import {
 const ORG_ID = "org_internal";
 const SELLER_ACCOUNT_ID = "seller-trial";
 const COLLECTOR_TOKEN = "trial-collector-token";
-const INTERNAL_TOKEN = "trial-admin-token";
 const SECRET_COOKIE = "one-talk-cookie-must-not-leave-collector";
 
 test("internal trial flow uploads collector data and exercises the Web customer workflow", async () => {
   const store = new InMemorySyncStore();
+  await store.createInternalUser({
+    orgId: ORG_ID,
+    email: "trial-admin@example.com",
+    displayName: "Trial Admin",
+    passwordHash: await hashPassword("secret"),
+    roles: ["admin"]
+  });
   const app = await createServer({
     store,
-    deviceTokens: [COLLECTOR_TOKEN],
-    internalTokens: [INTERNAL_TOKEN]
+    deviceTokens: [COLLECTOR_TOKEN]
   });
 
   await app.ready();
+  const loginResponse = await app.inject({
+    method: "POST",
+    url: "/internal/v1/auth/login",
+    payload: { orgId: ORG_ID, email: "trial-admin@example.com", password: "secret" }
+  });
+  assert.equal(loginResponse.statusCode, 200);
+  const internalToken = loginResponse.json().token;
   const baseUrl = "http://tradebridge.internal";
   const fetchImpl = fastifyFetch(app);
 
@@ -53,7 +66,7 @@ test("internal trial flow uploads collector data and exercises the Web customer 
     assert.equal(uploadResult.rejectedCount, 0);
     assert.equal(await state.getCursor(SELLER_ACCOUNT_ID), "2026-05-25T10:50:00.000Z");
 
-    const client = createInternalApiClient({ baseUrl, token: INTERNAL_TOKEN, fetchImpl });
+    const client = createInternalApiClient({ baseUrl, token: internalToken, fetchImpl });
     let workspace = await loadCustomerList(createInitialWorkspaceState({ orgId: ORG_ID }), client);
 
     assert.equal(workspace.customers.length, 1);

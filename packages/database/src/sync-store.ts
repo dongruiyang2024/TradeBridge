@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import type {
   AddCustomerTagInput,
+  AcceptUserInvitationInput,
+  AcceptUserInvitationResult,
   AssignCustomerInput,
   CollectorDevice,
   ConversationCustomerScope,
@@ -10,12 +12,16 @@ import type {
   CreateFollowUpTaskInput,
   CreateInternalUserInput,
   CreateReplySuggestionInput,
+  CreateUserInvitationInput,
   CustomerScope,
+  GetInternalUserCredentialsInput,
   InternalSession,
   InternalUser,
+  InternalUserCredentials,
   IssueInternalSessionInput,
   RegisteredCollectorDevice,
   RegisterCollectorDeviceInput,
+  RevokeInternalSessionInput,
   RevokeCollectorDeviceInput,
   StoredAuditLog,
   StoredAiSummary,
@@ -28,12 +34,14 @@ import type {
   StoredMessage,
   StoredReplySuggestion,
   StoredSellerAccount,
+  StoredUserInvitation,
   SyncBatch,
   SyncBatchResult,
   SyncConversationInput,
   SyncCustomerInput,
   SyncMessageInput,
-  UpdateFollowUpTaskInput
+  UpdateFollowUpTaskInput,
+  UpdateInternalUserInput
 } from "./sync-types.js";
 
 export class InMemorySyncStore {
@@ -50,6 +58,7 @@ export class InMemorySyncStore {
   private readonly auditLogs: StoredAuditLog[] = [];
   private readonly internalUsers = new Map<string, InternalUser & { passwordHash: string }>();
   private readonly internalSessions = new Map<string, InternalSession>();
+  private readonly userInvitations = new Map<string, StoredUserInvitation & { tokenHash: string }>();
   private readonly collectorDevices = new Map<string, CollectorDevice & { tokenHash: string }>();
   private collaborationSequence = 0;
   private internalUserSequence = 0;
@@ -282,12 +291,13 @@ export class InMemorySyncStore {
 
   async createInternalUser(input: CreateInternalUserInput): Promise<InternalUser> {
     const now = new Date().toISOString();
-    const key = internalUserKey(input.orgId, input.email);
+    const normalizedEmail = input.email.trim().toLowerCase();
+    const key = internalUserKey(input.orgId, normalizedEmail);
     const existing = this.internalUsers.get(key);
     const user: InternalUser & { passwordHash: string } = {
       id: existing?.id || this.nextInternalUserId(),
       orgId: input.orgId,
-      email: input.email,
+      email: normalizedEmail,
       displayName: input.displayName,
       status: input.status || "active",
       roles: input.roles ?? ["sales"],
@@ -299,8 +309,38 @@ export class InMemorySyncStore {
     return toPublicInternalUser(user);
   }
 
+  async listInternalUsers(orgId: string): Promise<InternalUser[]> {
+    return Array.from(this.internalUsers.values())
+      .filter((user) => user.orgId === orgId)
+      .map(toPublicInternalUser)
+      .sort((left, right) => left.email.localeCompare(right.email));
+  }
+
+  async getInternalUserCredentials(input: GetInternalUserCredentialsInput): Promise<InternalUserCredentials | null> {
+    const user = this.internalUsers.get(internalUserKey(input.orgId, input.email.trim().toLowerCase()));
+    return user ? { ...toPublicInternalUser(user), passwordHash: user.passwordHash } : null;
+  }
+
+  async updateInternalUser(input: UpdateInternalUserInput): Promise<InternalUser> {
+    const existing = Array.from(this.internalUsers.values()).find(
+      (user) => user.orgId === input.orgId && user.id === input.userId
+    );
+    if (!existing) throw new Error("internal_user_not_found");
+
+    const updated: InternalUser & { passwordHash: string } = {
+      ...existing,
+      displayName: input.displayName ?? existing.displayName,
+      passwordHash: input.passwordHash ?? existing.passwordHash,
+      roles: input.roles ?? existing.roles,
+      status: input.status ?? existing.status,
+      updatedAt: new Date().toISOString()
+    };
+    this.internalUsers.set(internalUserKey(updated.orgId, updated.email), updated);
+    return toPublicInternalUser(updated);
+  }
+
   async issueInternalSession(input: IssueInternalSessionInput): Promise<InternalSession> {
-    const user = this.internalUsers.get(internalUserKey(input.orgId, input.email));
+    const user = this.internalUsers.get(internalUserKey(input.orgId, input.email.trim().toLowerCase()));
     if (!user || user.status !== "active" || user.passwordHash !== input.passwordHash) {
       throw new Error("invalid_credentials");
     }
@@ -321,10 +361,65 @@ export class InMemorySyncStore {
     return session;
   }
 
+  async revokeInternalSession(input: RevokeInternalSessionInput): Promise<boolean> {
+    return this.internalSessions.delete(hashContent(input.token));
+  }
+
+  async createUserInvitation(input: CreateUserInvitationInput): Promise<StoredUserInvitation> {
+    const now = new Date().toISOString();
+    const token = input.token || crypto.randomBytes(32).toString("hex");
+    const invitation: StoredUserInvitation & { tokenHash: string } = {
+      id: this.nextInternalUserId().replace("user_", "inv_"),
+      orgId: input.orgId,
+      email: input.email.trim().toLowerCase(),
+      displayName: input.displayName,
+      roles: input.roles,
+      token,
+      tokenHash: hashContent(token),
+      createdByUserId: input.createdByUserId,
+      expiresAt: input.expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      createdAt: now
+    };
+    this.userInvitations.set(invitation.tokenHash, invitation);
+    const { tokenHash: _tokenHash, ...publicInvitation } = invitation;
+    return publicInvitation;
+  }
+
+  async getUserInvitation(token: string): Promise<StoredUserInvitation | null> {
+    const invitation = this.userInvitations.get(hashContent(token));
+    if (!invitation || invitation.acceptedAt || Date.parse(invitation.expiresAt) <= Date.now()) return null;
+    const { tokenHash: _tokenHash, token: _rawToken, ...publicInvitation } = invitation;
+    return publicInvitation;
+  }
+
+  async acceptUserInvitation(input: AcceptUserInvitationInput): Promise<AcceptUserInvitationResult> {
+    const tokenHash = hashContent(input.token);
+    const invitation = this.userInvitations.get(tokenHash);
+    if (!invitation) throw new Error("invitation_not_found");
+    if (invitation.acceptedAt) throw new Error("invitation_already_accepted");
+    if (Date.parse(invitation.expiresAt) <= Date.now()) throw new Error("invitation_expired");
+
+    const user = await this.createInternalUser({
+      orgId: invitation.orgId,
+      email: invitation.email,
+      displayName: invitation.displayName,
+      passwordHash: input.passwordHash,
+      roles: invitation.roles,
+      status: "active"
+    });
+    invitation.acceptedAt = new Date().toISOString();
+    const { tokenHash: _tokenHash, token: _rawToken, ...publicInvitation } = invitation;
+    return { invitation: publicInvitation, user };
+  }
+
   async getInternalSession(token: string): Promise<InternalSession | null> {
     const session = this.internalSessions.get(hashContent(token));
     if (!session) return null;
     if (Date.parse(session.expiresAt) <= Date.now()) return null;
+    const user = Array.from(this.internalUsers.values()).find(
+      (item) => item.orgId === session.orgId && item.id === session.userId
+    );
+    if (!user || user.status !== "active") return null;
     return session;
   }
 
