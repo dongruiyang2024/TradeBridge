@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import React from "react";
 import { renderToString } from "react-dom/server";
-import { WorkspaceView } from "../src/App.tsx";
+import { LoginView, WorkspaceView } from "../src/App.tsx";
 import {
   addTagToSelectedCustomer,
   createInitialWorkspaceState,
@@ -13,6 +13,32 @@ import {
 } from "../src/workspace-state.ts";
 import type { InternalApiClient, WorkspaceState } from "../src/types.ts";
 
+test("login view renders account login and developer token fallback", () => {
+  const html = renderToString(
+    <LoginView
+      orgId="org_internal"
+      serverBaseUrl=""
+      email="admin@example.com"
+      password=""
+      developerToken=""
+      loading={false}
+      error=""
+      onOrgIdChange={() => undefined}
+      onServerBaseUrlChange={() => undefined}
+      onEmailChange={() => undefined}
+      onPasswordChange={() => undefined}
+      onDeveloperTokenChange={() => undefined}
+      onPasswordLogin={() => undefined}
+      onDeveloperTokenLogin={() => undefined}
+    />
+  );
+
+  assert.match(html, /登录 TradeBridge/);
+  assert.match(html, /邮箱/);
+  assert.match(html, /密码/);
+  assert.match(html, /开发 Token/);
+});
+
 test("workspace renders customer list, selected timeline, and collaboration panel", () => {
   const state = sampleWorkspaceState();
 
@@ -20,11 +46,9 @@ test("workspace renders customer list, selected timeline, and collaboration pane
     <WorkspaceView
       state={state}
       serverBaseUrl=""
-      token="internal-token"
       orgId="org_internal"
       loading={false}
       onServerBaseUrlChange={() => undefined}
-      onTokenChange={() => undefined}
       onOrgIdChange={() => undefined}
       onRefresh={() => undefined}
       onSelectCustomer={() => undefined}
@@ -40,7 +64,11 @@ test("workspace renders customer list, selected timeline, and collaboration pane
   assert.match(html, /Customer asked for updated MOQ/);
   assert.match(html, /hot-lead/);
   assert.match(html, /Send revised quotation/);
-  assert.match(html, /开发 Token/);
+  assert.match(html, /客户外部 ID/);
+  assert.match(html, /customer-1/);
+  assert.match(html, /seller-1/);
+  assert.match(html, /sales-user-42/);
+  assert.match(html, /manager-user-7/);
 });
 
 test("customer workflow loads selected customer conversations and updates collaboration state", async () => {
@@ -55,6 +83,7 @@ test("customer workflow loads selected customer conversations and updates collab
 
   state = await selectCustomer(state, client, "customer-2");
   assert.equal(state.selectedCustomerId, "customer-2");
+  assert.equal(state.assignment?.assignedToUserId, "sales-user-2");
   assert.deepEqual(
     state.conversations.map((conversation) => conversation.externalConversationId),
     ["conv-2"]
@@ -98,6 +127,16 @@ function sampleWorkspaceState(): WorkspaceState {
       }
     ],
     selectedConversationId: "conv-1",
+    assignment: {
+      id: "assignment-1",
+      orgId: "org_internal",
+      sellerAccountExternalId: "seller-1",
+      externalCustomerId: "customer-1",
+      assignedToUserId: "sales-user-42",
+      assignedByUserId: "manager-user-7",
+      assignedAt: "2026-05-25T08:30:00.000Z",
+      updatedAt: "2026-05-25T08:30:00.000Z"
+    },
     messages: [
       {
         orgId: "org_internal",
@@ -148,6 +187,17 @@ function sampleWorkspaceState(): WorkspaceState {
 
 function createFakeClient(): InternalApiClient {
   return {
+    async login() {
+      return {
+        token: "internal-token",
+        user: {
+          id: "user-1",
+          orgId: "org_internal",
+          email: "admin@example.com",
+          roles: ["admin"]
+        }
+      };
+    },
     async listCustomers() {
       return [
         {
@@ -195,6 +245,16 @@ function createFakeClient(): InternalApiClient {
     },
     async listCustomerNotes() {
       return [];
+    },
+    async getCustomerAssignment(scope) {
+      return {
+        id: `assignment-${scope.externalCustomerId}`,
+        ...scope,
+        assignedToUserId: scope.externalCustomerId === "customer-2" ? "sales-user-2" : "sales-user-1",
+        assignedByUserId: "manager-user-1",
+        assignedAt: "2026-05-25T10:00:00.000Z",
+        updatedAt: "2026-05-25T10:00:00.000Z"
+      };
     },
     async createCustomerNote(scope, input) {
       return {

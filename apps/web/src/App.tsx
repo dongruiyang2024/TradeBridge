@@ -1,6 +1,9 @@
 import {
   CheckCircle2,
   Clock3,
+  KeyRound,
+  LogIn,
+  LogOut,
   MessageSquareText,
   RefreshCcw,
   Search,
@@ -32,9 +35,13 @@ const STORAGE_KEYS = {
 export function App() {
   const [serverBaseUrl, setServerBaseUrl] = useState(() => readStorage(STORAGE_KEYS.serverBaseUrl, ""));
   const [token, setToken] = useState(() => readStorage(STORAGE_KEYS.token, ""));
+  const [developerToken, setDeveloperToken] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [orgId, setOrgId] = useState(() => readStorage(STORAGE_KEYS.orgId, DEFAULT_ORG_ID));
   const [state, setState] = useState<WorkspaceState>(() => createInitialWorkspaceState({ orgId }));
   const [loading, setLoading] = useState(false);
+  const [authError, setAuthError] = useState("");
 
   const apiClient = useMemo(
     () => createInternalApiClient({ baseUrl: serverBaseUrl, token }),
@@ -91,16 +98,79 @@ export function App() {
     }
   }
 
+  async function runLogin(login: () => Promise<string>) {
+    setLoading(true);
+    setAuthError("");
+    try {
+      const nextToken = await login();
+      setToken(nextToken);
+    } catch (error) {
+      setAuthError(errorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handlePasswordLogin() {
+    if (!email.trim() || !password.trim()) {
+      setAuthError("login_credentials_required");
+      return;
+    }
+    void runLogin(async () => {
+      const result = await createInternalApiClient({ baseUrl: serverBaseUrl, token: "" }).login({
+        orgId,
+        email: email.trim(),
+        password
+      });
+      return result.token;
+    });
+  }
+
+  function handleDeveloperTokenLogin() {
+    const nextToken = developerToken.trim();
+    if (!nextToken) {
+      setAuthError("internal_token_required");
+      return;
+    }
+    setAuthError("");
+    setToken(nextToken);
+  }
+
+  function handleLogout() {
+    setToken("");
+    setState(createInitialWorkspaceState({ orgId }));
+  }
+
+  if (!token.trim()) {
+    return (
+      <LoginView
+        orgId={orgId}
+        serverBaseUrl={serverBaseUrl}
+        email={email}
+        password={password}
+        developerToken={developerToken}
+        loading={loading}
+        error={authError}
+        onOrgIdChange={setOrgId}
+        onServerBaseUrlChange={setServerBaseUrl}
+        onEmailChange={setEmail}
+        onPasswordChange={setPassword}
+        onDeveloperTokenChange={setDeveloperToken}
+        onPasswordLogin={handlePasswordLogin}
+        onDeveloperTokenLogin={handleDeveloperTokenLogin}
+      />
+    );
+  }
+
   return (
     <WorkspaceView
       state={state}
       serverBaseUrl={serverBaseUrl}
-      token={token}
       orgId={orgId}
       loading={loading}
       onServerBaseUrlChange={setServerBaseUrl}
-      onTokenChange={setToken}
       onOrgIdChange={setOrgId}
+      onLogout={handleLogout}
       onRefresh={() => void runWorkflow(() => loadCustomerList(createInitialWorkspaceState({ orgId }), apiClient))}
       onSelectCustomer={(customerId) => void runWorkflow((current) => selectCustomer(current, apiClient, customerId))}
       onSelectConversation={(conversationId) =>
@@ -113,15 +183,115 @@ export function App() {
   );
 }
 
+interface LoginViewProps {
+  orgId: string;
+  serverBaseUrl: string;
+  email: string;
+  password: string;
+  developerToken: string;
+  loading: boolean;
+  error: string;
+  onOrgIdChange(value: string): void;
+  onServerBaseUrlChange(value: string): void;
+  onEmailChange(value: string): void;
+  onPasswordChange(value: string): void;
+  onDeveloperTokenChange(value: string): void;
+  onPasswordLogin(): void;
+  onDeveloperTokenLogin(): void;
+}
+
+export function LoginView(props: LoginViewProps) {
+  return (
+    <main className="auth-shell">
+      <section className="auth-panel">
+        <div className="auth-brand">
+          <span className="brand-mark">TB</span>
+          <div>
+            <h1>登录 TradeBridge</h1>
+            <p>内部销售工作台</p>
+          </div>
+        </div>
+
+        <form
+          className="auth-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            props.onPasswordLogin();
+          }}
+        >
+          <label>
+            Org
+            <input value={props.orgId} onChange={(event) => props.onOrgIdChange(event.target.value)} />
+          </label>
+          <label>
+            API
+            <input
+              placeholder="/internal 代理"
+              value={props.serverBaseUrl}
+              onChange={(event) => props.onServerBaseUrlChange(event.target.value)}
+            />
+          </label>
+          <label>
+            邮箱
+            <input
+              type="email"
+              value={props.email}
+              onChange={(event) => props.onEmailChange(event.target.value)}
+            />
+          </label>
+          <label>
+            密码
+            <input
+              type="password"
+              value={props.password}
+              onChange={(event) => props.onPasswordChange(event.target.value)}
+            />
+          </label>
+          <button type="submit" disabled={props.loading}>
+            <LogIn size={16} />
+            <span>登录</span>
+          </button>
+        </form>
+
+        <div className="auth-divider">
+          <span>或</span>
+        </div>
+
+        <form
+          className="auth-form compact"
+          onSubmit={(event) => {
+            event.preventDefault();
+            props.onDeveloperTokenLogin();
+          }}
+        >
+          <label>
+            开发 Token
+            <input
+              type="password"
+              value={props.developerToken}
+              onChange={(event) => props.onDeveloperTokenChange(event.target.value)}
+            />
+          </label>
+          <button type="submit" disabled={props.loading}>
+            <KeyRound size={16} />
+            <span>进入</span>
+          </button>
+        </form>
+
+        {props.error && <p className="auth-error">{props.error}</p>}
+      </section>
+    </main>
+  );
+}
+
 interface WorkspaceViewProps {
   state: WorkspaceState;
   serverBaseUrl: string;
-  token: string;
   orgId: string;
   loading: boolean;
   onServerBaseUrlChange(value: string): void;
-  onTokenChange(value: string): void;
   onOrgIdChange(value: string): void;
+  onLogout?(): void;
   onRefresh(): void;
   onSelectCustomer(externalCustomerId: string): void;
   onSelectConversation(externalConversationId: string): void;
@@ -172,18 +342,16 @@ export function WorkspaceView(props: WorkspaceViewProps) {
               onChange={(event) => props.onServerBaseUrlChange(event.target.value)}
             />
           </label>
-          <label>
-            开发 Token
-            <input
-              type="password"
-              value={props.token}
-              onChange={(event) => props.onTokenChange(event.target.value)}
-            />
-          </label>
           <button className="icon-button primary" type="button" onClick={props.onRefresh} disabled={props.loading}>
             <RefreshCcw size={17} />
             <span>刷新</span>
           </button>
+          {props.onLogout && (
+            <button className="icon-button" type="button" onClick={props.onLogout}>
+              <LogOut size={17} />
+              <span>退出</span>
+            </button>
+          )}
         </div>
       </header>
 
@@ -275,10 +443,27 @@ export function WorkspaceView(props: WorkspaceViewProps) {
               <h2>客户档案</h2>
               <CheckCircle2 size={17} />
             </div>
-            <InfoRow label="买家 ID" value={selectedCustomer?.loginId || selectedCustomer?.externalCustomerId} />
+            <InfoRow label="显示名称" value={selectedCustomer?.displayName} />
+            <InfoRow label="登录 ID" value={selectedCustomer?.loginId} />
+            <InfoRow label="客户外部 ID" value={selectedCustomer?.externalCustomerId} />
             <InfoRow label="Seller" value={selectedCustomer?.sellerAccountExternalId} />
             <InfoRow label="国家/地区" value={selectedCustomer?.country} />
-            <InfoRow label="负责人" value={selectedCustomer?.ownerUserId} />
+            <InfoRow label="客户阶段" value={selectedCustomer?.stage} />
+            <InfoRow label="数据负责人" value={selectedCustomer?.ownerUserId} />
+            <InfoRow label="分配给" value={props.state.assignment?.assignedToUserId} />
+            <InfoRow label="分配人" value={props.state.assignment?.assignedByUserId} />
+            <InfoRow label="分配时间" value={formatDateTime(props.state.assignment?.assignedAt)} />
+          </section>
+
+          <section className="detail-section">
+            <div className="section-heading">
+              <h2>当前会话</h2>
+              <MessageSquareText size={17} />
+            </div>
+            <InfoRow label="会话 ID" value={selectedConversation?.externalConversationId} />
+            <InfoRow label="客户 ID" value={selectedConversation?.externalCustomerId} />
+            <InfoRow label="最近消息" value={formatDateTime(selectedConversation?.lastMessageAt)} />
+            <InfoRow label="消息数量" value={props.state.messages.length} />
           </section>
 
           <section className="detail-section">
@@ -360,6 +545,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
                 <article className="task-item" key={task.id}>
                   <span>{task.title}</span>
                   <strong>{task.status}</strong>
+                  {task.assignedToUserId && <small>{task.assignedToUserId}</small>}
                   {task.dueAt && <time>{formatDateTime(task.dueAt)}</time>}
                 </article>
               ))}

@@ -3,9 +3,11 @@ import type {
   InternalApiClient,
   StoredConversation,
   StoredCustomer,
+  StoredCustomerAssignment,
   StoredCustomerNote,
   StoredCustomerTag,
   StoredFollowUpTask,
+  LoginResult,
   StoredMessage
 } from "./types";
 
@@ -21,12 +23,16 @@ interface ApiEnvelope<T> {
   customers?: StoredCustomer[];
   conversations?: StoredConversation[];
   messages?: StoredMessage[];
+  assignment?: StoredCustomerAssignment | null;
   notes?: StoredCustomerNote[];
   note?: StoredCustomerNote;
   tags?: StoredCustomerTag[];
   tag?: StoredCustomerTag;
   tasks?: StoredFollowUpTask[];
   task?: StoredFollowUpTask;
+  token?: string;
+  expiresAt?: string;
+  user?: LoginResult["user"];
 }
 
 export function createInternalApiClient(options: CreateInternalApiClientOptions): InternalApiClient {
@@ -39,14 +45,19 @@ export function createInternalApiClient(options: CreateInternalApiClientOptions)
       method?: string;
       query?: Record<string, string | undefined>;
       body?: Record<string, unknown>;
+      auth?: boolean;
     } = {}
   ): Promise<ApiEnvelope<T>> {
+    const headers: Record<string, string> = {
+      "content-type": "application/json"
+    };
+    if (init.auth !== false && options.token) {
+      headers.authorization = `Bearer ${options.token}`;
+    }
+
     const response = await fetchImpl(buildUrl(baseUrl, path, init.query), {
       method: init.method,
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${options.token}`
-      },
+      headers,
       body: init.body ? JSON.stringify(init.body) : undefined
     });
     const text = await response.text();
@@ -58,6 +69,18 @@ export function createInternalApiClient(options: CreateInternalApiClientOptions)
   }
 
   return {
+    async login(input) {
+      const data = await request<LoginResult>("/internal/v1/auth/login", {
+        method: "POST",
+        auth: false,
+        body: input
+      });
+      return {
+        token: requireField(data.token, "token"),
+        expiresAt: data.expiresAt,
+        user: requireField(data.user, "user")
+      };
+    },
     async listCustomers(orgId) {
       const data = await request<StoredCustomer[]>("/internal/v1/customers", { query: { orgId } });
       return data.customers || [];
@@ -72,6 +95,12 @@ export function createInternalApiClient(options: CreateInternalApiClientOptions)
         { query: { orgId } }
       );
       return data.messages || [];
+    },
+    async getCustomerAssignment(scope) {
+      const data = await request<StoredCustomerAssignment>(customerPath(scope, "assignment"), {
+        query: scopeQuery(scope)
+      });
+      return data.assignment || null;
     },
     async listCustomerNotes(scope) {
       const data = await request<StoredCustomerNote[]>(customerPath(scope, "notes"), { query: scopeQuery(scope) });

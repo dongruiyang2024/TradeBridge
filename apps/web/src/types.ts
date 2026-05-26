@@ -64,10 +64,34 @@ export interface StoredFollowUpTask extends CustomerScope {
   updatedAt: string;
 }
 
+export interface StoredCustomerAssignment extends CustomerScope {
+  id: string;
+  assignedToUserId: string;
+  assignedByUserId?: string;
+  assignedAt: string;
+  updatedAt: string;
+}
+
+export interface InternalUser {
+  id: string;
+  orgId: string;
+  email: string;
+  displayName?: string;
+  roles: string[];
+}
+
+export interface LoginResult {
+  token: string;
+  expiresAt?: string;
+  user: InternalUser;
+}
+
 export interface InternalApiClient {
+  login(input: { orgId: string; email: string; password: string }): Promise<LoginResult>;
   listCustomers(orgId: string): Promise<StoredCustomer[]>;
   listConversations(orgId: string): Promise<StoredConversation[]>;
   listMessages(orgId: string, externalConversationId: string): Promise<StoredMessage[]>;
+  getCustomerAssignment(scope: CustomerScope): Promise<StoredCustomerAssignment | null>;
   listCustomerNotes(scope: CustomerScope): Promise<StoredCustomerNote[]>;
   createCustomerNote(scope: CustomerScope, input: { body: string }): Promise<StoredCustomerNote>;
   listCustomerTags(scope: CustomerScope): Promise<StoredCustomerTag[]>;
@@ -87,6 +111,7 @@ export interface WorkspaceState {
   selectedCustomerId?: string;
   conversations: StoredConversation[];
   selectedConversationId?: string;
+  assignment?: StoredCustomerAssignment | null;
   messages: StoredMessage[];
   notes: StoredCustomerNote[];
   tags: StoredCustomerTag[];

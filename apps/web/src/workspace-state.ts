@@ -12,6 +12,7 @@ export function createInitialWorkspaceState(input: { orgId: string }): Workspace
     status: "等待连接",
     customers: [],
     conversations: [],
+    assignment: null,
     messages: [],
     notes: [],
     tags: [],
@@ -46,6 +47,7 @@ export async function selectCustomer(
       selectedCustomerId: undefined,
       selectedConversationId: undefined,
       conversations: [],
+      assignment: null,
       messages: [],
       notes: [],
       tags: [],
@@ -60,8 +62,9 @@ export async function selectCustomer(
     allConversations.filter((conversation) => conversation.externalCustomerId === externalCustomerId)
   );
   const selectedConversationId = conversations[0]?.externalConversationId;
-  const [messages, notes, tags, tasks] = await Promise.all([
+  const [messages, assignment, notes, tags, tasks] = await Promise.all([
     selectedConversationId ? client.listMessages(state.orgId, selectedConversationId) : Promise.resolve([]),
+    client.getCustomerAssignment(scope),
     client.listCustomerNotes(scope),
     client.listCustomerTags(scope),
     client.listFollowUpTasks(scope)
@@ -72,6 +75,7 @@ export async function selectCustomer(
     selectedCustomerId: externalCustomerId,
     conversations,
     selectedConversationId,
+    assignment,
     messages: sortMessages(messages),
     notes,
     tags,
@@ -173,6 +177,7 @@ function clearSelection(state: WorkspaceState): WorkspaceState {
     selectedCustomerId: undefined,
     selectedConversationId: undefined,
     conversations: [],
+    assignment: null,
     messages: [],
     notes: [],
     tags: [],
