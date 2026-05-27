@@ -55,14 +55,23 @@ export class BrowserOnetalkClient {
     }
     const raw = safeJson(text);
     const code = isRecord(raw) ? (raw.code as string | number | null) ?? null : null;
-    const data = isRecord(raw) && isRecord(raw.data) ? raw.data : {};
+    const contentType = response.headers.get("content-type");
     const list = messageListFromRaw(raw);
     return {
       status: response.status,
-      contentType: response.headers.get("content-type"),
+      contentType,
       code,
       raw,
-      messages: list
+      messages: list.messages,
+      diagnostics: {
+        status: response.status,
+        contentType,
+        code,
+        listLength: list.messages.length,
+        listPath: list.path,
+        topLevelKeys: objectKeys(raw),
+        dataKeys: objectKeys(isRecord(raw) ? raw.data : undefined)
+      }
     };
   }
 }
@@ -97,7 +106,7 @@ function ctokenFromXmanUsT(raw: string): string {
   return params.get("ctoken") || params.get(" ctoken") || "";
 }
 
-function messageListFromRaw(raw: unknown): Record<string, unknown>[] {
+function messageListFromRaw(raw: unknown): { messages: Record<string, unknown>[]; path?: string } {
   for (const path of [
     ["data", "list"],
     ["data", "messages"],
@@ -109,9 +118,9 @@ function messageListFromRaw(raw: unknown): Record<string, unknown>[] {
     ["messages"]
   ]) {
     const value = valueAtPath(raw, path);
-    if (Array.isArray(value)) return value.filter(isRecord);
+    if (Array.isArray(value)) return { messages: value.filter(isRecord), path: path.join(".") };
   }
-  return [];
+  return { messages: [] };
 }
 
 function valueAtPath(source: unknown, path: string[]): unknown {
@@ -121,6 +130,10 @@ function valueAtPath(source: unknown, path: string[]): unknown {
     current = current[key];
   }
   return current;
+}
+
+function objectKeys(value: unknown): string[] {
+  return isRecord(value) ? Object.keys(value).sort() : [];
 }
 
 function safeJson(text: string): unknown {

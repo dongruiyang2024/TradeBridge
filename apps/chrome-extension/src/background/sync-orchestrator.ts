@@ -1,7 +1,14 @@
 import { mapWebliteToSyncBatch, type ChatMessageResponse, type WebliteData } from "@wangwang/onetalk-adapter/browser";
 import { assertNoSensitiveFields, sanitizeForUpload } from "./sanitizer.js";
 import { validateConfig } from "./storage.js";
-import type { ExtensionConfig, ExtensionStatus, SyncBatch, SyncBatchResult } from "../shared/sync-types.js";
+import type {
+  ExtensionConfig,
+  ExtensionStatus,
+  MessageRequestDiagnostic,
+  SyncBatch,
+  SyncBatchResult,
+  SyncDiagnostics
+} from "../shared/sync-types.js";
 
 export interface SyncStateStore {
   getConfig(): Promise<ExtensionConfig | null>;
@@ -47,7 +54,7 @@ export async function runSyncOnce(options: RunSyncOnceOptions): Promise<RunSyncR
     validateConfig(config);
 
     const weblite = await options.onetalkClient.fetchWeblite();
-    const messagesByConversationId = await fetchMessagesByConversation({
+    const messageFetch = await fetchMessagesByConversation({
       client: options.onetalkClient,
       weblite,
       pageSize,
@@ -66,7 +73,7 @@ export async function runSyncOnce(options: RunSyncOnceOptions): Promise<RunSyncR
       source: "chrome-extension",
       previousCursor: previousStatus.nextCursor || null,
       weblite,
-      messagesByConversationId
+      messagesByConversationId: messageFetch.messagesByConversationId
     });
 
     const sanitized = sanitizeForUpload(mapped);
@@ -80,6 +87,7 @@ export async function runSyncOnce(options: RunSyncOnceOptions): Promise<RunSyncR
     await options.stateStore.saveStatus({
       lastSyncedAt: now().toISOString(),
       nextCursor: uploadResult.nextCursor,
+      lastDiagnostics: messageFetch.diagnostics,
       lastError: undefined
     });
 
@@ -107,12 +115,15 @@ async function fetchMessagesByConversation(options: {
   weblite: WebliteData;
   pageSize: number;
   maxPages: number;
-}): Promise<Record<string, Record<string, unknown>[]>> {
+}): Promise<{ messagesByConversationId: Record<string, Record<string, unknown>[]>; diagnostics: SyncDiagnostics }> {
   const output: Record<string, Record<string, unknown>[]> = {};
+  const diagnostics: MessageRequestDiagnostic[] = [];
+  let conversations = 0;
 
   for (const conversation of options.weblite.conversations.filter(isRecord)) {
     const conversationId = firstString(conversation, ["cid", "conversationCode", "conversationId", "id"]);
     if (!conversationId) continue;
+    conversations += 1;
     const messages: Record<string, unknown>[] = [];
     let before: number | null = null;
 
@@ -124,6 +135,7 @@ async function fetchMessagesByConversation(options: {
         pageSize: options.pageSize
       });
       const records = result.messages.filter(isRecord);
+      diagnostics.push(messageRequestDiagnostic(conversationId, result, records.length));
       messages.push(...records);
       if (records.length < options.pageSize) break;
       const oldest = oldestTimestamp(records);
@@ -134,7 +146,34 @@ async function fetchMessagesByConversation(options: {
     output[conversationId] = messages;
   }
 
-  return output;
+  return {
+    messagesByConversationId: output,
+    diagnostics: {
+      conversations,
+      messageRequests: diagnostics
+    }
+  };
+}
+
+function messageRequestDiagnostic(
+  conversationId: string,
+  response: ChatMessageResponse,
+  listLength: number
+): MessageRequestDiagnostic {
+  return {
+    conversationId,
+    status: response.status,
+    code: response.code,
+    contentType: response.contentType,
+    listLength,
+    listPath: response.diagnostics?.listPath,
+    topLevelKeys: response.diagnostics?.topLevelKeys || objectKeys(response.raw),
+    dataKeys: response.diagnostics?.dataKeys || objectKeys(isRecord(response.raw) ? response.raw.data : undefined)
+  };
+}
+
+function objectKeys(value: unknown): string[] {
+  return isRecord(value) ? Object.keys(value).sort() : [];
 }
 
 function oldestTimestamp(records: Record<string, unknown>[]): number | null {

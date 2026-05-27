@@ -22,6 +22,17 @@ export interface ChatMessageResponse {
   code: string | number | null;
   raw: unknown;
   messages: Record<string, unknown>[];
+  diagnostics?: ChatMessageDiagnostics;
+}
+
+export interface ChatMessageDiagnostics {
+  status: number;
+  contentType: string | null;
+  code: string | number | null;
+  listLength: number;
+  listPath?: string;
+  topLevelKeys: string[];
+  dataKeys: string[];
 }
 
 export interface ChatDataSummaryResponse {

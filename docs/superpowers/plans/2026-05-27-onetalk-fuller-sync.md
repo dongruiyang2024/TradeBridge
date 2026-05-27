@@ -94,7 +94,7 @@ git commit -m "fix(chrome-extension): 补全 OneTalk 消息接口参数"
 
 ## 任务 2：记录消息接口诊断
 
-- [ ] **步骤 1：编写失败测试**
+- [x] **步骤 1：编写失败测试**
 
 在 `apps/chrome-extension/test/sync-orchestrator.test.ts` 断言同步成功后 `store.status.lastDiagnostics` 包含：
 
@@ -105,7 +105,7 @@ git commit -m "fix(chrome-extension): 补全 OneTalk 消息接口参数"
 }
 ```
 
-- [ ] **步骤 2：实现状态类型和保存逻辑**
+- [x] **步骤 2：实现状态类型和保存逻辑**
 
 在 `ExtensionStatus` 中增加：
 
@@ -124,7 +124,7 @@ lastDiagnostics?: {
 };
 ```
 
-- [ ] **步骤 3：弹窗展示摘要**
+- [x] **步骤 3：弹窗展示摘要**
 
 同步成功时展示：
 
@@ -133,13 +133,13 @@ lastDiagnostics?: {
 消息接口：1/5 个会话有消息
 ```
 
-- [ ] **步骤 4：运行测试**
+- [x] **步骤 4：运行测试**
 
 ```bash
 npm test -w @wangwang/chrome-extension
 ```
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add apps/chrome-extension/src/background/sync-orchestrator.ts apps/chrome-extension/src/shared/sync-types.ts apps/chrome-extension/src/popup/popup.ts apps/chrome-extension/test/sync-orchestrator.test.ts

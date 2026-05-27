@@ -44,8 +44,25 @@ export interface ExtensionConfig {
 export interface ExtensionStatus {
   lastSyncedAt?: string;
   nextCursor?: string | null;
+  lastDiagnostics?: SyncDiagnostics;
   lastError?: {
     code: string;
     message: string;
   };
+}
+
+export interface SyncDiagnostics {
+  conversations: number;
+  messageRequests: MessageRequestDiagnostic[];
+}
+
+export interface MessageRequestDiagnostic {
+  conversationId: string;
+  status: number;
+  code?: string | number | null;
+  contentType?: string | null;
+  listLength: number;
+  listPath?: string;
+  topLevelKeys: string[];
+  dataKeys: string[];
 }

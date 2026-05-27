@@ -1,6 +1,6 @@
 import { getChrome } from "../shared/chrome-api.js";
 import type { SyncNowResponse } from "../shared/extension-messages.js";
-import type { ExtensionStatus } from "../shared/sync-types.js";
+import type { ExtensionStatus, SyncDiagnostics } from "../shared/sync-types.js";
 
 const chromeApi = getChrome();
 const status = document.querySelector<HTMLParagraphElement>("#status");
@@ -28,8 +28,16 @@ async function renderStatus(): Promise<void> {
     return;
   }
   if (current.lastSyncedAt) {
-    status?.replaceChildren(`最近同步：${current.lastSyncedAt}`);
+    const diagnostics = diagnosticSummary(current.lastDiagnostics);
+    status?.replaceChildren(`最近同步：${current.lastSyncedAt}${diagnostics ? `\n${diagnostics}` : ""}`);
     return;
   }
   status?.replaceChildren("未同步");
+}
+
+function diagnosticSummary(diagnostics?: SyncDiagnostics): string {
+  if (!diagnostics) return "";
+  const requests = diagnostics.messageRequests.length;
+  const withMessages = diagnostics.messageRequests.filter((item) => item.listLength > 0).length;
+  return `消息接口：${withMessages}/${requests || diagnostics.conversations} 个会话有消息`;
 }
