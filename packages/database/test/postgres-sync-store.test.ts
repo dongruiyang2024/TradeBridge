@@ -1170,6 +1170,8 @@ test("PostgresSyncStore registers collector devices with a persisted seller bind
   const registerQuery = client.queries.find((query) => /register_collector_device/i.test(query.sql));
   assert.ok(registerQuery);
   assert.match(registerQuery.sql, /INSERT INTO seller_account/i);
+  assert.match(registerQuery.sql, /SELECT \$1::text/i);
+  assert.match(registerQuery.sql, /WHERE \$1::text IS NOT NULL/i);
   assert.match(registerQuery.sql, /ON CONFLICT \(external_account_id\)/i);
   assert.equal(registerQuery.params[0], "default-seller");
   assert.equal(registered.sellerAccountExternalId, "default-seller");

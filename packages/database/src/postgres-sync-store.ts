@@ -1335,8 +1335,8 @@ export class PostgresSyncStore {
       /* register_collector_device */
       WITH seller AS (
         INSERT INTO seller_account (external_account_id)
-        SELECT $1
-        WHERE $1 IS NOT NULL
+        SELECT $1::text
+        WHERE $1::text IS NOT NULL
         ON CONFLICT (external_account_id)
         DO UPDATE SET updated_at = now()
         RETURNING id, external_account_id
