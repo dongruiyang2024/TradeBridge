@@ -76,7 +76,7 @@ test("runSyncOnce fetches OneTalk data, sanitizes it, uploads batch, and saves c
   assert.equal(store.status.lastError, undefined);
 });
 
-test("runSyncOnce stores config_required errors", async () => {
+test("runSyncOnce stores collector_activation_required errors", async () => {
   const store = new MemoryStateStore();
   store.config = null;
 
@@ -96,6 +96,6 @@ test("runSyncOnce stores config_required errors", async () => {
   });
 
   assert.equal(result.ok, false);
-  assert.equal(result.error, "config_required");
-  assert.equal(store.status.lastError?.code, "config_required");
+  assert.equal(result.error, "collector_activation_required");
+  assert.equal(store.status.lastError?.code, "collector_activation_required");
 });

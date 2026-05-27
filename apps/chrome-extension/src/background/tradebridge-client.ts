@@ -1,4 +1,9 @@
-import type { SyncBatch, SyncBatchResult } from "../shared/sync-types.js";
+import type {
+  CollectorActivationInput,
+  CollectorActivationResult,
+  SyncBatch,
+  SyncBatchResult
+} from "../shared/sync-types.js";
 
 export interface UploadSyncBatchOptions {
   serverUrl: string;
@@ -32,8 +37,38 @@ export async function uploadSyncBatch(options: UploadSyncBatchOptions): Promise<
   };
 }
 
+export async function activateCollectorDevice(input: CollectorActivationInput): Promise<CollectorActivationResult> {
+  const response = await fetch(collectorAuthUrl(input.serverUrl), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email: input.email,
+      password: input.password,
+      sellerAccountExternalId: input.sellerAccountExternalId,
+      deviceExternalId: input.deviceExternalId,
+      deviceName: input.deviceName
+    })
+  });
+  const body = await response.json().catch(() => null);
+
+  if (response.status === 401) throw new Error("invalid_credentials");
+  if (response.status === 403) throw new Error("forbidden");
+  if (!response.ok || !isActivationResponse(body)) {
+    throw new Error("collector_activation_failed");
+  }
+
+  return {
+    token: body.token,
+    device: body.device
+  };
+}
+
 function syncBatchUrl(serverUrl: string): string {
   return new URL("/collector/v1/sync-batches", serverUrl).toString();
+}
+
+function collectorAuthUrl(serverUrl: string): string {
+  return new URL("/collector/v1/auth/login", serverUrl).toString();
 }
 
 function isSyncBatchResponse(value: unknown): value is SyncBatchResult & { ok: true } {
@@ -45,6 +80,20 @@ function isSyncBatchResponse(value: unknown): value is SyncBatchResult & { ok: t
     (typeof value.nextCursor === "string" || value.nextCursor === null) &&
     Array.isArray(value.warnings) &&
     value.warnings.every((item) => typeof item === "string")
+  );
+}
+
+function isActivationResponse(value: unknown): value is CollectorActivationResult & { ok: true } {
+  if (!isRecord(value) || value.ok !== true || typeof value.token !== "string" || !isRecord(value.device)) {
+    return false;
+  }
+  return (
+    typeof value.device.id === "string" &&
+    typeof value.device.externalDeviceId === "string" &&
+    typeof value.device.status === "string" &&
+    (value.device.sellerAccountExternalId === undefined ||
+      typeof value.device.sellerAccountExternalId === "string") &&
+    (value.device.deviceName === undefined || typeof value.device.deviceName === "string")
   );
 }
 

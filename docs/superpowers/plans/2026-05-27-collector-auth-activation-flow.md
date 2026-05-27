@@ -568,7 +568,7 @@ git commit -m "feat(server): 支持采集端账号密码激活"
 - 测试：`apps/chrome-extension/test/tradebridge-client.test.ts`
 - 测试：`apps/chrome-extension/test/sync-orchestrator.test.ts`
 
-- [ ] **步骤 1：编写失败的激活客户端测试**
+- [x] **步骤 1：编写失败的激活客户端测试**
 
 在 `apps/chrome-extension/test/tradebridge-client.test.ts` 增加测试：
 
@@ -604,7 +604,7 @@ test("activateCollectorDevice posts credentials and device metadata", async () =
 });
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：
 
@@ -615,7 +615,7 @@ node --import tsx --test apps/chrome-extension/test/tradebridge-client.test.ts
 
 预期：FAIL，`activateCollectorDevice` 未导出。
 
-- [ ] **步骤 3：增加插件类型**
+- [x] **步骤 3：增加插件类型**
 
 在 `apps/chrome-extension/src/shared/sync-types.ts` 增加：
 
@@ -641,7 +641,7 @@ export interface CollectorActivationResult {
 }
 ```
 
-- [ ] **步骤 4：实现激活请求**
+- [x] **步骤 4：实现激活请求**
 
 在 `apps/chrome-extension/src/background/tradebridge-client.ts` 增加：
 
@@ -666,7 +666,7 @@ export async function activateCollectorDevice(input: CollectorActivationInput): 
 }
 ```
 
-- [ ] **步骤 5：更新插件设置页 HTML**
+- [x] **步骤 5：更新插件设置页 HTML**
 
 在 `apps/chrome-extension/src/options/options.html` 中将 token 输入替换为账号密码激活表单：
 
@@ -680,7 +680,7 @@ export async function activateCollectorDevice(input: CollectorActivationInput): 
 <button type="submit">激活采集端</button>
 ```
 
-- [ ] **步骤 6：更新插件设置页逻辑**
+- [x] **步骤 6：更新插件设置页逻辑**
 
 在 `apps/chrome-extension/src/options/options.ts` 中提交表单后调用 `activateCollectorDevice`，保存返回的 collector token：
 
@@ -703,7 +703,7 @@ await store.saveConfig({
 });
 ```
 
-- [ ] **步骤 7：更新未激活错误码**
+- [x] **步骤 7：更新未激活错误码**
 
 在 `apps/chrome-extension/src/background/storage.ts` 中把配置缺失错误改为更贴近 UI 的名称：
 
@@ -713,7 +713,7 @@ throw new Error("collector_activation_required");
 
 同步更新 `apps/chrome-extension/test/sync-orchestrator.test.ts` 的断言。
 
-- [ ] **步骤 8：运行插件测试验证通过**
+- [x] **步骤 8：运行插件测试验证通过**
 
 运行：
 
@@ -723,7 +723,7 @@ npm test -w @wangwang/chrome-extension
 
 预期：PASS。
 
-- [ ] **步骤 9：Commit**
+- [x] **步骤 9：Commit**
 
 ```bash
 git add apps/chrome-extension/src/shared/sync-types.ts apps/chrome-extension/src/background/tradebridge-client.ts apps/chrome-extension/src/background/storage.ts apps/chrome-extension/src/options/options.html apps/chrome-extension/src/options/options.ts apps/chrome-extension/test/tradebridge-client.test.ts apps/chrome-extension/test/sync-orchestrator.test.ts

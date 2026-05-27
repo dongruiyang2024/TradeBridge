@@ -33,7 +33,7 @@ export class ExtensionStateStore {
 
 export function validateConfig(config: ExtensionConfig | null): asserts config is ExtensionConfig {
   if (!config?.serverUrl || !config.collectorToken || !config.sellerAccountExternalId || !config.deviceId) {
-    throw new Error("config_required");
+    throw new Error("collector_activation_required");
   }
 }
 
