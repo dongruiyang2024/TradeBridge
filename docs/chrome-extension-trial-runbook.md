@@ -33,11 +33,8 @@ apps/chrome-extension/dist
 - Server URL：`http://127.0.0.1:5032`
 - 邮箱：管理员邮箱
 - 密码：管理员密码
-- Seller Account：卖家账号外部 ID
-- Device ID：本机插件设备 ID
-- Device Name：本机插件设备名称
 
-点击“激活采集端”后，插件会调用 `/collector/v1/auth/login`，并保存服务端返回的 collector token。后续同步只使用该 collector token，不保存管理员密码。
+点击“激活采集端”后，插件会自动生成并复用设备 ID，设备名称默认使用 `Chrome Extension`，然后调用 `/collector/v1/auth/login` 并保存服务端返回的 collector token。后续同步只使用该 collector token，不保存管理员密码。
 
 不要在设置页填写 OneTalk Cookie、`ctoken`、`_tb_token_`、`sgcookie`、`x5sec` 或 `chatToken`。
 

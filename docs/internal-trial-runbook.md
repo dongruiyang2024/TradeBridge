@@ -24,8 +24,6 @@ Node 启动入口会自动读取项目根目录下的 `.env.local` 和 `.env`，
 WANGWANG_SERVER_HOST=127.0.0.1
 WANGWANG_SERVER_PORT=5032
 WANGWANG_SERVER_URL=http://127.0.0.1:5032
-WANGWANG_SELLER_ACCOUNT_ID=seller-demo
-WANGWANG_COLLECTOR_DEVICE_ID=demo-device
 # 采集端激活后再写入：
 # WANGWANG_COLLECTOR_TOKEN=<激活接口返回的 token>
 ```
@@ -123,14 +121,11 @@ curl -X POST http://127.0.0.1:5032/collector/v1/auth/login \
   -H 'Content-Type: application/json' \
   -d '{
     "email": "admin@example.com",
-    "password": "change-me-password",
-    "sellerAccountExternalId": "seller-demo",
-    "deviceExternalId": "demo-device",
-    "deviceName": "Demo Mac"
+    "password": "change-me-password"
   }'
 ```
 
-响应里的 `token` 只返回一次。桌面采集端需要将它写入 `.env.local`：
+响应里的 `token` 只返回一次。服务端会为本次激活生成默认 seller 绑定和设备记录。桌面采集端需要将 token 写入 `.env.local`：
 
 ```bash
 WANGWANG_COLLECTOR_TOKEN=<激活接口返回的 token>
@@ -145,14 +140,13 @@ npm run electron -w @wangwang/collector-desktop
 采集端会读取：
 
 - `WANGWANG_SERVER_URL`
-- `WANGWANG_SELLER_ACCOUNT_ID`
-- `WANGWANG_COLLECTOR_DEVICE_ID`
 - `WANGWANG_COLLECTOR_TOKEN`
 
 当前 Electron 采集端是 MVP：
 
 - 可以显示会话/设备/同步状态。
 - 支持手动同步按钮。
+- 设备 ID 自动生成，设备名称默认使用本机 hostname；同步入库时以 collector token 绑定的设备为准。
 - 真实数据依赖本机 AliSupplier/OneTalk 登录态。
 
 ## 8. 客户视角验证

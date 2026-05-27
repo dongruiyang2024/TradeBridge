@@ -55,15 +55,15 @@
 - 测试：`apps/server/test/auth-routes.test.ts`
 - 测试：`apps/server/test/sync-batches.test.ts`
 
-- [ ] **步骤 1：编写失败的激活默认值测试**
+- [x] **步骤 1：编写失败的激活默认值测试**
 
 在 `apps/server/test/auth-routes.test.ts` 增加测试：请求 `/collector/v1/auth/login` 时只提交 `email`、`password`，断言返回 200、`device.sellerAccountExternalId === "default-seller"`，且 `device.externalDeviceId` 以 `collector-` 开头。
 
-- [ ] **步骤 2：编写失败的同步归属覆盖测试**
+- [x] **步骤 2：编写失败的同步归属覆盖测试**
 
 在 `apps/server/test/sync-batches.test.ts` 增加测试：注册设备时绑定 `seller-token` 和 `device-token`，上传 payload 里故意写 `seller-forged` 和 `device-forged`，断言 store 中客户归属为 `seller-token`，设备列表中的 `externalDeviceId` 仍为 `device-token`。
 
-- [ ] **步骤 3：运行服务端测试确认失败**
+- [x] **步骤 3：运行服务端测试确认失败**
 
 运行：
 
@@ -73,7 +73,7 @@ npm test -w @wangwang/server
 
 预期：新增测试失败，原因是当前激活接口要求 seller/device，且同步接口信任 payload。
 
-- [ ] **步骤 4：实现服务端默认值与归属覆盖**
+- [x] **步骤 4：实现服务端默认值与归属覆盖**
 
 在 `apps/server/src/server.ts` 中增加默认值常量，激活接口使用：
 
@@ -88,7 +88,7 @@ const DEFAULT_COLLECTOR_DEVICE_NAME = "TradeBridge Collector";
 const batch = collectorScopedBatch(request.body as SyncBatch, collectorDevice);
 ```
 
-- [ ] **步骤 5：运行服务端测试验证通过**
+- [x] **步骤 5：运行服务端测试验证通过**
 
 运行：
 
@@ -98,7 +98,7 @@ npm test -w @wangwang/server
 
 预期：PASS。
 
-- [ ] **步骤 6：Commit**
+- [x] **步骤 6：Commit**
 
 ```bash
 git add apps/server/src/server.ts apps/server/test/auth-routes.test.ts apps/server/test/sync-batches.test.ts
@@ -113,11 +113,11 @@ git commit -m "feat(server): 简化采集端默认绑定"
 - 修改：`apps/chrome-extension/src/options/options.ts`
 - 测试：`apps/chrome-extension/test/tradebridge-client.test.ts`
 
-- [ ] **步骤 1：编写失败的激活客户端测试**
+- [x] **步骤 1：编写失败的激活客户端测试**
 
 在 `apps/chrome-extension/test/tradebridge-client.test.ts` 增加测试：`activateCollectorDevice` 只传 `serverUrl`、`email`、`password`，断言请求体不包含 `sellerAccountExternalId`，接口仍返回 token 和默认 seller/device。
 
-- [ ] **步骤 2：运行插件测试确认失败**
+- [x] **步骤 2：运行插件测试确认失败**
 
 运行：
 
@@ -127,7 +127,7 @@ npm test -w @wangwang/chrome-extension
 
 预期：TypeScript 或断言失败，原因是激活类型要求 seller/device。
 
-- [ ] **步骤 3：移除表单中的 seller/device 字段**
+- [x] **步骤 3：移除表单中的 seller/device 字段**
 
 在 `apps/chrome-extension/src/options/options.html` 只保留：
 
@@ -137,11 +137,11 @@ npm test -w @wangwang/chrome-extension
 <label>密码 <input name="password" type="password" autocomplete="current-password" /></label>
 ```
 
-- [ ] **步骤 4：自动生成并保存设备 ID**
+- [x] **步骤 4：自动生成并保存设备 ID**
 
 在 `apps/chrome-extension/src/options/options.ts` 中复用已保存 `config.deviceId`，否则生成 `chrome-extension-<uuid>`。设备名称默认 `Chrome Extension`。保存时使用服务端返回的 `activation.device.sellerAccountExternalId` 和 `activation.device.externalDeviceId`。
 
-- [ ] **步骤 5：运行插件验证**
+- [x] **步骤 5：运行插件验证**
 
 运行：
 
@@ -153,7 +153,7 @@ npm run build -w @wangwang/chrome-extension
 
 预期：全部 PASS。
 
-- [ ] **步骤 6：Commit**
+- [x] **步骤 6：Commit**
 
 ```bash
 git add apps/chrome-extension/src/shared/sync-types.ts apps/chrome-extension/src/options/options.html apps/chrome-extension/src/options/options.ts apps/chrome-extension/test/tradebridge-client.test.ts
@@ -166,11 +166,11 @@ git commit -m "feat(chrome-extension): 自动生成采集设备信息"
 - 修改：`apps/collector-desktop/src/electron-main.ts`
 - 测试：`apps/collector-desktop/test/electron-shell.test.ts`
 
-- [ ] **步骤 1：更新桌面端默认行为测试**
+- [x] **步骤 1：更新桌面端默认行为测试**
 
 在 `apps/collector-desktop/test/electron-shell.test.ts` 保持 shell 只展示 seller/device 状态，不再要求环境变量来自用户配置。
 
-- [ ] **步骤 2：移除桌面入口环境变量依赖**
+- [x] **步骤 2：移除桌面入口环境变量依赖**
 
 在 `apps/collector-desktop/src/electron-main.ts` 中移除 `WANGWANG_SELLER_ACCOUNT_ID`、`WANGWANG_SELLER_DISPLAY_NAME`、`WANGWANG_COLLECTOR_DEVICE_ID`、`WANGWANG_DEVICE_NAME` 的读取。使用：
 
@@ -180,7 +180,7 @@ const defaultDeviceId = `collector-desktop-${os.hostname()}`;
 const defaultDeviceName = os.hostname();
 ```
 
-- [ ] **步骤 3：运行桌面端验证**
+- [x] **步骤 3：运行桌面端验证**
 
 运行：
 
@@ -191,7 +191,7 @@ npm test -w @wangwang/collector-desktop
 
 预期：PASS。
 
-- [ ] **步骤 4：Commit**
+- [x] **步骤 4：Commit**
 
 ```bash
 git add apps/collector-desktop/src/electron-main.ts apps/collector-desktop/test/electron-shell.test.ts
@@ -206,7 +206,7 @@ git commit -m "feat(collector-desktop): 移除采集端冗余环境变量"
 - 修改：`docs/internal-trial-runbook.md`
 - 修改：`docs/chrome-extension-trial-runbook.md`
 
-- [ ] **步骤 1：移除环境变量模板中的冗余项**
+- [x] **步骤 1：移除环境变量模板中的冗余项**
 
 从 `.env.example` 删除：
 
@@ -217,11 +217,11 @@ WANGWANG_COLLECTOR_DEVICE_ID
 WANGWANG_DEVICE_NAME
 ```
 
-- [ ] **步骤 2：更新 Chrome 插件手册**
+- [x] **步骤 2：更新 Chrome 插件手册**
 
 文档中说明插件激活页只需要 Server URL、邮箱、密码；设备 ID 和设备名称自动生成。
 
-- [ ] **步骤 3：更新桌面采集端手册**
+- [x] **步骤 3：更新桌面采集端手册**
 
 文档中说明桌面端只需要：
 
@@ -230,7 +230,7 @@ WANGWANG_SERVER_URL=http://127.0.0.1:5032
 WANGWANG_COLLECTOR_TOKEN=<激活接口返回 token>
 ```
 
-- [ ] **步骤 4：运行关键词检查**
+- [x] **步骤 4：运行关键词检查**
 
 运行：
 
@@ -240,7 +240,7 @@ rg -n "WANGWANG_SELLER_ACCOUNT_ID|WANGWANG_SELLER_DISPLAY_NAME|WANGWANG_COLLECTO
 
 预期：除历史计划外，用户文档和插件表单不再要求这些字段。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add .env.example docs/ENVIRONMENT.md docs/internal-trial-runbook.md docs/chrome-extension-trial-runbook.md

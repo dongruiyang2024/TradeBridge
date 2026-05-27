@@ -56,9 +56,12 @@ npm run electron -w @wangwang/collector-desktop
 
 项目不再支持静态采集 token。Chrome 插件和桌面采集端必须通过 `/collector/v1/auth/login` 激活并保存返回的 collector token。
 
-Chrome 插件会在设置页提交 Server URL、管理员邮箱、管理员密码、Seller Account、Device ID 和 Device Name，激活成功后自动保存 collector token。桌面采集端当前通过环境变量读取激活后的 token：
+Chrome 插件会在设置页提交 Server URL、管理员邮箱和管理员密码；设备 ID 自动生成并复用，设备名称默认使用 `Chrome Extension`。激活成功后插件自动保存 collector token，后续同步只使用 token，不保存管理员密码。
+
+桌面采集端当前通过环境变量读取服务端地址和激活后的 token；设备 ID 自动生成，设备名称默认使用本机 hostname：
 
 ```bash
+WANGWANG_SERVER_URL=http://127.0.0.1:5032
 WANGWANG_COLLECTOR_TOKEN=<激活接口返回的 token>
 ```
 
