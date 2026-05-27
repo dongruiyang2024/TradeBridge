@@ -34,7 +34,7 @@ const controller = createCollectorShellController({
       sellerAccountExternalId: process.env.WANGWANG_SELLER_ACCOUNT_ID,
       sellerDisplayName: process.env.WANGWANG_SELLER_DISPLAY_NAME,
       deviceName: process.env.WANGWANG_DEVICE_NAME || os.hostname(),
-      deviceStatus: process.env.WANGWANG_COLLECTOR_TOKEN ? "registered" : "unregistered",
+      deviceStatus: process.env.WANGWANG_COLLECTOR_TOKEN ? "registered" : "collector_activation_required",
       lastSyncAt: process.env.WANGWANG_SELLER_ACCOUNT_ID
         ? localState.cursors[process.env.WANGWANG_SELLER_ACCOUNT_ID]
         : undefined,

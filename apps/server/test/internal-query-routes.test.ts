@@ -44,10 +44,13 @@ async function createSeededApp() {
     passwordHash: await hashPassword("secret"),
     roles: ["admin"]
   });
-  const app = await createServer({
-    store,
-    deviceTokens: ["device-token"]
+  await store.registerCollectorDevice({
+    sellerAccountExternalId: "seller-1",
+    externalDeviceId: "device-1",
+    deviceName: "Test Device",
+    token: "device-token"
   });
+  const app = await createServer({ store });
 
   await app.inject({
     method: "POST",

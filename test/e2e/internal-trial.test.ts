@@ -21,7 +21,6 @@ import {
 } from "../../apps/web/src/dashboard-state";
 
 const SELLER_ACCOUNT_ID = "seller-trial";
-const COLLECTOR_TOKEN = "trial-collector-token";
 const SECRET_COOKIE = "one-talk-cookie-must-not-leave-collector";
 
 test("internal trial flow uploads collector data and exercises the Web customer workflow", async () => {
@@ -32,12 +31,23 @@ test("internal trial flow uploads collector data and exercises the Web customer 
     passwordHash: await hashPassword("secret"),
     roles: ["admin"]
   });
-  const app = await createServer({
-    store,
-    deviceTokens: [COLLECTOR_TOKEN]
-  });
+  const app = await createServer({ store });
 
   await app.ready();
+  const activationResponse = await app.inject({
+    method: "POST",
+    url: "/collector/v1/auth/login",
+    payload: {
+      email: "trial-admin@example.com",
+      password: "secret",
+      sellerAccountExternalId: SELLER_ACCOUNT_ID,
+      deviceExternalId: "trial-device",
+      deviceName: "Trial Mac"
+    }
+  });
+  assert.equal(activationResponse.statusCode, 200);
+  const collectorToken = activationResponse.json().token;
+
   const loginResponse = await app.inject({
     method: "POST",
     url: "/internal/v1/auth/login",
@@ -55,7 +65,7 @@ test("internal trial flow uploads collector data and exercises the Web customer 
       device: { deviceId: "trial-device", deviceName: "Trial Mac" },
       state,
       adapter: fixtureCollectorAdapter(),
-      uploadBatch: (batch) => uploadBatchThroughServer(app, batch),
+      uploadBatch: (batch) => uploadBatchThroughServer(app, batch, collectorToken),
       collectedAt: "2026-05-25T10:50:00.000Z"
     });
 
@@ -87,7 +97,7 @@ test("internal trial flow uploads collector data and exercises the Web customer 
     assert.equal(dashboard.tasks.at(-1)?.title, "Send tracking number");
 
     const forbidden = await fetchImpl(new URL("/internal/v1/customers", baseUrl), {
-      headers: { authorization: `Bearer ${COLLECTOR_TOKEN}` }
+      headers: { authorization: `Bearer ${collectorToken}` }
     });
     assert.equal(forbidden.status, 401);
   } finally {
@@ -148,11 +158,11 @@ function fixtureCollectorAdapter() {
   };
 }
 
-async function uploadBatchThroughServer(app: FastifyInstance, batch: SyncBatch) {
+async function uploadBatchThroughServer(app: FastifyInstance, batch: SyncBatch, collectorToken: string) {
   const response = await app.inject({
     method: "POST",
     url: "/collector/v1/sync-batches",
-    headers: { authorization: `Bearer ${COLLECTOR_TOKEN}` },
+    headers: { authorization: `Bearer ${collectorToken}` },
     payload: batch
   });
   const body = response.json();

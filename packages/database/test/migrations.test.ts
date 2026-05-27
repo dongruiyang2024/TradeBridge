@@ -42,6 +42,7 @@ test("initial schema defines idempotency constraints for sync writes", () => {
   const normalized = INTERNAL_SYNC_MIGRATIONS[0].sql.replace(/\s+/g, " ").toLowerCase();
 
   assert.match(normalized, /unique \(external_account_id\)/);
+  assert.match(normalized, /unique \(external_device_id\)/);
   assert.match(normalized, /unique \(device_token_hash\)/);
   assert.match(normalized, /unique \(seller_account_id, external_conversation_id\)/);
   assert.match(normalized, /unique \(seller_account_id, conversation_id, external_message_id\)/);

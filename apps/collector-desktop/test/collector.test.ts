@@ -128,6 +128,69 @@ test("collectOnce maps OneTalk conversations and paged messages into one sync ba
   assert.equal(await state.getCursor("seller-1"), "2026-05-25T10:49:00.000Z");
 });
 
+test("collectOnce uses activated collector token for upload", async () => {
+  const requests: Request[] = [];
+  const state = new JsonLocalStateStore(tempFile("state.json"));
+  const adapter = {
+    detectSession: () => ({
+      cookies: { cookie2: "cookie-value" },
+      cookieNames: ["cookie2"],
+      hasCtoken: false,
+      hasTbToken: false,
+      hasCookie2: true,
+      hasSgcookie: false,
+      logPaths: [],
+      cookieDbPaths: [],
+      tokenCachePaths: []
+    }),
+    fetchConversations: async () => ({
+      html: "<html></html>",
+      bootstrap: { aliId: "self-ali" },
+      conversations: []
+    }),
+    fetchMessages: async () => {
+      throw new Error("should_not_fetch_messages");
+    }
+  };
+  globalThis.fetch = async (input, init) => {
+    requests.push(new Request(input, init));
+    return Response.json({
+      ok: true,
+      acceptedCount: 0,
+      rejectedCount: 0,
+      nextCursor: null,
+      warnings: []
+    });
+  };
+
+  const result = await collectOnce({
+    serverUrl: "http://127.0.0.1:5032",
+    collectorToken: "collector-token",
+    sellerAccount: { externalAccountId: "seller-demo" },
+    device: { deviceId: "desktop-demo", deviceName: "Desktop Collector" },
+    state,
+    adapter,
+    collectedAt: "2026-05-25T10:50:00.000Z"
+  });
+
+  assert.equal(result.acceptedCount, 0);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].headers.get("authorization"), "Bearer collector-token");
+  assert.equal(requests[0].url, "http://127.0.0.1:5032/collector/v1/sync-batches");
+  assert.deepEqual(await requests[0].json(), {
+    sellerAccount: { externalAccountId: "seller-demo" },
+    device: { deviceId: "desktop-demo", deviceName: "Desktop Collector" },
+    sourceMeta: {
+      source: "collector-desktop",
+      collectedAt: "2026-05-25T10:50:00.000Z",
+      sourceBatchKey: "seller-demo:2026-05-25T10:50:00.000Z"
+    },
+    customers: [],
+    conversations: [],
+    messages: []
+  });
+});
+
 test("JsonLocalStateStore persists cursors, failed batches, and last errors", async () => {
   const statePath = tempFile("state.json");
   const store = new JsonLocalStateStore(statePath);

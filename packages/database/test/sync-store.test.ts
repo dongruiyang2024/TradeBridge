@@ -382,10 +382,12 @@ test("internal users can be listed, updated, disabled, reset, and resolved for c
 test("collector devices authenticate by one-time tokens and can be revoked", async () => {
   const store = new InMemorySyncStore();
   const registered = await store.registerCollectorDevice({
+    externalDeviceId: "desktop-demo",
     deviceName: "MacBook",
     token: "collector-token"
   });
 
+  assert.equal(registered.externalDeviceId, "desktop-demo");
   assert.equal(registered.deviceName, "MacBook");
   assert.equal(registered.status, "active");
   assert.equal(registered.token, "collector-token");
@@ -406,6 +408,29 @@ test("collector devices authenticate by one-time tokens and can be revoked", asy
   });
   assert.equal(revoked.status, "revoked");
   assert.equal(await store.authenticateCollectorDevice("collector-token"), null);
+});
+
+test("collector device activation updates existing external devices without exposing token hashes", async () => {
+  const store = new InMemorySyncStore();
+  const first = await store.registerCollectorDevice({
+    sellerAccountExternalId: "seller-demo",
+    externalDeviceId: "chrome-extension-demo",
+    deviceName: "Chrome Extension",
+    token: "collector-token"
+  });
+  const updated = await store.registerCollectorDevice({
+    sellerAccountExternalId: "seller-demo",
+    externalDeviceId: "chrome-extension-demo",
+    deviceName: "Chrome Extension Updated",
+    token: "rotated-token"
+  });
+
+  assert.equal(updated.id, first.id);
+  assert.equal(updated.externalDeviceId, "chrome-extension-demo");
+  assert.equal(updated.token, "rotated-token");
+  assert.equal((await store.listCollectorDevices()).length, 1);
+  assert.equal(await store.authenticateCollectorDevice("collector-token"), null);
+  assert.equal((await store.authenticateCollectorDevice("rotated-token"))?.id, first.id);
 });
 
 test("internal users are unique by email in single-tenant mode", async () => {

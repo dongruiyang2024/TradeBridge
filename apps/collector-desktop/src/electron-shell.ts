@@ -52,7 +52,7 @@ export function createCollectorShellViewModel(
     lastSyncLabel: formatDateMinute(status.lastSyncAt),
     lastErrorLabel: status.lastError ? `${status.lastError.code}: ${status.lastError.message}` : "No error",
     queuedFailedBatchLabel: `${status.queuedFailedBatchCount || 0} queued`,
-    canManualSync: hasSession && status.deviceStatus !== "revoked",
+    canManualSync: hasSession && status.deviceStatus === "registered",
     ...(lastRun ? { lastRun } : {})
   };
 }

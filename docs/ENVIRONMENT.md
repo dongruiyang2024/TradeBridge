@@ -17,9 +17,9 @@ cp .env.example .env.local
 
 已提交的 `.env.example` 记录了项目支持的环境变量。当前工作区里的 `.env.local` 已加入 `.gitignore`，用于本机开发：
 
-- 采集端兜底 token：`dev-device-token`
 - 内部服务端：`http://127.0.0.1:5032`
 - Web 工作台：`http://127.0.0.1:5173`
+- 采集端：通过 `/collector/v1/auth/login` 激活后保存服务端返回的 collector token
 
 ## 内部工作台登录
 
@@ -52,6 +52,16 @@ npm run dev:web
 npm run electron -w @wangwang/collector-desktop
 ```
 
+## 采集端激活
+
+项目不再支持静态采集 token。Chrome 插件和桌面采集端必须通过 `/collector/v1/auth/login` 激活并保存返回的 collector token。
+
+Chrome 插件会在设置页提交 Server URL、管理员邮箱、管理员密码、Seller Account、Device ID 和 Device Name，激活成功后自动保存 collector token。桌面采集端当前通过环境变量读取激活后的 token：
+
+```bash
+WANGWANG_COLLECTOR_TOKEN=<激活接口返回的 token>
+```
+
 如果你要在当前终端里直接执行 `curl` 或其他脚本，并希望它们也拿到 `.env.local` 里的变量，可以手动加载：
 
 ```bash
@@ -78,7 +88,6 @@ REDIS_URL=redis://127.0.0.1:6379/0
 
 不要提交真实值：
 
-- `WANGWANG_DEVICE_TOKENS`
 - `WANGWANG_COLLECTOR_TOKEN`
 - `DATABASE_URL`
 - `REDIS_URL`

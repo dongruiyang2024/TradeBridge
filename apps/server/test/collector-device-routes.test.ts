@@ -25,10 +25,7 @@ async function createDeviceAdminApp() {
     roles: ["sales"]
   });
 
-  const app = await createServer({
-    store,
-    deviceTokens: ["static-device-token"]
-  });
+  const app = await createServer({ store });
 
   return { app, store, admin };
 }
@@ -39,6 +36,8 @@ async function registerDevice(app: Awaited<ReturnType<typeof createServer>>) {
     url: "/internal/v1/collector-devices",
     headers: await createInternalAuthHeaders(app),
     payload: {
+      sellerAccountExternalId: "seller-1",
+      deviceExternalId: "device-1",
       deviceName: "MacBook"
     }
   });
@@ -67,6 +66,8 @@ test("admin users can register, list, and revoke collector devices without expos
   assert.equal(created.ok, true);
   assert.equal(typeof created.token, "string");
   assert.equal(Object.hasOwn(created.device, ["org", "Id"].join("")), false);
+  assert.equal(created.device.externalDeviceId, "device-1");
+  assert.equal(created.device.sellerAccountExternalId, "seller-1");
   assert.equal(created.device.deviceName, "MacBook");
   assert.equal(created.device.status, "active");
   assert.equal("token" in created.device, false);
@@ -129,19 +130,6 @@ test("registered collector device tokens can upload sync batches until revoked",
   assert.deepEqual(rejectedResponse.json(), { ok: false, error: "unauthorized" });
 });
 
-test("static collector device tokens remain available as a development fallback", async () => {
-  const { app } = await createDeviceAdminApp();
-  const response = await app.inject({
-    method: "POST",
-    url: "/collector/v1/sync-batches",
-    headers: { authorization: "Bearer static-device-token" },
-    payload: syncPayload
-  });
-
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.json().ok, true);
-});
-
 test("sales users cannot manage collector devices", async () => {
   const { app } = await createDeviceAdminApp();
   const loginResponse = await app.inject({
@@ -158,6 +146,8 @@ test("sales users cannot manage collector devices", async () => {
     url: "/internal/v1/collector-devices",
     headers: { authorization: `Bearer ${loginResponse.json().token}` },
     payload: {
+      sellerAccountExternalId: "seller-1",
+      deviceExternalId: "device-1",
       deviceName: "MacBook"
     }
   });

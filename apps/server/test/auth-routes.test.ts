@@ -19,10 +19,7 @@ async function createAuthApp() {
     roles: ["admin"]
   });
 
-  const app = await createServer({
-    store,
-    deviceTokens: ["device-token"]
-  });
+  const app = await createServer({ store });
 
   return { app, store };
 }
@@ -42,6 +39,16 @@ async function createInternalAuthHeaders(app: Awaited<ReturnType<typeof createSe
   const loginResponse = await login(app, email);
   assert.equal(loginResponse.statusCode, 200);
   return { authorization: `Bearer ${loginResponse.json().token}` };
+}
+
+async function createCollectorToken(store: InMemorySyncStore, externalDeviceId = "device-1"): Promise<string> {
+  const registered = await store.registerCollectorDevice({
+    sellerAccountExternalId: "seller-1",
+    externalDeviceId,
+    deviceName: "Test Device",
+    token: "device-token"
+  });
+  return registered.token;
 }
 
 test("POST /internal/v1/auth/login issues a session token and GET /internal/v1/me resolves it", async () => {
@@ -136,7 +143,7 @@ test("POST /internal/v1/auth/login returns 401 when failed-login audit cannot be
   assert.deepEqual(response.json(), { ok: false, error: "invalid_credentials" });
 });
 
-test("legacy development bearer tokens cannot access internal APIs", async () => {
+test("unknown bearer tokens cannot access internal APIs", async () => {
   const { app } = await createAuthApp();
   const response = await app.inject({
     method: "GET",
@@ -146,6 +153,125 @@ test("legacy development bearer tokens cannot access internal APIs", async () =>
 
   assert.equal(response.statusCode, 401);
   assert.deepEqual(response.json(), { ok: false, error: "internal_unauthorized" });
+});
+
+test("POST /collector/v1/auth/login activates a collector device for admin users", async () => {
+  const { app, store } = await createAuthApp();
+  const response = await app.inject({
+    method: "POST",
+    url: "/collector/v1/auth/login",
+    payload: {
+      email: "admin@example.com",
+      password: "secret",
+      sellerAccountExternalId: "seller-1",
+      deviceExternalId: "chrome-extension-1",
+      deviceName: "Chrome Extension"
+    }
+  });
+
+  assert.equal(response.statusCode, 200);
+  const body = response.json();
+  assert.equal(body.ok, true);
+  assert.equal(typeof body.token, "string");
+  assert.equal(body.device.externalDeviceId, "chrome-extension-1");
+  assert.equal(body.device.sellerAccountExternalId, "seller-1");
+  assert.equal(body.device.deviceName, "Chrome Extension");
+  assert.equal(body.device.status, "active");
+  assert.equal("token" in body.device, false);
+  assert.equal("tokenHash" in body.device, false);
+
+  const syncResponse = await app.inject({
+    method: "POST",
+    url: "/collector/v1/sync-batches",
+    headers: { authorization: `Bearer ${body.token}` },
+    payload: { ...syncPayload, device: { deviceId: "chrome-extension-1", deviceName: "Chrome Extension" } }
+  });
+  assert.equal(syncResponse.statusCode, 200);
+
+  const auditLogs = await store.listAuditLogs();
+  assert.equal(auditLogs.some((log) => log.action === "collector_device.activated"), true);
+});
+
+test("POST /collector/v1/auth/login rejects invalid credentials", async () => {
+  const { app } = await createAuthApp();
+  const response = await app.inject({
+    method: "POST",
+    url: "/collector/v1/auth/login",
+    payload: {
+      email: "admin@example.com",
+      password: "wrong-password",
+      sellerAccountExternalId: "seller-1",
+      deviceExternalId: "chrome-extension-1"
+    }
+  });
+
+  assert.equal(response.statusCode, 401);
+  assert.deepEqual(response.json(), { ok: false, error: "invalid_credentials" });
+});
+
+test("POST /collector/v1/auth/login rejects non-admin users", async () => {
+  const { app, store } = await createAuthApp();
+  await store.createInternalUser({
+    email: "sales@example.com",
+    displayName: "Sales User",
+    passwordHash: await hashPassword("secret"),
+    roles: ["sales"]
+  });
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/collector/v1/auth/login",
+    payload: {
+      email: "sales@example.com",
+      password: "secret",
+      sellerAccountExternalId: "seller-1",
+      deviceExternalId: "chrome-extension-1"
+    }
+  });
+
+  assert.equal(response.statusCode, 403);
+  assert.deepEqual(response.json(), { ok: false, error: "forbidden" });
+});
+
+test("POST /collector/v1/auth/login rejects disabled admins", async () => {
+  const { app, store } = await createAuthApp();
+  await store.createInternalUser({
+    email: "disabled-admin@example.com",
+    displayName: "Disabled Admin",
+    passwordHash: await hashPassword("secret"),
+    roles: ["admin"],
+    status: "disabled"
+  });
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/collector/v1/auth/login",
+    payload: {
+      email: "disabled-admin@example.com",
+      password: "secret",
+      sellerAccountExternalId: "seller-1",
+      deviceExternalId: "chrome-extension-1"
+    }
+  });
+
+  assert.equal(response.statusCode, 401);
+  assert.deepEqual(response.json(), { ok: false, error: "invalid_credentials" });
+});
+
+test("POST /collector/v1/auth/login rejects missing activation fields", async () => {
+  const { app } = await createAuthApp();
+  const response = await app.inject({
+    method: "POST",
+    url: "/collector/v1/auth/login",
+    payload: {
+      email: "admin@example.com",
+      password: "secret",
+      sellerAccountExternalId: "seller-1"
+    }
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.deepEqual(response.json(), { ok: false, error: "invalid_collector_login_request" });
 });
 
 test("POST /internal/v1/auth/logout revokes the current session", async () => {
@@ -170,11 +296,12 @@ test("POST /internal/v1/auth/logout revokes the current session", async () => {
 });
 
 test("session tokens can access internal APIs while collector tokens cannot", async () => {
-  const { app } = await createAuthApp();
+  const { app, store } = await createAuthApp();
+  const collectorToken = await createCollectorToken(store);
   await app.inject({
     method: "POST",
     url: "/collector/v1/sync-batches",
-    headers: { authorization: "Bearer device-token" },
+    headers: { authorization: `Bearer ${collectorToken}` },
     payload: syncPayload
   });
 
@@ -187,7 +314,7 @@ test("session tokens can access internal APIs while collector tokens cannot", as
   const collectorResponse = await app.inject({
     method: "GET",
     url: "/internal/v1/customers",
-    headers: { authorization: "Bearer device-token" }
+    headers: { authorization: `Bearer ${collectorToken}` }
   });
 
   assert.equal(internalResponse.statusCode, 200);

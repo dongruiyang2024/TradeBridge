@@ -11,6 +11,26 @@ export interface SyncBatchResult {
   warnings: string[];
 }
 
+export interface CollectorActivationInput {
+  serverUrl: string;
+  email: string;
+  password: string;
+  sellerAccountExternalId: string;
+  deviceExternalId: string;
+  deviceName?: string;
+}
+
+export interface CollectorActivationResult {
+  token: string;
+  device: {
+    id: string;
+    externalDeviceId: string;
+    sellerAccountExternalId?: string;
+    deviceName?: string;
+    status: string;
+  };
+}
+
 export interface ExtensionConfig {
   serverUrl: string;
   collectorToken: string;

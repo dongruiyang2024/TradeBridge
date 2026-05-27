@@ -23,11 +23,11 @@ Node 启动入口会自动读取项目根目录下的 `.env.local` 和 `.env`，
 ```bash
 WANGWANG_SERVER_HOST=127.0.0.1
 WANGWANG_SERVER_PORT=5032
-WANGWANG_DEVICE_TOKENS=dev-device-token
 WANGWANG_SERVER_URL=http://127.0.0.1:5032
 WANGWANG_SELLER_ACCOUNT_ID=seller-demo
 WANGWANG_COLLECTOR_DEVICE_ID=demo-device
-WANGWANG_COLLECTOR_TOKEN=dev-device-token
+# 采集端激活后再写入：
+# WANGWANG_COLLECTOR_TOKEN=<激活接口返回的 token>
 ```
 
 如果使用本仓库提供的 PostgreSQL Docker Compose，建议使用：
@@ -112,37 +112,28 @@ curl -X POST http://127.0.0.1:5032/internal/v1/auth/login \
 - 初始化接口只允许在当前实例尚无管理员时创建首个管理员。
 - 后续管理员和普通内部用户由已登录管理员在工作台中创建。
 
-## 6. 注册采集设备
+## 6. 激活采集设备
 
-本地开发可以直接使用 `WANGWANG_DEVICE_TOKENS=dev-device-token` 作为采集端兜底 token。
+项目不再支持静态采集 token。采集端必须通过管理员邮箱密码激活，由服务端创建或更新设备并返回 collector token。
 
-如果要走设备注册路径，先用邮箱密码登录获取内部 session token：
+调用采集端激活接口：
 
 ```bash
-curl -X POST http://127.0.0.1:5032/internal/v1/auth/login \
+curl -X POST http://127.0.0.1:5032/collector/v1/auth/login \
   -H 'Content-Type: application/json' \
   -d '{
     "email": "admin@example.com",
-    "password": "change-me-password"
-  }'
-```
-
-再使用登录响应中的 `token` 注册采集设备：
-
-```bash
-curl -X POST http://127.0.0.1:5032/internal/v1/collector-devices \
-  -H 'Authorization: Bearer <登录返回 token>' \
-  -H 'Content-Type: application/json' \
-  -d '{
+    "password": "change-me-password",
     "sellerAccountExternalId": "seller-demo",
+    "deviceExternalId": "demo-device",
     "deviceName": "Demo Mac"
   }'
 ```
 
-响应里的 `token` 只返回一次。将它写入 `.env.local`：
+响应里的 `token` 只返回一次。桌面采集端需要将它写入 `.env.local`：
 
 ```bash
-WANGWANG_COLLECTOR_TOKEN=<注册接口返回的 token>
+WANGWANG_COLLECTOR_TOKEN=<激活接口返回的 token>
 ```
 
 ## 7. 启动桌面采集端
@@ -185,7 +176,7 @@ http://127.0.0.1:5173
 
 ```bash
 curl http://127.0.0.1:5032/internal/v1/customers \
-  -H 'Authorization: Bearer dev-device-token'
+  -H 'Authorization: Bearer <激活接口返回的 token>'
 ```
 
 期望返回 `401`。

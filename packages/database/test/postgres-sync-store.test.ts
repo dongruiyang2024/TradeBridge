@@ -227,6 +227,7 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "device-db-id",
+            externalDeviceId: "chrome-extension-demo",
             sellerAccountExternalId: null,
             deviceName: "MacBook",
             status: "active",
@@ -244,6 +245,7 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "device-db-id",
+            externalDeviceId: "chrome-extension-demo",
             sellerAccountExternalId: null,
             deviceName: "MacBook",
             status: "active",
@@ -260,6 +262,7 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "device-db-id",
+            externalDeviceId: "chrome-extension-demo",
             sellerAccountExternalId: null,
             deviceName: "MacBook",
             status: "revoked",
@@ -276,6 +279,7 @@ class FakePostgresClient implements SqlClient {
         rows: [
           {
             id: "device-db-id",
+            externalDeviceId: "chrome-extension-demo",
             sellerAccountExternalId: null,
             deviceName: "MacBook",
             status: "active",
@@ -1112,6 +1116,7 @@ test("PostgresSyncStore manages collector devices without storing raw tokens", a
   const store = new PostgresSyncStore(client);
 
   const registered = await store.registerCollectorDevice({
+    externalDeviceId: "chrome-extension-demo",
     deviceName: "MacBook",
     token: "collector-token"
   });
@@ -1127,6 +1132,7 @@ test("PostgresSyncStore manages collector devices without storing raw tokens", a
   assert.deepEqual(devices, [
     {
       id: "device-db-id",
+      externalDeviceId: "chrome-extension-demo",
       sellerAccountExternalId: undefined,
       deviceName: "MacBook",
       status: "active",
@@ -1146,7 +1152,25 @@ test("PostgresSyncStore manages collector devices without storing raw tokens", a
   assert.equal(registerQuery.params.includes("collector-token"), false);
   assert.equal(authQuery.params.includes("collector-token"), false);
   assert.equal(registerQuery.params[0], null);
-  assert.equal(registerQuery.params[1], "MacBook");
+  assert.equal(registerQuery.params[1], "chrome-extension-demo");
+  assert.equal(registerQuery.params[2], "MacBook");
+});
+
+test("PostgresSyncStore sync batch upserts collector devices by external device id", async () => {
+  const client = new FakePostgresClient();
+  const store = new PostgresSyncStore(client);
+
+  await store.acceptSyncBatch({
+    sellerAccount: { externalAccountId: "seller-1" },
+    device: { deviceId: "chrome-extension-demo", deviceName: "Chrome Extension" }
+  });
+
+  const upsertQuery = client.queries.find((query) => /upsert_collector_device/i.test(query.sql));
+  assert.ok(upsertQuery);
+  assert.match(upsertQuery.sql, /external_device_id/i);
+  assert.doesNotMatch(upsertQuery.sql, /device_token_hash,\s*last_heartbeat_at/i);
+  assert.equal(upsertQuery.params[1], "chrome-extension-demo");
+  assert.equal(upsertQuery.params.includes("collector-token"), false);
 });
 
 test("PostgresSyncStore creates and reads AI summaries and reply suggestions with scoped params", async () => {

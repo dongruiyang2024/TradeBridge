@@ -8,10 +8,12 @@
     <main>
       <form id="options-form">
         <label>Server URL <input name="serverUrl" value="http://127.0.0.1:5032" /></label>
+        <label>邮箱 <input name="email" type="email" autocomplete="username" /></label>
+        <label>密码 <input name="password" type="password" autocomplete="current-password" /></label>
         <label>Seller Account <input name="sellerAccountExternalId" /></label>
-        <label>Device ID <input name="deviceId" /></label>
-        <label>Collector Token <input name="collectorToken" type="password" /></label>
-        <button type="submit">保存</button>
+        <label>Device ID <input name="deviceExternalId" /></label>
+        <label>Device Name <input name="deviceName" /></label>
+        <button type="submit">激活采集端</button>
       </form>
       <p id="options-status"></p>
     </main>
