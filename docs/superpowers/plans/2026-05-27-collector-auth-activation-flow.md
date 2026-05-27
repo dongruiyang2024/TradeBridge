@@ -68,7 +68,7 @@
   - 覆盖激活接口请求和错误映射。
 - 修改：`apps/chrome-extension/test/sync-orchestrator.test.ts`
   - 覆盖未激活时返回 `collector_activation_required`。
-- 修改：`apps/collector-desktop/src/main.ts`
+- 修改：`apps/collector-desktop/src/electron-main.ts`
   - 增加采集端激活配置读取和状态展示入口。
 - 修改：`apps/collector-desktop/src/collector.ts`
   - 保持同步只使用 collector token。
@@ -734,10 +734,12 @@ git commit -m "feat(chrome-extension): 支持账号密码激活采集端"
 
 **文件：**
 - 修改：`apps/collector-desktop/src/collector.ts`
-- 修改：`apps/collector-desktop/src/main.ts`
+- 修改：`apps/collector-desktop/src/electron-main.ts`
+- 修改：`apps/collector-desktop/src/electron-shell.ts`
 - 测试：`apps/collector-desktop/test/collector.test.ts`
+- 测试：`apps/collector-desktop/test/electron-shell.test.ts`
 
-- [ ] **步骤 1：编写 collector 回归测试**
+- [x] **步骤 1：编写 collector 回归测试**
 
 在 `apps/collector-desktop/test/collector.test.ts` 增加测试：
 
@@ -766,7 +768,7 @@ test("collectOnce uses activated collector token for upload", async () => {
 });
 ```
 
-- [ ] **步骤 2：运行测试验证当前行为**
+- [x] **步骤 2：运行测试验证当前行为**
 
 运行：
 
@@ -777,9 +779,9 @@ node --import tsx --test apps/collector-desktop/test/collector.test.ts
 
 预期：PASS，确认桌面采集端上传仍只依赖 collector token。
 
-- [ ] **步骤 3：在桌面入口展示激活状态**
+- [x] **步骤 3：在桌面入口展示激活状态**
 
-在 `apps/collector-desktop/src/main.ts` 中读取：
+在 `apps/collector-desktop/src/electron-main.ts` 中读取：
 
 ```ts
 WANGWANG_COLLECTOR_TOKEN
@@ -789,7 +791,7 @@ WANGWANG_SELLER_ACCOUNT_ID
 
 当 token 缺失时，状态文案显示 `collector_activation_required`，同步按钮不可触发上传。
 
-- [ ] **步骤 4：保持同步只使用 collector token**
+- [x] **步骤 4：保持同步只使用 collector token**
 
 确认 `apps/collector-desktop/src/collector.ts` 上传时只发送：
 
@@ -799,7 +801,7 @@ Authorization: Bearer ${collectorToken}
 
 不能发送邮箱、密码、internal session token、OneTalk Cookie 或 OneTalk token。
 
-- [ ] **步骤 5：运行桌面采集端测试验证通过**
+- [x] **步骤 5：运行桌面采集端测试验证通过**
 
 运行：
 
@@ -809,10 +811,10 @@ npm test -w @wangwang/collector-desktop
 
 预期：PASS。
 
-- [ ] **步骤 6：Commit**
+- [x] **步骤 6：Commit**
 
 ```bash
-git add apps/collector-desktop/src/collector.ts apps/collector-desktop/src/main.ts apps/collector-desktop/test/collector.test.ts
+git add apps/collector-desktop/src/collector.ts apps/collector-desktop/src/electron-main.ts apps/collector-desktop/src/electron-shell.ts apps/collector-desktop/test/collector.test.ts apps/collector-desktop/test/electron-shell.test.ts
 git commit -m "feat(collector-desktop): 明确采集端激活状态"
 ```
 

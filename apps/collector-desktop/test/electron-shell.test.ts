@@ -38,7 +38,7 @@ test("renderCollectorShellHtml includes the desktop status surface and manual sy
       session: { hasCookie2: false, hasCtoken: false, hasTbToken: false, hasSgcookie: false },
       sellerAccountExternalId: "seller-1",
       deviceName: "MacBook",
-      deviceStatus: "unregistered"
+      deviceStatus: "collector_activation_required"
     })
   );
 
@@ -50,6 +50,25 @@ test("renderCollectorShellHtml includes the desktop status surface and manual sy
   assert.match(html, /Last error/);
   assert.match(html, /Manual sync/);
   assert.match(html, /manual-sync/);
+  assert.match(html, /collector_activation_required/);
+});
+
+test("createCollectorShellViewModel disables sync until the collector is activated", () => {
+  const viewModel = createCollectorShellViewModel({
+    session: {
+      hasCookie2: true,
+      hasCtoken: false,
+      hasTbToken: false,
+      hasSgcookie: false
+    },
+    sellerAccountExternalId: "seller-1",
+    deviceName: "MacBook",
+    deviceStatus: "collector_activation_required"
+  });
+
+  assert.equal(viewModel.sessionStatus, "ready");
+  assert.equal(viewModel.deviceLabel, "MacBook - collector_activation_required");
+  assert.equal(viewModel.canManualSync, false);
 });
 
 test("createCollectorShellController reloads state around manual sync actions", async () => {

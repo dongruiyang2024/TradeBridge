@@ -240,7 +240,10 @@ function isAfterCursor(sentAt: string | undefined, cursor: string | null): boole
 }
 
 function defaultUploader(options: CollectOnceOptions): (batch: SyncBatch) => Promise<SyncBatchResult> {
-  if (!options.serverUrl || !options.collectorToken) {
+  if (!options.collectorToken) {
+    throw new Error("collector_activation_required");
+  }
+  if (!options.serverUrl) {
     throw new Error("collector_upload_target_required");
   }
   return (batch) => uploadSyncBatch({ serverUrl: options.serverUrl || "", token: options.collectorToken || "", batch });
