@@ -39,14 +39,15 @@ test("internal trial flow uploads collector data and exercises the Web customer 
     url: "/collector/v1/auth/login",
     payload: {
       email: "trial-admin@example.com",
-      password: "secret",
-      sellerAccountExternalId: SELLER_ACCOUNT_ID,
-      deviceExternalId: "trial-device",
-      deviceName: "Trial Mac"
+      password: "secret"
     }
   });
   assert.equal(activationResponse.statusCode, 200);
-  const collectorToken = activationResponse.json().token;
+  const activation = activationResponse.json();
+  assert.equal(activation.device.sellerAccountExternalId, "default-seller");
+  assert.match(activation.device.externalDeviceId, /^collector-/);
+  assert.equal(activation.device.deviceName, "TradeBridge Collector");
+  const collectorToken = activation.token;
 
   const loginResponse = await app.inject({
     method: "POST",

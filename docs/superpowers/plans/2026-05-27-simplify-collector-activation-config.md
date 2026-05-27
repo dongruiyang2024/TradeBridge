@@ -252,11 +252,11 @@ git commit -m "docs: 简化采集端配置说明"
 **文件：**
 - 测试：`test/e2e/internal-trial.test.ts`
 
-- [ ] **步骤 1：确认 E2E 仍走激活流程**
+- [x] **步骤 1：确认 E2E 仍走激活流程**
 
 检查 `test/e2e/internal-trial.test.ts` 中 `/collector/v1/auth/login` 可省略 seller/device，或继续传入测试值但不依赖环境变量。
 
-- [ ] **步骤 2：运行全量验证**
+- [x] **步骤 2：运行全量验证**
 
 运行：
 
@@ -271,7 +271,7 @@ npm run test:e2e
 
 预期：全部 PASS。
 
-- [ ] **步骤 3：Commit**
+- [x] **步骤 3：Commit**
 
 如 E2E 或计划状态有改动：
 
