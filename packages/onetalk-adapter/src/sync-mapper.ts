@@ -1,4 +1,4 @@
-import type { WebliteData } from "./onetalk-client.js";
+import type { WebliteData, WeblitePageConversation } from "./onetalk-client.js";
 
 export type MessageDirection = "received" | "sent" | "unknown";
 
@@ -63,7 +63,9 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
   const conversations: BrowserSyncConversationInput[] = [];
   const messages: BrowserSyncMessageInput[] = [];
 
-  for (const conversation of options.weblite.conversations.filter(isRecord)) {
+  const rawConversations = options.weblite.conversations.filter(isRecord);
+  for (let index = 0; index < rawConversations.length; index += 1) {
+    const conversation = rawConversations[index];
     const externalConversationId = firstString(conversation, ["cid", "conversationCode", "conversationId", "id"]);
     const externalCustomerId = firstString(conversation, [
       "contactAccountId",
@@ -72,24 +74,31 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
       "contactAliId"
     ]);
     if (!externalConversationId || !externalCustomerId) continue;
+    const pageConversation = pageConversationFor(
+      options.weblite,
+      externalConversationId,
+      externalCustomerId,
+      index
+    );
 
     customers.set(
       externalCustomerId,
       compact({
         externalCustomerId,
-        loginId: firstString(conversation, ["loginId", "contactLoginId"]),
-        displayName: firstString(conversation, [
-          "contactNick",
-          "contactName",
-          "contactDisplayName",
-          "buyerName",
-          "buyerNick",
-          "nickName",
-          "displayName",
-          "nick",
-          "name"
-        ]),
-        country: firstString(conversation, ["country"])
+        loginId: firstString(conversation, ["loginId", "contactLoginId"]) || firstString(pageConversation, ["loginId"]),
+        displayName:
+          firstString(conversation, [
+            "contactNick",
+            "contactName",
+            "contactDisplayName",
+            "buyerName",
+            "buyerNick",
+            "nickName",
+            "displayName",
+            "nick",
+            "name"
+          ]) || firstString(pageConversation, ["displayName"]),
+        country: firstString(conversation, ["country"]) || firstString(pageConversation, ["country"])
       })
     );
 
@@ -97,21 +106,7 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
       compact({
         externalConversationId,
         externalCustomerId,
-        lastMessageAt: isoTime(
-          firstValue(conversation, [
-            "lastMessageTime",
-            "lastMessageAt",
-            "lastMsgTime",
-            "latestMessage.sendTime",
-            "latestMessage.time",
-            "latestMessage.gmtCreate",
-            "latestMessage.createdAt",
-            "lastMessage.sendTime",
-            "lastMessage.time",
-            "lastMessage.gmtCreate",
-            "lastMessage.createdAt"
-          ])
-        )
+        lastMessageAt: isoTime(firstMessageTime(conversation) ?? firstValue(pageConversation, ["lastMessageAt"]))
       })
     );
 
@@ -136,6 +131,37 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
     conversations,
     messages
   });
+}
+
+function firstMessageTime(conversation: Record<string, unknown>): unknown {
+  return firstValue(conversation, [
+    "lastMessageTime",
+    "lastMessageAt",
+    "lastMsgTime",
+    "latestMessage.sendTime",
+    "latestMessage.time",
+    "latestMessage.gmtCreate",
+    "latestMessage.createdAt",
+    "lastMessage.sendTime",
+    "lastMessage.time",
+    "lastMessage.gmtCreate",
+    "lastMessage.createdAt"
+  ]);
+}
+
+function pageConversationFor(
+  weblite: WebliteData,
+  externalConversationId: string,
+  externalCustomerId: string,
+  index: number
+): WeblitePageConversation {
+  const conversations = (weblite.pageSnapshot?.conversations || []).filter(isRecord) as WeblitePageConversation[];
+  return (
+    conversations.find((item) => item.externalConversationId === externalConversationId) ||
+    conversations.find((item) => item.externalCustomerId === externalCustomerId) ||
+    conversations[index] ||
+    {}
+  );
 }
 
 function mapMessage(

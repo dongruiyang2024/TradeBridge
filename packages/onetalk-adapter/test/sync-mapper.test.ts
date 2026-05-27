@@ -127,3 +127,42 @@ test("mapWebliteToSyncBatch maps alternate OneTalk customer and message fields",
   assert.equal(batch.messages?.[0].sentAt, "2026-05-27T04:05:00.000Z");
   assert.equal(batch.messages?.[0].direction, "received");
 });
+
+test("mapWebliteToSyncBatch fills customer names from page snapshot when cached conversations only contain ids", () => {
+  const batch = mapWebliteToSyncBatch({
+    sellerAccount: { externalAccountId: "seller-demo" },
+    device: { deviceId: "chrome-extension-demo" },
+    collectedAt: "2026-05-27T04:40:00.000Z",
+    source: "chrome-extension",
+    previousCursor: null,
+    weblite: {
+      html: "",
+      bootstrap: { aliId: "seller-ali" },
+      conversations: [
+        { cid: "conv-peter", contactAccountId: "285799943" },
+        { cid: "conv-neko", contactAccountId: "286335779" }
+      ],
+      pageSnapshot: {
+        capturedAt: "2026-05-27T04:39:59.000Z",
+        conversations: [
+          { displayName: "Peter SHU", country: "CN" },
+          { displayName: "Neko Lin", country: "CN" }
+        ]
+      }
+    },
+    messagesByConversationId: {}
+  });
+
+  assert.deepEqual(batch.customers, [
+    {
+      externalCustomerId: "285799943",
+      displayName: "Peter SHU",
+      country: "CN"
+    },
+    {
+      externalCustomerId: "286335779",
+      displayName: "Neko Lin",
+      country: "CN"
+    }
+  ]);
+});

@@ -31,6 +31,37 @@ test("fetchWeblite parses cached conversations and sends credentials include", a
   assert.equal(requests[0].credentials, "include");
 });
 
+test("fetchWeblite attaches the latest OneTalk page snapshot from extension storage", async () => {
+  const html = fs.readFileSync(path.resolve("test/fixtures/weblite.html"), "utf8");
+  globalThis.fetch = async () =>
+    new Response(html, {
+      status: 200,
+      headers: { "content-type": "text/html" }
+    });
+  (globalThis as unknown as { chrome: unknown }).chrome = {
+    storage: {
+      local: {
+        get: async () => ({
+          tradebridgeOnetalkPageSnapshot: {
+            url: "https://onetalk.alibaba.com/message/weblitePWA.htm",
+            savedAt: "2026-05-27T04:39:59.000Z",
+            snapshot: {
+              capturedAt: "2026-05-27T04:39:59.000Z",
+              conversations: [{ displayName: "Peter SHU", country: "CN" }]
+            }
+          }
+        })
+      }
+    }
+  };
+
+  const client = new BrowserOnetalkClient();
+  const result = await client.fetchWeblite();
+
+  assert.equal(result.pageSnapshot?.conversations?.[0]?.displayName, "Peter SHU");
+});
+
+
 test("getChatMessages posts payload and parses message list", async () => {
   const requests: Request[] = [];
   globalThis.fetch = async (input, init) => {
