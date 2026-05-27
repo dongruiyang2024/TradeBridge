@@ -38,22 +38,39 @@ test("runSyncOnce fetches OneTalk data, sanitizes it, uploads batch, and saves c
       fetchWeblite: async () => ({
         html: "",
         bootstrap: { aliId: "self-ali" },
-        conversations: [{ cid: "conv-1", contactAccountId: "buyer-1", contactNick: "Buyer One" }]
+        conversations: [
+          {
+            singleChatUserConversation: {
+              singleChatConversation: { cid: "conv-1", pairFirst: "self-ali", pairSecond: "buyer-ali" }
+            }
+          }
+        ]
       }),
       getChatMessages: async () => ({
         status: 200,
-        contentType: "application/json",
+        contentType: "application/lwp+json",
         code: 200,
         raw: {},
         messages: [
           {
-            messageId: "m1",
-            senderAliId: "buyer-ali",
-            messageType: "text",
-            content: "hello",
-            sendTime: 1779706200000
+            message: {
+              messageId: "m1",
+              cid: "conv-1",
+              sender: { uid: "buyer-ali" },
+              content: { text: { content: "hello" } },
+              createAt: 1779706200000
+            }
           }
-        ]
+        ],
+        diagnostics: {
+          status: 200,
+          contentType: "application/lwp+json",
+          code: 200,
+          listLength: 1,
+          listPath: "body.userMessageModels",
+          topLevelKeys: ["body", "code", "headers"],
+          dataKeys: ["hasMore", "nextCursor", "userMessageModels"]
+        }
       })
     },
     uploadSyncBatch: async (options) => {
@@ -77,6 +94,10 @@ test("runSyncOnce fetches OneTalk data, sanitizes it, uploads batch, and saves c
   assert.equal(store.status.lastDiagnostics?.conversations, 1);
   assert.deepEqual(store.status.lastDiagnostics?.messageRequests.map((item) => [item.conversationId, item.status, item.listLength]), [
     ["conv-1", 200, 1]
+  ]);
+  assert.deepEqual(store.status.lastDiagnostics?.lwpRoutes?.map((item) => item.route), [
+    "/r/Conversation/listNewestPagination",
+    "/r/MessageManager/listUserMessages"
   ]);
 });
 

@@ -73,6 +73,14 @@ export interface ExtensionStatus {
 export interface SyncDiagnostics {
   conversations: number;
   messageRequests: MessageRequestDiagnostic[];
+  lwpRoutes?: LwpRouteDiagnostic[];
+}
+
+export interface LwpRouteDiagnostic {
+  route: string;
+  status: number;
+  listLength?: number;
+  hasMore?: boolean;
 }
 
 export interface MessageRequestDiagnostic {
