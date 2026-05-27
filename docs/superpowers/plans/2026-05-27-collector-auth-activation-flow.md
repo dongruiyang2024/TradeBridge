@@ -893,7 +893,7 @@ git commit -m "docs: 更新采集端激活测试流程"
 **文件：**
 - 修改：`test/e2e/internal-trial.test.ts`
 
-- [ ] **步骤 1：扩展 E2E 流程**
+- [x] **步骤 1：扩展 E2E 流程**
 
 在 `test/e2e/internal-trial.test.ts` 中加入采集端激活请求：
 
@@ -916,7 +916,7 @@ const collectorToken = activationResponse.json().token;
 
 使用 `collectorToken` 上传 sync batch，不再使用任何静态采集 token。
 
-- [ ] **步骤 2：运行 E2E 验证通过**
+- [x] **步骤 2：运行 E2E 验证通过**
 
 运行：
 
@@ -926,7 +926,7 @@ npm run test:e2e
 
 预期：PASS。
 
-- [ ] **步骤 3：修复 E2E 暴露的集成问题**
+- [x] **步骤 3：修复 E2E 暴露的集成问题**
 
 如果 E2E 暴露设备字段不一致，统一使用：
 
@@ -936,7 +936,7 @@ device.deviceId: "chrome-extension-demo"
 sellerAccount.externalAccountId: "seller-demo"
 ```
 
-- [ ] **步骤 4：运行全量验证**
+- [x] **步骤 4：运行全量验证**
 
 运行：
 
@@ -951,7 +951,7 @@ npm run test:e2e
 
 预期：全部 PASS。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add test/e2e/internal-trial.test.ts
