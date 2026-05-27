@@ -78,7 +78,17 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
       compact({
         externalCustomerId,
         loginId: firstString(conversation, ["loginId", "contactLoginId"]),
-        displayName: firstString(conversation, ["contactNick", "displayName", "nick", "contactName"]),
+        displayName: firstString(conversation, [
+          "contactNick",
+          "contactName",
+          "contactDisplayName",
+          "buyerName",
+          "buyerNick",
+          "nickName",
+          "displayName",
+          "nick",
+          "name"
+        ]),
         country: firstString(conversation, ["country"])
       })
     );
@@ -87,7 +97,21 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
       compact({
         externalConversationId,
         externalCustomerId,
-        lastMessageAt: isoTime(firstValue(conversation, ["lastMessageTime", "lastMessageAt", "lastMsgTime"]))
+        lastMessageAt: isoTime(
+          firstValue(conversation, [
+            "lastMessageTime",
+            "lastMessageAt",
+            "lastMsgTime",
+            "latestMessage.sendTime",
+            "latestMessage.time",
+            "latestMessage.gmtCreate",
+            "latestMessage.createdAt",
+            "lastMessage.sendTime",
+            "lastMessage.time",
+            "lastMessage.gmtCreate",
+            "lastMessage.createdAt"
+          ])
+        )
       })
     );
 
@@ -123,10 +147,10 @@ function mapMessage(
   const sentAt = isoTime(firstValue(message, ["sendTime", "sentAt", "time", "gmtCreate", "createdAt"]));
   return compact({
     externalConversationId,
-    externalMessageId: firstString(message, ["messageId", "msgId", "id"]),
+    externalMessageId: firstString(message, ["messageId", "msgId", "messageID", "msgIdStr", "id"]),
     direction: directionOf(message, bootstrap, conversation),
     messageType: firstString(message, ["messageType", "type", "msgType"]) || "text",
-    content: firstString(message, ["content", "text", "message", "summary"]),
+    content: firstString(message, ["content", "text", "message", "summary", "messageContent", "textContent", "showText", "plainText"]),
     sentAt,
     rawSanitized: message
   });
@@ -159,10 +183,19 @@ function firstString(source: Record<string, unknown>, keys: string[]): string | 
 
 function firstValue(source: Record<string, unknown>, keys: string[]): unknown {
   for (const key of keys) {
-    const value = source[key];
+    const value = key.includes(".") ? valueAtPath(source, key.split(".")) : source[key];
     if (value != null && value !== "") return value;
   }
   return undefined;
+}
+
+function valueAtPath(source: unknown, path: string[]): unknown {
+  let current = source;
+  for (const key of path) {
+    if (!isRecord(current)) return undefined;
+    current = current[key];
+  }
+  return current;
 }
 
 function isoTime(value: unknown): string | undefined {

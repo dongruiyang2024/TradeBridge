@@ -148,11 +148,11 @@ git commit -m "feat(chrome-extension): 记录 OneTalk 消息接口诊断"
 
 ## 任务 3：增强客户和消息字段映射
 
-- [ ] **步骤 1：编写失败测试**
+- [x] **步骤 1：编写失败测试**
 
 在 `packages/onetalk-adapter/test/sync-mapper.test.ts` 增加测试：会话里使用 `buyerName`、`latestMessage.sendTime`，消息里使用 `msgId`、`messageContent`、`gmtCreate`，断言能映射为客户名、最近消息时间和消息正文。
 
-- [ ] **步骤 2：实现字段别名**
+- [x] **步骤 2：实现字段别名**
 
 在 `sync-mapper.ts` 中扩展候选字段：
 
@@ -162,13 +162,13 @@ lastMessageAt: lastMessageTime, latestMessage.sendTime, latestMessage.time
 content: content, text, message, summary, messageContent, textContent, showText
 ```
 
-- [ ] **步骤 3：运行 adapter 测试**
+- [x] **步骤 3：运行 adapter 测试**
 
 ```bash
 npm test -w @wangwang/onetalk-adapter
 ```
 
-- [ ] **步骤 4：Commit**
+- [x] **步骤 4：Commit**
 
 ```bash
 git add packages/onetalk-adapter/src/sync-mapper.ts packages/onetalk-adapter/test/sync-mapper.test.ts

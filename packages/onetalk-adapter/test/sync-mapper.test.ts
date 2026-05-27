@@ -85,3 +85,45 @@ test("mapWebliteToSyncBatch filters messages at or before the previous cursor", 
 
   assert.deepEqual(batch.messages?.map((message) => message.externalMessageId), ["new"]);
 });
+
+test("mapWebliteToSyncBatch maps alternate OneTalk customer and message fields", () => {
+  const batch = mapWebliteToSyncBatch({
+    sellerAccount: { externalAccountId: "seller-demo" },
+    device: { deviceId: "chrome-extension-demo" },
+    collectedAt: "2026-05-27T04:10:00.000Z",
+    source: "chrome-extension",
+    previousCursor: null,
+    weblite: {
+      html: "",
+      bootstrap: { aliId: "seller-ali" },
+      conversations: [
+        {
+          id: "conv-alt",
+          buyerAccountId: "buyer-alt",
+          buyerName: "Peter SHU",
+          country: "CN",
+          latestMessage: { sendTime: 1779854700000 },
+          selfAliId: "seller-ali"
+        }
+      ]
+    },
+    messagesByConversationId: {
+      "conv-alt": [
+        {
+          msgId: "msg-alt",
+          fromId: "buyer-ali",
+          msgType: "text",
+          messageContent: "I would like to have a copy of your catalog",
+          gmtCreate: "2026-05-27T04:05:00.000Z"
+        }
+      ]
+    }
+  });
+
+  assert.equal(batch.customers?.[0].displayName, "Peter SHU");
+  assert.equal(batch.conversations?.[0].lastMessageAt, "2026-05-27T04:05:00.000Z");
+  assert.equal(batch.messages?.[0].externalMessageId, "msg-alt");
+  assert.equal(batch.messages?.[0].content, "I would like to have a copy of your catalog");
+  assert.equal(batch.messages?.[0].sentAt, "2026-05-27T04:05:00.000Z");
+  assert.equal(batch.messages?.[0].direction, "received");
+});
