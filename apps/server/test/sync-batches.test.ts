@@ -54,6 +54,48 @@ test("POST /collector/v1/sync-batches accepts a valid batch", async () => {
   assert.equal(store.listMessages().length, 1);
 });
 
+test("POST /collector/v1/sync-batches uses collector device scope over uploaded seller and device ids", async () => {
+  const store = new InMemorySyncStore();
+  const registered = await store.registerCollectorDevice({
+    sellerAccountExternalId: "seller-token",
+    externalDeviceId: "device-token",
+    deviceName: "Bound Device",
+    token: "bound-token"
+  });
+  const app = await createServer({ store });
+  const response = await app.inject({
+    method: "POST",
+    url: "/collector/v1/sync-batches",
+    headers: { authorization: `Bearer ${registered.token}` },
+    payload: {
+      sellerAccount: { externalAccountId: "seller-forged" },
+      device: { deviceId: "device-forged", deviceName: "Forged Device" },
+      customers: [{ externalCustomerId: "customer-1", displayName: "Buyer One" }]
+    }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(store.listCustomers(), [
+    {
+      sellerAccountExternalId: "seller-token",
+      externalCustomerId: "customer-1",
+      displayName: "Buyer One"
+    }
+  ]);
+  assert.deepEqual(await store.listCollectorDevices(), [
+    {
+      id: registered.id,
+      externalDeviceId: "device-token",
+      sellerAccountExternalId: "seller-token",
+      deviceName: "Bound Device",
+      status: "active",
+      lastHeartbeatAt: undefined,
+      createdAt: registered.createdAt,
+      updatedAt: registered.updatedAt
+    }
+  ]);
+});
+
 test("POST /collector/v1/sync-batches rejects invalid batch shapes before writing", async () => {
   const store = new InMemorySyncStore();
   const token = await createCollectorToken(store);

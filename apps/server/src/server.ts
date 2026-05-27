@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { loadWorkspaceEnv } from "@wangwang/env";
 import {
@@ -55,6 +56,9 @@ import {
 } from "./ai-queue.js";
 import { createDeterministicAiProvider, type AiProvider } from "./ai-service.js";
 import { hashPassword, verifyPassword } from "./auth.js";
+
+const DEFAULT_SELLER_ACCOUNT_EXTERNAL_ID = "default-seller";
+const DEFAULT_COLLECTOR_DEVICE_NAME = "TradeBridge Collector";
 
 export interface CreateServerOptions {
   store?: SyncStore;
@@ -126,10 +130,11 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   app.post("/collector/v1/auth/login", async (request, reply) => {
     const email = bodyStringField(request.body, "email");
     const password = bodyStringField(request.body, "password");
-    const sellerAccountExternalId = bodyStringField(request.body, "sellerAccountExternalId");
-    const deviceExternalId = bodyStringField(request.body, "deviceExternalId");
-    const deviceName = bodyStringField(request.body, "deviceName");
-    if (!email || !password || !sellerAccountExternalId || !deviceExternalId) {
+    const sellerAccountExternalId =
+      bodyStringField(request.body, "sellerAccountExternalId") || DEFAULT_SELLER_ACCOUNT_EXTERNAL_ID;
+    const deviceExternalId = bodyStringField(request.body, "deviceExternalId") || defaultCollectorDeviceExternalId();
+    const deviceName = bodyStringField(request.body, "deviceName") || DEFAULT_COLLECTOR_DEVICE_NAME;
+    if (!email || !password) {
       return reply.code(400).send({ ok: false, error: "invalid_collector_login_request" });
     }
 
@@ -146,7 +151,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const registered = await store.registerCollectorDevice({
       sellerAccountExternalId,
       externalDeviceId: deviceExternalId,
-      deviceName: deviceName || undefined
+      deviceName
     });
     await store.appendAuditLog({
       actorUserId: credentials.id,
@@ -168,7 +173,8 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   });
 
   app.post("/collector/v1/sync-batches", async (request, reply) => {
-    if (!(await isCollectorAuthorized(request.headers.authorization || "", store))) {
+    const collectorDevice = await collectorDeviceFromAuthorization(request.headers.authorization || "", store);
+    if (!collectorDevice) {
       return reply.code(401).send({ ok: false, error: "unauthorized" });
     }
 
@@ -177,7 +183,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       return reply.code(400).send({ ok: false, error: "invalid_sync_batch" });
     }
 
-    const result = await store.acceptSyncBatch(batch);
+    const result = await store.acceptSyncBatch(collectorScopedBatch(batch, collectorDevice));
     return {
       ok: true,
       ...result
@@ -856,11 +862,32 @@ async function createPostgresStore(
   return new PostgresSyncStore(client);
 }
 
-async function isCollectorAuthorized(authorization: string, store: SyncStore): Promise<boolean> {
+async function collectorDeviceFromAuthorization(authorization: string, store: SyncStore): Promise<CollectorDevice | null> {
   const token = bearerToken(authorization);
-  if (!token) return false;
+  if (!token) return null;
 
-  return Boolean(await store.authenticateCollectorDevice(token));
+  return store.authenticateCollectorDevice(token);
+}
+
+function collectorScopedBatch(batch: SyncBatch, device: CollectorDevice): SyncBatch {
+  const sellerAccountExternalId = device.sellerAccountExternalId || DEFAULT_SELLER_ACCOUNT_EXTERNAL_ID;
+  const deviceId = device.externalDeviceId || batch.device.deviceId;
+  return {
+    ...batch,
+    sellerAccount: {
+      ...batch.sellerAccount,
+      externalAccountId: sellerAccountExternalId
+    },
+    device: {
+      ...batch.device,
+      deviceId,
+      deviceName: device.deviceName || batch.device.deviceName
+    }
+  };
+}
+
+function defaultCollectorDeviceExternalId(): string {
+  return `collector-${crypto.randomUUID()}`;
 }
 
 interface PublicInternalUser {

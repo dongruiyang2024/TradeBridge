@@ -192,6 +192,26 @@ test("POST /collector/v1/auth/login activates a collector device for admin users
   assert.equal(auditLogs.some((log) => log.action === "collector_device.activated"), true);
 });
 
+test("POST /collector/v1/auth/login can activate with generated seller and device defaults", async () => {
+  const { app } = await createAuthApp();
+  const response = await app.inject({
+    method: "POST",
+    url: "/collector/v1/auth/login",
+    payload: {
+      email: "admin@example.com",
+      password: "secret"
+    }
+  });
+
+  assert.equal(response.statusCode, 200);
+  const body = response.json();
+  assert.equal(body.ok, true);
+  assert.equal(typeof body.token, "string");
+  assert.equal(body.device.sellerAccountExternalId, "default-seller");
+  assert.match(body.device.externalDeviceId, /^collector-/);
+  assert.equal(body.device.deviceName, "TradeBridge Collector");
+});
+
 test("POST /collector/v1/auth/login rejects invalid credentials", async () => {
   const { app } = await createAuthApp();
   const response = await app.inject({
@@ -258,15 +278,13 @@ test("POST /collector/v1/auth/login rejects disabled admins", async () => {
   assert.deepEqual(response.json(), { ok: false, error: "invalid_credentials" });
 });
 
-test("POST /collector/v1/auth/login rejects missing activation fields", async () => {
+test("POST /collector/v1/auth/login rejects missing credentials", async () => {
   const { app } = await createAuthApp();
   const response = await app.inject({
     method: "POST",
     url: "/collector/v1/auth/login",
     payload: {
-      email: "admin@example.com",
-      password: "secret",
-      sellerAccountExternalId: "seller-1"
+      email: "admin@example.com"
     }
   });
 
