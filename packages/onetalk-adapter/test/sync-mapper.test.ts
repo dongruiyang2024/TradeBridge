@@ -128,6 +128,100 @@ test("mapWebliteToSyncBatch maps alternate OneTalk customer and message fields",
   assert.equal(batch.messages?.[0].direction, "received");
 });
 
+test("mapWebliteToSyncBatch maps LWP conversation and message models from OneTalk WebSocket", () => {
+  const lastMessageAt = Date.parse("2026-05-27T04:33:20.000Z");
+  const inboundAt = Date.parse("2026-05-27T04:32:30.000Z");
+  const outboundAt = Date.parse("2026-05-27T04:33:10.000Z");
+
+  const batch = mapWebliteToSyncBatch({
+    sellerAccount: { externalAccountId: "seller-demo" },
+    device: { deviceId: "chrome-extension-demo" },
+    collectedAt: "2026-05-27T04:40:00.000Z",
+    source: "chrome-extension",
+    previousCursor: null,
+    weblite: {
+      html: "",
+      bootstrap: { aliId: "seller-ali" },
+      conversations: [
+        {
+          singleChatUserConversation: {
+            modifyTime: lastMessageAt,
+            lastMessage: {
+              message: {
+                cid: "conv-lwp-1",
+                createAt: lastMessageAt,
+                content: { contentType: 1, text: { content: "latest message" } }
+              }
+            },
+            singleChatConversation: {
+              cid: "conv-lwp-1",
+              pairFirst: "seller-ali",
+              pairSecond: "buyer-ali"
+            }
+          }
+        }
+      ]
+    },
+    messagesByConversationId: {
+      "conv-lwp-1": [
+        {
+          message: {
+            messageId: "msg-lwp-in",
+            cid: "conv-lwp-1",
+            createAt: inboundAt,
+            content: { contentType: 1, text: { content: "Hello from buyer" } },
+            searchableContent: { summary: "Hello from buyer" },
+            sender: { uid: "buyer-ali" },
+            receivers: [{ uid: "seller-ali" }]
+          }
+        },
+        {
+          message: {
+            messageId: "msg-lwp-out",
+            cid: "conv-lwp-1",
+            createAt: outboundAt,
+            content: { contentType: 1, text: { content: "Offer sent" } },
+            searchableContent: { summary: "Offer sent" },
+            sender: { uid: "seller-ali" },
+            receivers: [{ uid: "buyer-ali" }]
+          }
+        }
+      ]
+    }
+  });
+
+  assert.deepEqual(batch.customers, [{ externalCustomerId: "buyer-ali" }]);
+  assert.deepEqual(batch.conversations, [
+    {
+      externalConversationId: "conv-lwp-1",
+      externalCustomerId: "buyer-ali",
+      lastMessageAt: "2026-05-27T04:33:20.000Z"
+    }
+  ]);
+  assert.deepEqual(
+    batch.messages?.map((message) => ({
+      id: message.externalMessageId,
+      direction: message.direction,
+      content: message.content,
+      sentAt: message.sentAt
+    })),
+    [
+      {
+        id: "msg-lwp-in",
+        direction: "received",
+        content: "Hello from buyer",
+        sentAt: "2026-05-27T04:32:30.000Z"
+      },
+      {
+        id: "msg-lwp-out",
+        direction: "sent",
+        content: "Offer sent",
+        sentAt: "2026-05-27T04:33:10.000Z"
+      }
+    ]
+  );
+});
+
 test("mapWebliteToSyncBatch fills customer names from page snapshot when cached conversations only contain ids", () => {
   const batch = mapWebliteToSyncBatch({
     sellerAccount: { externalAccountId: "seller-demo" },
