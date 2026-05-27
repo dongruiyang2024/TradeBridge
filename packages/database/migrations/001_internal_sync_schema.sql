@@ -62,12 +62,14 @@ CREATE TABLE IF NOT EXISTS seller_account (
 CREATE TABLE IF NOT EXISTS collector_device (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   seller_account_id UUID REFERENCES seller_account(id) ON DELETE SET NULL,
+  external_device_id TEXT,
   device_name TEXT,
-  device_token_hash TEXT NOT NULL,
+  device_token_hash TEXT,
   last_heartbeat_at TIMESTAMPTZ,
   status TEXT NOT NULL DEFAULT 'active',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (external_device_id),
   UNIQUE (device_token_hash)
 );
 

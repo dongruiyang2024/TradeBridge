@@ -279,6 +279,7 @@ export interface InternalSession {
 
 export interface CollectorDevice {
   id: string;
+  externalDeviceId?: string;
   sellerAccountExternalId?: string;
   deviceName?: string;
   status: string;
@@ -294,6 +295,7 @@ export interface RegisteredCollectorDevice extends CollectorDevice {
 
 export interface RegisterCollectorDeviceInput {
   sellerAccountExternalId?: string;
+  externalDeviceId?: string;
   deviceName?: string;
   token?: string;
   status?: string;

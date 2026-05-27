@@ -424,12 +424,16 @@ export class InMemorySyncStore {
     const now = new Date().toISOString();
     const token = input.token || crypto.randomBytes(32).toString("hex");
     const tokenHash = hashContent(token);
+    const existing = input.externalDeviceId
+      ? Array.from(this.collectorDevices.values()).find((item) => item.externalDeviceId === input.externalDeviceId)
+      : undefined;
     const device: CollectorDevice & { tokenHash: string } = {
-      id: this.nextCollectorDeviceId(),
+      id: existing?.id || this.nextCollectorDeviceId(),
+      externalDeviceId: input.externalDeviceId ?? existing?.externalDeviceId,
       sellerAccountExternalId: input.sellerAccountExternalId,
-      deviceName: input.deviceName,
+      deviceName: input.deviceName ?? existing?.deviceName,
       status: input.status || "active",
-      createdAt: now,
+      createdAt: existing?.createdAt || now,
       updatedAt: now,
       tokenHash
     };
@@ -554,6 +558,7 @@ function toPublicInternalUser(user: InternalUser & { passwordHash: string }): In
 function toPublicCollectorDevice(device: CollectorDevice & { tokenHash: string }): CollectorDevice {
   return {
     id: device.id,
+    externalDeviceId: device.externalDeviceId,
     sellerAccountExternalId: device.sellerAccountExternalId,
     deviceName: device.deviceName,
     status: device.status,

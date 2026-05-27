@@ -205,6 +205,7 @@ interface AcceptUserInvitationRow extends UserInvitationRow {
 
 interface CollectorDeviceRow {
   id: string;
+  externalDeviceId: string | null;
   sellerAccountExternalId: string | null;
   deviceName: string | null;
   status: string;
@@ -1338,17 +1339,19 @@ export class PostgresSyncStore {
         WHERE external_account_id = $1
       ),
       upsert_device AS (
-        INSERT INTO collector_device (seller_account_id, device_name, device_token_hash, status)
-        VALUES ((SELECT id FROM seller), $2, $3, $4)
-        ON CONFLICT (device_token_hash)
+        INSERT INTO collector_device (seller_account_id, external_device_id, device_name, device_token_hash, status)
+        VALUES ((SELECT id FROM seller), $2, $3, $4, $5)
+        ON CONFLICT (external_device_id)
         DO UPDATE SET
           seller_account_id = EXCLUDED.seller_account_id,
           device_name = COALESCE(EXCLUDED.device_name, collector_device.device_name),
+          device_token_hash = EXCLUDED.device_token_hash,
           status = EXCLUDED.status,
           updated_at = now()
         RETURNING
           id,
           seller_account_id,
+          external_device_id,
           device_name,
           device_token_hash,
           status,
@@ -1358,6 +1361,7 @@ export class PostgresSyncStore {
       )
       SELECT
         d.id::text AS "id",
+        d.external_device_id AS "externalDeviceId",
         COALESCE(s.external_account_id, $1) AS "sellerAccountExternalId",
         d.device_name AS "deviceName",
         d.status AS "status",
@@ -1370,6 +1374,7 @@ export class PostgresSyncStore {
       `,
       [
         input.sellerAccountExternalId || null,
+        input.externalDeviceId || null,
         input.deviceName || null,
         tokenHash,
         input.status || "active"
@@ -1388,6 +1393,7 @@ export class PostgresSyncStore {
       /* list_collector_devices */
       SELECT
         d.id::text AS "id",
+        d.external_device_id AS "externalDeviceId",
         s.external_account_id AS "sellerAccountExternalId",
         d.device_name AS "deviceName",
         d.status AS "status",
@@ -1412,10 +1418,11 @@ export class PostgresSyncStore {
         SET status = 'revoked',
           updated_at = now()
         WHERE id = $1
-        RETURNING id, seller_account_id, device_name, status, last_heartbeat_at, created_at, updated_at
+        RETURNING id, seller_account_id, external_device_id, device_name, status, last_heartbeat_at, created_at, updated_at
       )
       SELECT
         d.id::text AS "id",
+        d.external_device_id AS "externalDeviceId",
         s.external_account_id AS "sellerAccountExternalId",
         d.device_name AS "deviceName",
         d.status AS "status",
@@ -1440,10 +1447,11 @@ export class PostgresSyncStore {
           updated_at = now()
         WHERE device_token_hash = $1
           AND status = 'active'
-        RETURNING id, seller_account_id, device_name, status, last_heartbeat_at, created_at, updated_at
+        RETURNING id, seller_account_id, external_device_id, device_name, status, last_heartbeat_at, created_at, updated_at
       )
       SELECT
         d.id::text AS "id",
+        d.external_device_id AS "externalDeviceId",
         s.external_account_id AS "sellerAccountExternalId",
         d.device_name AS "deviceName",
         d.status AS "status",
@@ -1487,9 +1495,9 @@ export class PostgresSyncStore {
     const result = await this.client.query<IdRow>(
       `
       /* upsert_collector_device */
-      INSERT INTO collector_device (seller_account_id, device_name, device_token_hash, last_heartbeat_at, status)
+      INSERT INTO collector_device (seller_account_id, external_device_id, device_name, last_heartbeat_at, status)
       VALUES ($1, $2, $3, $4, 'active')
-      ON CONFLICT (device_token_hash)
+      ON CONFLICT (external_device_id)
       DO UPDATE SET
         seller_account_id = EXCLUDED.seller_account_id,
         device_name = COALESCE(EXCLUDED.device_name, collector_device.device_name),
@@ -1499,8 +1507,8 @@ export class PostgresSyncStore {
       `,
       [
         sellerAccountId,
+        batch.device.deviceId,
         batch.device.deviceName || null,
-        hashContent(batch.device.deviceId),
         sourceTime(batch)
       ]
     );
@@ -1818,6 +1826,7 @@ function mapReplySuggestion(row: ReplySuggestionRow): StoredReplySuggestion {
 function mapCollectorDevice(row: CollectorDeviceRow): CollectorDevice {
   return {
     id: row.id,
+    externalDeviceId: row.externalDeviceId ?? undefined,
     sellerAccountExternalId: row.sellerAccountExternalId ?? undefined,
     deviceName: row.deviceName ?? undefined,
     status: row.status,
