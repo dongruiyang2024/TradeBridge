@@ -826,7 +826,7 @@ git commit -m "feat(collector-desktop): 明确采集端激活状态"
 - 修改：`docs/internal-trial-runbook.md`
 - 修改：`.env.example`
 
-- [ ] **步骤 1：更新环境变量文档**
+- [x] **步骤 1：更新环境变量文档**
 
 在 `docs/ENVIRONMENT.md` 中写明：
 
@@ -834,7 +834,7 @@ git commit -m "feat(collector-desktop): 明确采集端激活状态"
 项目不再支持 `WANGWANG_DEVICE_TOKENS` 静态采集 token。Chrome 插件和桌面采集端必须通过 `/collector/v1/auth/login` 激活并保存返回的 collector token。
 ```
 
-- [ ] **步骤 2：更新 Chrome 插件手册**
+- [x] **步骤 2：更新 Chrome 插件手册**
 
 在 `docs/chrome-extension-trial-runbook.md` 中替换手动 token 流程：
 
@@ -846,7 +846,7 @@ git commit -m "feat(collector-desktop): 明确采集端激活状态"
 5. 打开 OneTalk 页面并点击插件同步。
 ```
 
-- [ ] **步骤 3：更新完整试运行手册**
+- [x] **步骤 3：更新完整试运行手册**
 
 在 `docs/internal-trial-runbook.md` 中增加采集端激活接口示例：
 
@@ -862,7 +862,7 @@ curl -X POST http://127.0.0.1:5032/collector/v1/auth/login \
   }'
 ```
 
-- [ ] **步骤 4：更新 `.env.example`**
+- [x] **步骤 4：更新 `.env.example`**
 
 删除 `WANGWANG_DEVICE_TOKENS`，并将 `WANGWANG_COLLECTOR_TOKEN` 说明改为激活后写入：
 
@@ -871,7 +871,7 @@ curl -X POST http://127.0.0.1:5032/collector/v1/auth/login \
 WANGWANG_COLLECTOR_TOKEN=change-me-activated-collector-token
 ```
 
-- [ ] **步骤 5：运行文档关键词检查**
+- [x] **步骤 5：运行文档关键词检查**
 
 运行：
 
@@ -881,7 +881,7 @@ rg -n "Org ID|WANGWANG_SETUP_TOKEN|WANGWANG_DEVICE_TOKENS|手动填写 Collector
 
 预期：除历史计划和规格归档外，不再出现 `Org ID`、`WANGWANG_SETUP_TOKEN`、`WANGWANG_DEVICE_TOKENS` 或过期的 Chrome 插件手动 token 主流程描述。
 
-- [ ] **步骤 6：Commit**
+- [x] **步骤 6：Commit**
 
 ```bash
 git add docs/ENVIRONMENT.md docs/chrome-extension-trial-runbook.md docs/internal-trial-runbook.md .env.example
