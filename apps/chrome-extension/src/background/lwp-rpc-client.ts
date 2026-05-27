@@ -56,13 +56,14 @@ export class LwpRpcClient {
     const socket = this.requireOpenSocket();
     const parsed = parseLwpFrame(frameText);
     if (!parsed.mid) throw new Error("lwp_request_mid_missing");
+    const mid = parsed.mid;
     const timeoutMs = this.options.timeoutMs || 15_000;
     return new Promise((resolve, reject) => {
       const timer = globalThis.setTimeout(() => {
-        this.pending.delete(parsed.mid || "");
+        this.pending.delete(mid);
         reject(new Error("lwp_request_timeout"));
       }, timeoutMs) as unknown as number;
-      this.pending.set(parsed.mid, { resolve, reject, timer });
+      this.pending.set(mid, { resolve, reject, timer });
       socket.send(frameText);
     });
   }
