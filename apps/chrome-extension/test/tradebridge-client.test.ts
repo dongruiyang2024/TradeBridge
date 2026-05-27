@@ -95,6 +95,39 @@ test("activateCollectorDevice posts credentials and device metadata", async () =
   });
 });
 
+test("activateCollectorDevice can post only credentials and let the server assign collector scope", async () => {
+  const requests: Request[] = [];
+  globalThis.fetch = async (input, init) => {
+    requests.push(new Request(input, init));
+    return Response.json({
+      ok: true,
+      token: "collector-token",
+      device: {
+        id: "collector-device-1",
+        externalDeviceId: "collector-generated",
+        sellerAccountExternalId: "default-seller",
+        deviceName: "TradeBridge Collector",
+        status: "active"
+      }
+    });
+  };
+
+  const result = await activateCollectorDevice({
+    serverUrl: "http://127.0.0.1:5032",
+    email: "admin@example.com",
+    password: "secret"
+  });
+  const requestBody = await requests[0].json();
+
+  assert.equal(result.token, "collector-token");
+  assert.equal(result.device.sellerAccountExternalId, "default-seller");
+  assert.equal(result.device.externalDeviceId, "collector-generated");
+  assert.deepEqual(requestBody, {
+    email: "admin@example.com",
+    password: "secret"
+  });
+});
+
 test("activateCollectorDevice maps auth failures", async () => {
   globalThis.fetch = async () => Response.json({ ok: false, error: "invalid_credentials" }, { status: 401 });
   await assert.rejects(

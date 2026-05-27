@@ -15,8 +15,8 @@ export interface CollectorActivationInput {
   serverUrl: string;
   email: string;
   password: string;
-  sellerAccountExternalId: string;
-  deviceExternalId: string;
+  sellerAccountExternalId?: string;
+  deviceExternalId?: string;
   deviceName?: string;
 }
 
