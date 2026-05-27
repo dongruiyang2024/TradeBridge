@@ -68,10 +68,15 @@ function activationErrorMessage(code: string): string {
     missing_serverUrl: "请填写 Server URL",
     missing_email: "请填写管理员邮箱",
     missing_password: "请填写管理员密码",
+    invalid_collector_login_request: "激活请求格式不匹配，请确认服务端已重启到最新版本",
     invalid_credentials: "管理员邮箱或密码不正确",
     forbidden: "当前账号不是管理员，不能激活采集端",
-    collector_activation_failed: "采集端激活请求失败"
+    collector_activation_failed: "采集端激活请求失败",
+    collector_activation_response_invalid: "采集端激活响应格式不正确，请确认 Server URL 指向 TradeBridge 服务端"
   };
+  if (code.startsWith("collector_activation_failed_")) {
+    return `采集端激活请求失败（HTTP ${code.slice("collector_activation_failed_".length)}），请确认 Server URL 指向 TradeBridge 服务端`;
+  }
   return messages[code] || code;
 }
 

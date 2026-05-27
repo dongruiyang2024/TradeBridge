@@ -155,3 +155,32 @@ test("activateCollectorDevice maps auth failures", async () => {
     /forbidden/
   );
 });
+
+test("activateCollectorDevice surfaces server activation errors", async () => {
+  globalThis.fetch = async () =>
+    Response.json({ ok: false, error: "invalid_collector_login_request" }, { status: 400 });
+
+  await assert.rejects(
+    () =>
+      activateCollectorDevice({
+        serverUrl: "http://127.0.0.1:5032",
+        email: "admin@example.com",
+        password: "secret"
+      }),
+    /invalid_collector_login_request/
+  );
+});
+
+test("activateCollectorDevice includes HTTP status for non-json activation failures", async () => {
+  globalThis.fetch = async () => new Response("not found", { status: 404 });
+
+  await assert.rejects(
+    () =>
+      activateCollectorDevice({
+        serverUrl: "http://127.0.0.1:5173",
+        email: "admin@example.com",
+        password: "secret"
+      }),
+    /collector_activation_failed_404/
+  );
+});

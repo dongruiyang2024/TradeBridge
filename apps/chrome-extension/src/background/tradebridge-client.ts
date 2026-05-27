@@ -53,8 +53,9 @@ export async function activateCollectorDevice(input: CollectorActivationInput): 
 
   if (response.status === 401) throw new Error("invalid_credentials");
   if (response.status === 403) throw new Error("forbidden");
-  if (!response.ok || !isActivationResponse(body)) {
-    throw new Error("collector_activation_failed");
+  if (!response.ok) throw new Error(responseErrorCode(body, `collector_activation_failed_${response.status}`));
+  if (!isActivationResponse(body)) {
+    throw new Error("collector_activation_response_invalid");
   }
 
   return {
@@ -69,6 +70,11 @@ function syncBatchUrl(serverUrl: string): string {
 
 function collectorAuthUrl(serverUrl: string): string {
   return new URL("/collector/v1/auth/login", serverUrl).toString();
+}
+
+function responseErrorCode(body: unknown, fallback: string): string {
+  if (isRecord(body) && typeof body.error === "string") return body.error;
+  return fallback;
 }
 
 function isSyncBatchResponse(value: unknown): value is SyncBatchResult & { ok: true } {
