@@ -10,6 +10,7 @@ import {
   type CollectorShellViewModel
 } from "./electron-shell.js";
 import { JsonLocalStateStore } from "./local-state.js";
+import { collectorRuntimeConfig } from "./runtime-config.js";
 
 loadWorkspaceEnv();
 
@@ -20,10 +21,12 @@ const state = new JsonLocalStateStore(statePath);
 let mainWindow: any = null;
 let appEventsRegistered = false;
 let ipcHandlersRegistered = false;
+const runtimeConfig = () => collectorRuntimeConfig(process.env, os.hostname());
 
 const controller = createCollectorShellController({
   readStatus: async () => {
     const localState = await state.read();
+    const config = runtimeConfig();
     return {
       session: {
         hasCookie2: Boolean(process.env.WANGWANG_COLLECTOR_HAS_COOKIE2),
@@ -31,31 +34,24 @@ const controller = createCollectorShellController({
         hasTbToken: Boolean(process.env.WANGWANG_COLLECTOR_HAS_TB_TOKEN),
         hasSgcookie: Boolean(process.env.WANGWANG_COLLECTOR_HAS_SGCOOKIE)
       },
-      sellerAccountExternalId: process.env.WANGWANG_SELLER_ACCOUNT_ID,
-      sellerDisplayName: process.env.WANGWANG_SELLER_DISPLAY_NAME,
-      deviceName: process.env.WANGWANG_DEVICE_NAME || os.hostname(),
-      deviceStatus: process.env.WANGWANG_COLLECTOR_TOKEN ? "registered" : "collector_activation_required",
-      lastSyncAt: process.env.WANGWANG_SELLER_ACCOUNT_ID
-        ? localState.cursors[process.env.WANGWANG_SELLER_ACCOUNT_ID]
-        : undefined,
+      sellerAccountExternalId: config.sellerAccount.externalAccountId,
+      deviceName: config.device.deviceName,
+      deviceStatus: config.collectorToken ? "registered" : "collector_activation_required",
+      lastSyncAt: localState.cursors[config.sellerAccount.externalAccountId],
       lastError: localState.lastError,
       queuedFailedBatchCount: localState.failedBatches.length
     } satisfies CollectorShellStatus;
   },
-  manualSync: async () =>
-    collectOnce({
-      sellerAccount: {
-        externalAccountId: requiredEnv("WANGWANG_SELLER_ACCOUNT_ID"),
-        displayName: process.env.WANGWANG_SELLER_DISPLAY_NAME
-      },
-      device: {
-        deviceId: process.env.WANGWANG_COLLECTOR_DEVICE_ID || os.hostname(),
-        deviceName: process.env.WANGWANG_DEVICE_NAME || os.hostname()
-      },
+  manualSync: async () => {
+    const config = runtimeConfig();
+    return collectOnce({
+      sellerAccount: config.sellerAccount,
+      device: config.device,
       serverUrl: requiredEnv("WANGWANG_SERVER_URL"),
       collectorToken: requiredEnv("WANGWANG_COLLECTOR_TOKEN"),
       state
-    })
+    });
+  }
 });
 
 void startElectronShell().catch((error) => {
