@@ -6,8 +6,6 @@ export type {
   ChatDataSummaryResponse,
   ChatMessageRequest,
   ChatMessageResponse,
-  WebliteData,
-  WeblitePageConversation,
-  WeblitePageSnapshot
+  WebliteData
 } from "./onetalk-client.js";
 export * from "./sync-mapper.js";

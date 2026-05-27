@@ -32,11 +32,11 @@ export function buildRegisterFrame(input: RegisterFrameInput): string {
       "app-key": input.appKey,
       did: input.deviceId,
       token: input.accessToken,
-      ua: input.userAgent,
+      ua: lwpUserAgent(input.userAgent),
       dt: "j",
-      wv: "im:1",
-      sync: "1",
-      "cache-header": "app-key did token ua"
+      wv: "im:3,au:3,sy:6",
+      sync: "0,0;0;0;",
+      "cache-header": "app-key token ua wv"
     }
   });
 }
@@ -96,6 +96,15 @@ function parseRecord(text: string): Record<string, unknown> {
     throw new Error("lwp_frame_invalid_json");
   }
   throw new Error("lwp_frame_invalid_shape");
+}
+
+function lwpUserAgent(userAgent: string): string {
+  if (/DingWeb\/[^ ]+ IMPaaS/.test(userAgent)) return userAgent;
+  const chromeVersion = /Chrome\/([^ ]+)/.exec(userAgent)?.[1];
+  const macVersion = /Mac OS X ([^;)]+)/.exec(userAgent)?.[1]?.replace(/_/g, ".");
+  const os = macVersion ? ` OS(Mac OS/${macVersion})` : "";
+  const browser = chromeVersion ? ` Browser(Chrome/${chromeVersion})` : "";
+  return `${userAgent} DingTalk(2.1.0-beta.22)${os}${browser} DingWeb/2.1.0-beta.22 IMPaaS`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -7,7 +7,6 @@ import {
   type WebliteData
 } from "@wangwang/onetalk-adapter/browser";
 import { getChrome, type ChromeCookie } from "../shared/chrome-api.js";
-import { readLatestOnetalkPageSnapshot } from "./onetalk-page-snapshot.js";
 
 const WEBLITE_URL = "https://onetalk.alibaba.com/message/weblitePWA.htm";
 const MESSAGE_URL = "https://onetalk.alibaba.com/message/getChatMessageList.htm";
@@ -26,12 +25,10 @@ export class BrowserOnetalkClient {
     }
     const parsed = extractJsonAfter(html, "window.__VMFsConv__cache__");
     const conversations = Array.isArray(parsed) ? parsed.filter(isRecord) : [];
-    const pageSnapshot = await readLatestOnetalkPageSnapshot();
     return {
       html,
       conversations,
-      bootstrap: pageBootstrap(html),
-      pageSnapshot
+      bootstrap: pageBootstrap(html)
     };
   }
 

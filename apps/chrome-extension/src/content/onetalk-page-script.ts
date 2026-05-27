@@ -1,3 +1,6 @@
+import { requestCustomerProfilesFromPageRuntime } from "./onetalk-customer-profile.js";
+import { requestImTokenFromPageRuntime } from "./onetalk-im-token.js";
+import type { OneTalkCustomerProfileContact } from "../shared/extension-messages.js";
 import type { OutboundMessage } from "../shared/sync-types.js";
 
 interface PageBridgeWindow extends Window {
@@ -6,11 +9,6 @@ interface PageBridgeWindow extends Window {
       default?: {
         getMessageService?: () => OneTalkMessageService;
       };
-    };
-  };
-  lib?: {
-    mtop?: {
-      request?: (options: unknown, callback?: (response: unknown) => void) => Promise<unknown> | unknown;
     };
   };
   __tradeBridgeOneTalkPageBridgeInstalled?: boolean;
@@ -35,6 +33,10 @@ if (!pageWindow.__tradeBridgeOneTalkPageBridgeInstalled) {
     }
     if (event.data.type === "get-onetalk-im-token") {
       void handleTokenRequest(event.data);
+      return;
+    }
+    if (event.data.type === "get-onetalk-customer-profiles") {
+      void handleCustomerProfilesRequest(event.data);
     }
   });
 }
@@ -60,20 +62,20 @@ async function handleTokenRequest(data: Record<string, unknown>): Promise<void> 
   const appKey = typeof data.appKey === "string" ? data.appKey : "12574478";
   const deviceId = typeof data.deviceId === "string" ? data.deviceId : "";
   if (!requestId || !deviceId) {
-    publishTokenResult(requestId, false, undefined, undefined, undefined, "invalid_token_request");
+    publishTokenResult(requestId, false, undefined, undefined, undefined, undefined, undefined, "invalid_token_request");
     return;
   }
 
   try {
-    const result = await requestMtopToken(appKey, deviceId);
-    const object = tokenObjectFromMtopResult(result);
-    if (!object?.accessToken) throw new Error("onetalk_token_response_invalid");
+    const token = await requestImTokenFromPageRuntime(window, appKey, deviceId);
     publishTokenResult(
       requestId,
       true,
-      object.accessToken,
-      object.refreshToken,
-      object.accessTokenExpiredMillSeconds
+      token.accessToken,
+      token.refreshToken,
+      token.expiresInMs,
+      token.appKey,
+      token.deviceId
     );
   } catch (error) {
     publishTokenResult(
@@ -82,48 +84,32 @@ async function handleTokenRequest(data: Record<string, unknown>): Promise<void> 
       undefined,
       undefined,
       undefined,
+      undefined,
+      undefined,
       error instanceof Error ? error.message : "onetalk_token_fetch_failed"
     );
   }
 }
 
-function requestMtopToken(appKey: string, deviceId: string): Promise<unknown> {
-  const request = pageWindow.lib?.mtop?.request;
-  if (!request) return Promise.reject(new Error("onetalk_mtop_unavailable"));
-  const options = {
-    api: "mtop.alibaba.icbu.im.login.token.get",
-    v: "1.0",
-    appKey,
-    dataType: "json",
-    type: "GET",
-    data: { appKey, deviceId }
-  };
-  return new Promise((resolve, reject) => {
-    try {
-      const maybePromise = request(options, resolve);
-      if (maybePromise && typeof (maybePromise as Promise<unknown>).then === "function") {
-        (maybePromise as Promise<unknown>).then(resolve, reject);
-      }
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
+async function handleCustomerProfilesRequest(data: Record<string, unknown>): Promise<void> {
+  const requestId = typeof data.requestId === "string" ? data.requestId : "";
+  const contacts = Array.isArray(data.contacts) ? data.contacts.filter(isCustomerProfileContact) : [];
+  if (!requestId || !contacts.length) {
+    publishCustomerProfilesResult(requestId, false, [], "invalid_customer_profile_request");
+    return;
+  }
 
-function tokenObjectFromMtopResult(value: unknown): {
-  accessToken?: string;
-  refreshToken?: string;
-  accessTokenExpiredMillSeconds?: number;
-} | null {
-  const data = isRecord(value) && isRecord(value.data) ? value.data : null;
-  const object = data && isRecord(data.object) ? data.object : null;
-  if (!object) return null;
-  return {
-    accessToken: firstString(object, ["accessToken"]),
-    refreshToken: firstString(object, ["refreshToken"]),
-    accessTokenExpiredMillSeconds:
-      typeof object.accessTokenExpiredMillSeconds === "number" ? object.accessTokenExpiredMillSeconds : undefined
-  };
+  try {
+    const profiles = await requestCustomerProfilesFromPageRuntime(pageWindow, contacts);
+    publishCustomerProfilesResult(requestId, true, profiles);
+  } catch (error) {
+    publishCustomerProfilesResult(
+      requestId,
+      false,
+      [],
+      error instanceof Error ? error.message : "onetalk_customer_profile_failed"
+    );
+  }
 }
 
 function publishTokenResult(
@@ -132,6 +118,8 @@ function publishTokenResult(
   accessToken?: string,
   refreshToken?: string,
   expiresInMs?: number,
+  appKey?: string,
+  deviceId?: string,
   error?: string
 ): void {
   window.postMessage(
@@ -143,6 +131,27 @@ function publishTokenResult(
       accessToken,
       refreshToken,
       expiresInMs,
+      appKey,
+      deviceId,
+      error
+    },
+    window.location.origin
+  );
+}
+
+function publishCustomerProfilesResult(
+  requestId: string,
+  ok: boolean,
+  profiles: Record<string, unknown>[],
+  error?: string
+): void {
+  window.postMessage(
+    {
+      source: "tradebridge-onetalk-page",
+      type: "get-onetalk-customer-profiles-result",
+      requestId,
+      ok,
+      profiles,
       error
     },
     window.location.origin
@@ -205,6 +214,15 @@ function isOutboundMessage(value: unknown): value is OutboundMessage {
     typeof value.externalConversationId === "string" &&
     typeof value.content === "string" &&
     value.content.trim().length > 0
+  );
+}
+
+function isCustomerProfileContact(value: unknown): value is OneTalkCustomerProfileContact {
+  return (
+    isRecord(value) &&
+    typeof value.buyerAccountId === "string" &&
+    value.buyerAccountId.trim().length > 0 &&
+    (value.buyerLoginId === undefined || typeof value.buyerLoginId === "string")
   );
 }
 

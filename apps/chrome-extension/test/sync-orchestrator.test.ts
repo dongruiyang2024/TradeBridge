@@ -124,3 +124,63 @@ test("runSyncOnce stores collector_activation_required errors", async () => {
   assert.equal(result.error, "collector_activation_required");
   assert.equal(store.status.lastError?.code, "collector_activation_required");
 });
+
+test("runSyncOnce records per-conversation message failures and continues upload", async () => {
+  const store = new MemoryStateStore();
+  const uploaded: SyncBatch[] = [];
+
+  const result = await runSyncOnce({
+    now: () => new Date("2026-05-26T08:10:00.000Z"),
+    stateStore: store,
+    onetalkClient: {
+      fetchWeblite: async () => ({
+        html: "",
+        bootstrap: { aliId: "self-ali" },
+        conversations: [
+          {
+            singleChatUserConversation: {
+              singleChatConversation: { cid: "conv-timeout", pairFirst: "self-ali", pairSecond: "buyer-1" }
+            }
+          },
+          {
+            singleChatUserConversation: {
+              singleChatConversation: { cid: "conv-ok", pairFirst: "self-ali", pairSecond: "buyer-2" }
+            }
+          }
+        ]
+      }),
+      getChatMessages: async ({ conversation }) => {
+        const cid = (conversation.singleChatUserConversation as { singleChatConversation: { cid: string } })
+          .singleChatConversation.cid;
+        if (cid === "conv-timeout") throw new Error("lwp_request_timeout:/r/MessageManager/listUserMessages");
+        return {
+          status: 200,
+          contentType: "application/lwp+json",
+          code: 200,
+          raw: {},
+          messages: [],
+          diagnostics: {
+            status: 200,
+            contentType: "application/lwp+json",
+            code: 200,
+            listLength: 0,
+            listPath: "body.userMessageModels",
+            topLevelKeys: ["body", "code", "headers"],
+            dataKeys: ["userMessageModels"]
+          }
+        };
+      }
+    },
+    uploadSyncBatch: async (options) => {
+      uploaded.push(options.batch);
+      return { acceptedCount: 0, rejectedCount: 0, nextCursor: null, warnings: [] };
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(uploaded.length, 1);
+  assert.deepEqual(store.status.lastDiagnostics?.messageRequests.map((item) => [item.conversationId, item.status, item.code]), [
+    ["conv-timeout", 0, "lwp_request_timeout:/r/MessageManager/listUserMessages"],
+    ["conv-ok", 200, 200]
+  ]);
+});

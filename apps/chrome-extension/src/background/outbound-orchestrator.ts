@@ -1,3 +1,4 @@
+import { sendMessageToOneTalkTab } from "./onetalk-tab-messaging.js";
 import { validateConfig } from "./storage.js";
 import type { ChromeApi } from "../shared/chrome-api.js";
 import type { ExtensionConfig, ExtensionStatus, OutboundMessage } from "../shared/sync-types.js";
@@ -86,16 +87,15 @@ export async function runOutboundDelivery(options: RunOutboundDeliveryOptions): 
 }
 
 async function sendViaOneTalkTab(chromeApi: ChromeApi, message: OutboundMessage): Promise<PageSendResponse> {
-  if (!chromeApi.tabs) return { ok: false, error: "chrome_tabs_unavailable" };
-  const tabs = await chromeApi.tabs.query({ url: "https://onetalk.alibaba.com/*" });
-  const tab = tabs.find((item) => typeof item.id === "number");
-  if (typeof tab?.id !== "number") return { ok: false, error: "onetalk_tab_required" };
-
-  const response = await chromeApi.tabs.sendMessage(tab.id, {
-    type: "send-onetalk-message",
-    message
-  });
-  return isPageSendResponse(response) ? response : { ok: false, error: "onetalk_send_response_invalid" };
+  try {
+    const response = await sendMessageToOneTalkTab(chromeApi, {
+      type: "send-onetalk-message",
+      message
+    });
+    return isPageSendResponse(response) ? response : { ok: false, error: "onetalk_send_response_invalid" };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "onetalk_send_failed" };
+  }
 }
 
 function isPageSendResponse(value: unknown): value is PageSendResponse {

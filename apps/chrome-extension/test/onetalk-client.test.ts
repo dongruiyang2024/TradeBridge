@@ -31,7 +31,7 @@ test("fetchWeblite parses cached conversations and sends credentials include", a
   assert.equal(requests[0].credentials, "include");
 });
 
-test("fetchWeblite attaches the latest OneTalk page snapshot from extension storage", async () => {
+test("fetchWeblite ignores stored OneTalk page snapshots", async () => {
   const html = fs.readFileSync(path.resolve("test/fixtures/weblite.html"), "utf8");
   globalThis.fetch = async () =>
     new Response(html, {
@@ -58,7 +58,7 @@ test("fetchWeblite attaches the latest OneTalk page snapshot from extension stor
   const client = new BrowserOnetalkClient();
   const result = await client.fetchWeblite();
 
-  assert.equal(result.pageSnapshot?.conversations?.[0]?.displayName, "Peter SHU");
+  assert.equal((result as { pageSnapshot?: unknown }).pageSnapshot, undefined);
 });
 
 

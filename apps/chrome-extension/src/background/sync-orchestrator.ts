@@ -134,12 +134,18 @@ async function fetchMessagesByConversation(options: {
     let before: number | null = null;
 
     for (let page = 0; page < options.maxPages; page += 1) {
-      const result = await options.client.getChatMessages({
-        conversation,
-        bootstrap: options.weblite.bootstrap,
-        before,
-        pageSize: options.pageSize
-      });
+      let result: ChatMessageResponse;
+      try {
+        result = await options.client.getChatMessages({
+          conversation,
+          bootstrap: options.weblite.bootstrap,
+          before,
+          pageSize: options.pageSize
+        });
+      } catch (error) {
+        diagnostics.push(failedMessageRequestDiagnostic(conversationId, error));
+        break;
+      }
       const records = result.messages.filter(isRecord);
       diagnostics.push(messageRequestDiagnostic(conversationId, result, records.length));
       messages.push(...records);
@@ -166,6 +172,20 @@ async function fetchMessagesByConversation(options: {
         }))
       ]
     }
+  };
+}
+
+function failedMessageRequestDiagnostic(conversationId: string, error: unknown): MessageRequestDiagnostic {
+  const code = error instanceof Error ? error.message : "onetalk_message_request_failed";
+  return {
+    conversationId,
+    status: 0,
+    contentType: "application/lwp+json",
+    code,
+    listLength: 0,
+    listPath: "body.userMessageModels",
+    topLevelKeys: [],
+    dataKeys: []
   };
 }
 

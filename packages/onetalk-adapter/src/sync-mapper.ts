@@ -1,4 +1,11 @@
-import type { WebliteData, WeblitePageConversation } from "./onetalk-client.js";
+import {
+  countryFromProfile,
+  customerProfileFor,
+  displayNameFromProfile,
+  loginIdFromProfile,
+  lwpCustomerIdentity
+} from "./customer-profile.js";
+import type { WebliteData } from "./onetalk-client.js";
 
 export type MessageDirection = "received" | "sent" | "unknown";
 
@@ -67,6 +74,8 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
   for (let index = 0; index < rawConversations.length; index += 1) {
     const conversation = rawConversations[index];
     const lwpConversation = lwpSingleChatConversation(conversation);
+    const pairCustomerId = lwpCustomerId(lwpConversation, options.weblite.bootstrap);
+    const lwpIdentity = lwpCustomerIdentity(conversation, pairCustomerId);
     const externalConversationId =
       firstString(conversation, ["cid", "conversationCode", "conversationId", "id"]) ||
       firstString(lwpConversation, ["cid"]);
@@ -76,20 +85,25 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
         "contactAccountIdEncrypt",
         "buyerAccountId",
         "contactAliId"
-      ]) || lwpCustomerId(lwpConversation, options.weblite.bootstrap);
+      ]) ||
+      lwpIdentity.accountIdEncrypt ||
+      lwpIdentity.accountId ||
+      lwpIdentity.aliIdEncrypt ||
+      lwpIdentity.pairCustomerId;
     if (!externalConversationId || !externalCustomerId) continue;
-    const pageConversation = pageConversationFor(
-      options.weblite,
-      externalConversationId,
+    const customerProfile = customerProfileFor(options.weblite.customerProfiles, {
       externalCustomerId,
-      index
-    );
+      conversation,
+      lwpIdentity
+    });
 
     customers.set(
       externalCustomerId,
       compact({
         externalCustomerId,
-        loginId: firstString(conversation, ["loginId", "contactLoginId"]) || firstString(pageConversation, ["loginId"]),
+        loginId:
+          firstString(conversation, ["loginId", "contactLoginId"]) ||
+          loginIdFromProfile(customerProfile),
         displayName:
           firstString(conversation, [
             "contactNick",
@@ -101,8 +115,11 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
             "displayName",
             "nick",
             "name"
-          ]) || firstString(pageConversation, ["displayName"]),
-        country: firstString(conversation, ["country"]) || firstString(pageConversation, ["country"])
+          ]) ||
+          displayNameFromProfile(customerProfile),
+        country:
+          firstString(conversation, ["country"]) ||
+          countryFromProfile(customerProfile)
       })
     );
 
@@ -110,7 +127,7 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
       compact({
         externalConversationId,
         externalCustomerId,
-        lastMessageAt: isoTime(firstMessageTime(conversation) ?? firstValue(pageConversation, ["lastMessageAt"]))
+        lastMessageAt: isoTime(firstMessageTime(conversation))
       })
     );
 
@@ -153,21 +170,6 @@ function firstMessageTime(conversation: Record<string, unknown>): unknown {
     "singleChatUserConversation.lastMessage.message.createAt",
     "singleChatUserConversation.modifyTime"
   ]);
-}
-
-function pageConversationFor(
-  weblite: WebliteData,
-  externalConversationId: string,
-  externalCustomerId: string,
-  index: number
-): WeblitePageConversation {
-  const conversations = (weblite.pageSnapshot?.conversations || []).filter(isRecord) as WeblitePageConversation[];
-  return (
-    conversations.find((item) => item.externalConversationId === externalConversationId) ||
-    conversations.find((item) => item.externalCustomerId === externalCustomerId) ||
-    conversations[index] ||
-    {}
-  );
 }
 
 function mapMessage(

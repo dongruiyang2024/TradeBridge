@@ -9,12 +9,13 @@ import {
   type WebliteData
 } from "@wangwang/onetalk-adapter/browser";
 import { LwpRpcClient } from "./lwp-rpc-client.js";
-import { readLatestOnetalkPageSnapshot } from "./onetalk-page-snapshot.js";
 
 export interface TokenProviderResult {
   accessToken: string;
   refreshToken?: string;
   expiresInMs?: number;
+  appKey?: string;
+  deviceId?: string;
 }
 
 export interface LwpTransport {
@@ -29,6 +30,7 @@ export interface BrowserOnetalkLwpClientOptions {
   deviceId: string;
   userAgent: string;
   tokenProvider(): Promise<TokenProviderResult>;
+  customerProfileProvider?: (conversations: Record<string, unknown>[]) => Promise<Record<string, unknown>[]>;
   rpcFactory?: () => LwpTransport;
   now?: () => Date;
 }
@@ -48,12 +50,12 @@ export class BrowserOnetalkLwpClient {
     if (isRecord(state.body)) {
       await transport.request(LWP_ROUTES.ackDiff, [state.body]);
     }
-    const pageSnapshot = await readLatestOnetalkPageSnapshot();
+    const customerProfiles = await this.fetchCustomerProfiles(conversations.conversations);
     return {
       html: "",
       bootstrap: this.bootstrap,
       conversations: conversations.conversations,
-      pageSnapshot
+      customerProfiles
     };
   }
 
@@ -98,8 +100,8 @@ export class BrowserOnetalkLwpClient {
     const transport = this.options.rpcFactory?.() || new LwpRpcClient();
     await transport.connect();
     const registerFrame = await registerWithTransport(transport, {
-      appKey: this.options.appKey,
-      deviceId: this.options.deviceId,
+      appKey: token.appKey || this.options.appKey,
+      deviceId: token.deviceId || this.options.deviceId,
       userAgent: this.options.userAgent,
       accessToken: token.accessToken
     });
@@ -109,6 +111,16 @@ export class BrowserOnetalkLwpClient {
     this.transport = transport;
     return transport;
   }
+
+  private async fetchCustomerProfiles(conversations: Record<string, unknown>[]): Promise<Record<string, unknown>[] | undefined> {
+    if (!this.options.customerProfileProvider) return undefined;
+    try {
+      const profiles = await this.options.customerProfileProvider(conversations);
+      return profiles.length ? profiles : undefined;
+    } catch {
+      return undefined;
+    }
+  }
 }
 
 async function registerWithTransport(
@@ -117,7 +129,7 @@ async function registerWithTransport(
 ): Promise<ParsedLwpFrame> {
   return transport.requestFrame(
     buildRegisterFrame({
-      mid: `tradebridge-reg-${Date.now()}`,
+      mid: createLwpMid(),
       appKey: input.appKey,
       deviceId: input.deviceId,
       userAgent: input.userAgent,
@@ -126,10 +138,14 @@ async function registerWithTransport(
   );
 }
 
+function createLwpMid(): string {
+  return `${Math.floor(Math.random() * 1000)}${Date.now()} 0`;
+}
+
 function conversationId(conversation: Record<string, unknown>): string | undefined {
   return (
-    firstString(conversation, ["cid", "conversationCode", "conversationId", "id"]) ||
-    firstString(valueAtPath(conversation, ["singleChatUserConversation", "singleChatConversation"]), ["cid"])
+    firstString(valueAtPath(conversation, ["singleChatUserConversation", "singleChatConversation"]), ["cid"]) ||
+    firstString(conversation, ["cid", "conversationCode", "conversationId", "id"])
   );
 }
 

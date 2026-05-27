@@ -7,22 +7,7 @@ export interface WebliteData {
   html: string;
   conversations: Record<string, unknown>[];
   bootstrap: Record<string, string>;
-  pageSnapshot?: WeblitePageSnapshot;
-}
-
-export interface WeblitePageSnapshot {
-  capturedAt: string;
-  conversations?: WeblitePageConversation[];
-}
-
-export interface WeblitePageConversation {
-  [key: string]: unknown;
-  externalConversationId?: string;
-  externalCustomerId?: string;
-  loginId?: string;
-  displayName?: string;
-  country?: string;
-  lastMessageAt?: string | number;
+  customerProfiles?: Record<string, unknown>[];
 }
 
 export interface ChatMessageRequest {

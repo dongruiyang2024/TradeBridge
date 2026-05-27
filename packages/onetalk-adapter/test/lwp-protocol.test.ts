@@ -52,11 +52,11 @@ test("LWP frame builders match OneTalk HAR route shapes", () => {
         "app-key": "12574478",
         did: "chrome-device",
         token: "access-token",
-        ua: "Mozilla/5.0",
+        ua: "Mozilla/5.0 DingTalk(2.1.0-beta.22) DingWeb/2.1.0-beta.22 IMPaaS",
         dt: "j",
-        wv: "im:1",
-        sync: "1",
-        "cache-header": "app-key did token ua"
+        wv: "im:3,au:3,sy:6",
+        sync: "0,0;0;0;",
+        "cache-header": "app-key token ua wv"
       }
     }
   );

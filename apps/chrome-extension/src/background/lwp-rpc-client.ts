@@ -58,10 +58,11 @@ export class LwpRpcClient {
     if (!parsed.mid) throw new Error("lwp_request_mid_missing");
     const mid = parsed.mid;
     const timeoutMs = this.options.timeoutMs || 15_000;
+    const timeoutRoute = parsed.route || "unknown";
     return new Promise((resolve, reject) => {
       const timer = globalThis.setTimeout(() => {
         this.pending.delete(mid);
-        reject(new Error("lwp_request_timeout"));
+        reject(new Error(`lwp_request_timeout:${timeoutRoute}`));
       }, timeoutMs) as unknown as number;
       this.pending.set(mid, { resolve, reject, timer });
       socket.send(frameText);
@@ -86,6 +87,9 @@ export class LwpRpcClient {
     const data = "data" in event && typeof event.data === "string" ? event.data : "";
     if (!data) return;
     const frame = parseLwpFrame(data);
+    if (frame.route?.startsWith("/s/")) {
+      this.socket?.send(JSON.stringify({ code: 200, headers: frame.headers }));
+    }
     if (!frame.mid) return;
     const pending = this.pending.get(frame.mid);
     if (!pending) return;
@@ -104,6 +108,6 @@ export class LwpRpcClient {
   private nextMid(): string {
     if (this.options.nextMid) return this.options.nextMid();
     this.sequence += 1;
-    return `tradebridge-${Date.now()}-${this.sequence}`;
+    return `${Math.floor(Math.random() * 1000)}${Date.now()} ${this.sequence - 1}`;
   }
 }

@@ -104,6 +104,40 @@ test("LwpRpcClient sends raw frames without dropping custom headers", async () =
   assert.equal(frame.headers["reg-uid"], "seller-ali");
 });
 
+test("LwpRpcClient acknowledges OneTalk server push frames", async () => {
+  const socket = new FakeSocket();
+  const client = new LwpRpcClient({
+    socketFactory: () => socket as never,
+    nextMid: () => "mid-state",
+    timeoutMs: 1000
+  });
+
+  const opened = client.connect();
+  socket.emit("open", {});
+  await opened;
+
+  const pending = client.request("/r/SyncStatus/getState", [{ topic: "sync" }]);
+  socket.emit("message", {
+    data: JSON.stringify({
+      lwp: "/s/sync",
+      headers: { mid: "server-mid", sid: "sid-value", "app-key": "runtime-app-key", ua: "ua-value" },
+      body: { syncExtraType: "diff" }
+    })
+  });
+
+  assert.deepEqual(JSON.parse(socket.sent[1]), {
+    code: 200,
+    headers: { mid: "server-mid", sid: "sid-value", "app-key": "runtime-app-key", ua: "ua-value" }
+  });
+
+  socket.emit("message", {
+    data: JSON.stringify({ code: 200, headers: { mid: "mid-state" }, body: { topic: "sync" } })
+  });
+
+  const frame = await pending;
+  assert.equal(frame.mid, "mid-state");
+});
+
 class FakeSocket {
   sent: string[] = [];
   readyState = 0;

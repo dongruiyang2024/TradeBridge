@@ -16,7 +16,7 @@ test("manifest uses minimal permissions for internal OneTalk collector", () => {
   };
 
   assert.equal(manifest.manifest_version, 3);
-  assert.deepEqual(manifest.permissions?.sort(), ["alarms", "cookies", "storage"]);
+  assert.deepEqual(manifest.permissions?.sort(), ["alarms", "cookies", "scripting", "storage"]);
   assert.ok(manifest.host_permissions?.includes("https://onetalk.alibaba.com/*"));
   assert.ok(manifest.host_permissions?.includes("http://127.0.0.1:5032/*"));
   assert.equal(manifest.host_permissions?.includes("<all_urls>"), false);
@@ -25,4 +25,26 @@ test("manifest uses minimal permissions for internal OneTalk collector", () => {
   assert.equal(manifest.background?.type, "module");
   assert.equal(manifest.content_scripts?.[0]?.run_at, "document_start");
   assert.equal(manifest.web_accessible_resources?.[0]?.resources?.includes("content/onetalk-page-script.js"), true);
+});
+
+test("OneTalk content bridge stays classic-script compatible", () => {
+  const bridgeSource = fs.readFileSync(path.resolve("src/content/onetalk-page-bridge.ts"), "utf8");
+  const runtimeImports = bridgeSource
+    .split("\n")
+    .filter((line) => line.startsWith("import ") && !line.startsWith("import type "));
+
+  assert.deepEqual(runtimeImports, []);
+  assert.equal(/^export\s/m.test(bridgeSource), false);
+});
+
+test("OneTalk content bridge does not collect business data from the page DOM", () => {
+  const bridgeSource = fs.readFileSync(path.resolve("src/content/onetalk-page-bridge.ts"), "utf8");
+
+  assert.equal(bridgeSource.includes("querySelectorAll"), false);
+  assert.equal(bridgeSource.includes("innerText"), false);
+  assert.equal(bridgeSource.includes("textContent"), false);
+  assert.equal(bridgeSource.includes("getBoundingClientRect"), false);
+  assert.equal(bridgeSource.includes("MutationObserver"), false);
+  assert.equal(bridgeSource.includes("tradebridgeOnetalkPageSnapshot"), false);
+  assert.equal(bridgeSource.includes("onetalk-page-snapshot"), false);
 });

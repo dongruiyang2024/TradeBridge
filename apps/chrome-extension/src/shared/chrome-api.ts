@@ -54,6 +54,10 @@ export interface ChromeTabsApi {
   sendMessage(tabId: number, message: unknown): Promise<unknown>;
 }
 
+export interface ChromeScriptingApi {
+  executeScript(injection: { target: { tabId: number }; files: string[] }): Promise<unknown[]>;
+}
+
 export interface ChromeApi {
   runtime: ChromeRuntimeApi;
   storage: {
@@ -62,6 +66,7 @@ export interface ChromeApi {
   alarms: ChromeAlarmsApi;
   cookies?: ChromeCookiesApi;
   tabs?: ChromeTabsApi;
+  scripting?: ChromeScriptingApi;
 }
 
 export function getChrome(): ChromeApi {

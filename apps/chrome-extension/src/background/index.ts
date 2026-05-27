@@ -1,3 +1,7 @@
+import {
+  contactProfileRequestsFromConversations,
+  requestOneTalkCustomerProfiles
+} from "./onetalk-customer-profile-client.js";
 import { BrowserOnetalkLwpClient } from "./onetalk-lwp-client.js";
 import { requestOneTalkImToken } from "./onetalk-token-client.js";
 import { runOutboundDelivery } from "./outbound-orchestrator.js";
@@ -50,6 +54,11 @@ async function runDefaultSync() {
           chromeApi,
           appKey: "12574478",
           deviceId: config?.deviceId || "chrome-extension"
+        }),
+      customerProfileProvider: async (conversations) =>
+        requestOneTalkCustomerProfiles({
+          chromeApi,
+          contacts: contactProfileRequestsFromConversations(conversations)
         })
     }),
     uploadSyncBatch
