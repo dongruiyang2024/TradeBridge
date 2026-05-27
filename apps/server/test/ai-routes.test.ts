@@ -17,12 +17,13 @@ async function createSeededApp(aiProvider = createFakeAiProvider(), aiJobQueue?:
     passwordHash: await hashPassword("secret"),
     roles: ["admin"]
   });
-  const app = await createServer({
-    store,
-    deviceTokens: ["device-token"],
-    aiProvider,
-    aiJobQueue
+  await store.registerCollectorDevice({
+    sellerAccountExternalId: "seller-1",
+    externalDeviceId: "device-1",
+    deviceName: "Test Device",
+    token: "device-token"
   });
+  const app = await createServer({ store, aiProvider, aiJobQueue });
 
   await app.inject({
     method: "POST",

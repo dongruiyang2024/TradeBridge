@@ -3,8 +3,18 @@ import { test } from "node:test";
 import { InMemorySyncStore } from "@wangwang/database";
 import { createServer } from "../src/server.js";
 
+async function createCollectorToken(store: InMemorySyncStore, externalDeviceId = "device-1"): Promise<string> {
+  const registered = await store.registerCollectorDevice({
+    sellerAccountExternalId: "seller-1",
+    externalDeviceId,
+    deviceName: "Test Device",
+    token: "device-token"
+  });
+  return registered.token;
+}
+
 test("POST /collector/v1/sync-batches requires a registered device token", async () => {
-  const app = await createServer({ store: new InMemorySyncStore(), deviceTokens: ["device-token"] });
+  const app = await createServer({ store: new InMemorySyncStore() });
   const response = await app.inject({ method: "POST", url: "/collector/v1/sync-batches", payload: {} });
 
   assert.equal(response.statusCode, 401);
@@ -13,11 +23,12 @@ test("POST /collector/v1/sync-batches requires a registered device token", async
 
 test("POST /collector/v1/sync-batches accepts a valid batch", async () => {
   const store = new InMemorySyncStore();
-  const app = await createServer({ store, deviceTokens: ["device-token"] });
+  const token = await createCollectorToken(store);
+  const app = await createServer({ store });
   const response = await app.inject({
     method: "POST",
     url: "/collector/v1/sync-batches",
-    headers: { authorization: "Bearer device-token" },
+    headers: { authorization: `Bearer ${token}` },
     payload: {
       sellerAccount: { externalAccountId: "seller-1" },
       device: { deviceId: "device-1" },
@@ -45,7 +56,8 @@ test("POST /collector/v1/sync-batches accepts a valid batch", async () => {
 
 test("POST /collector/v1/sync-batches rejects invalid batch shapes before writing", async () => {
   const store = new InMemorySyncStore();
-  const app = await createServer({ store, deviceTokens: ["device-token"] });
+  const token = await createCollectorToken(store);
+  const app = await createServer({ store });
   const invalidPayloads = [
     { sellerAccount: {}, device: { deviceId: "device-1" } },
     { sellerAccount: { externalAccountId: "seller-1" }, device: {} },
@@ -61,7 +73,7 @@ test("POST /collector/v1/sync-batches rejects invalid batch shapes before writin
     const response = await app.inject({
       method: "POST",
       url: "/collector/v1/sync-batches",
-      headers: { authorization: "Bearer device-token" },
+      headers: { authorization: `Bearer ${token}` },
       payload
     });
 
@@ -74,7 +86,8 @@ test("POST /collector/v1/sync-batches rejects invalid batch shapes before writin
 
 test("POST /collector/v1/sync-batches returns idempotent counts for duplicate messages", async () => {
   const store = new InMemorySyncStore();
-  const app = await createServer({ store, deviceTokens: ["device-token"] });
+  const token = await createCollectorToken(store);
+  const app = await createServer({ store });
   const payload = {
     sellerAccount: { externalAccountId: "seller-1" },
     device: { deviceId: "device-1" },
@@ -93,13 +106,13 @@ test("POST /collector/v1/sync-batches returns idempotent counts for duplicate me
   await app.inject({
     method: "POST",
     url: "/collector/v1/sync-batches",
-    headers: { authorization: "Bearer device-token" },
+    headers: { authorization: `Bearer ${token}` },
     payload
   });
   const duplicate = await app.inject({
     method: "POST",
     url: "/collector/v1/sync-batches",
-    headers: { authorization: "Bearer device-token" },
+    headers: { authorization: `Bearer ${token}` },
     payload
   });
 
@@ -110,7 +123,7 @@ test("POST /collector/v1/sync-batches returns idempotent counts for duplicate me
 });
 
 test("GET /health returns internal server status", async () => {
-  const app = await createServer({ store: new InMemorySyncStore(), deviceTokens: [] });
+  const app = await createServer({ store: new InMemorySyncStore() });
   const response = await app.inject({ method: "GET", url: "/health" });
 
   assert.equal(response.statusCode, 200);

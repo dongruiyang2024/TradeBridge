@@ -32,10 +32,13 @@ test("internal trial flow uploads collector data and exercises the Web customer 
     passwordHash: await hashPassword("secret"),
     roles: ["admin"]
   });
-  const app = await createServer({
-    store,
-    deviceTokens: [COLLECTOR_TOKEN]
+  await store.registerCollectorDevice({
+    sellerAccountExternalId: SELLER_ACCOUNT_ID,
+    externalDeviceId: "trial-device",
+    deviceName: "Trial Mac",
+    token: COLLECTOR_TOKEN
   });
+  const app = await createServer({ store });
 
   await app.ready();
   const loginResponse = await app.inject({

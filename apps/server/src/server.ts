@@ -58,7 +58,6 @@ import { hashPassword, verifyPassword } from "./auth.js";
 
 export interface CreateServerOptions {
   store?: SyncStore;
-  deviceTokens?: string[];
   aiProvider?: AiProvider;
   aiJobQueue?: AiJobQueue;
   logger?: boolean;
@@ -66,7 +65,6 @@ export interface CreateServerOptions {
 
 export interface CreateServerFromEnvOptions {
   env?: Record<string, string | undefined>;
-  deviceTokens?: string[];
   logger?: boolean;
   sqlClientFactory?: (databaseUrl: string) => Promise<SqlClient> | SqlClient;
   aiJobQueueFactory?: (env: Record<string, string | undefined>) => Promise<AiJobQueue | undefined> | AiJobQueue | undefined;
@@ -110,7 +108,6 @@ export interface SyncStore {
 
 export async function createServer(options: CreateServerOptions = {}): Promise<FastifyInstance> {
   const store = options.store || new InMemorySyncStore();
-  const deviceTokens = new Set(options.deviceTokens || envDeviceTokens());
   const aiProvider = options.aiProvider || createDeterministicAiProvider();
   const aiJobQueue = options.aiJobQueue || createSyncAiJobQueue();
   const internalAccessRoles: InternalRole[] = ["admin", "supervisor", "sales"];
@@ -126,8 +123,52 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     time: new Date().toISOString()
   }));
 
+  app.post("/collector/v1/auth/login", async (request, reply) => {
+    const email = bodyStringField(request.body, "email");
+    const password = bodyStringField(request.body, "password");
+    const sellerAccountExternalId = bodyStringField(request.body, "sellerAccountExternalId");
+    const deviceExternalId = bodyStringField(request.body, "deviceExternalId");
+    const deviceName = bodyStringField(request.body, "deviceName");
+    if (!email || !password || !sellerAccountExternalId || !deviceExternalId) {
+      return reply.code(400).send({ ok: false, error: "invalid_collector_login_request" });
+    }
+
+    const credentials = await store.getInternalUserCredentials({ email });
+    const validPassword = credentials ? await verifyPassword(password, credentials.passwordHash) : false;
+    if (!credentials || credentials.status !== "active" || !validPassword) {
+      await appendLoginFailedAuditLog(store, email);
+      return reply.code(401).send({ ok: false, error: "invalid_credentials" });
+    }
+    if (!credentials.roles.some((role) => adminRoles.includes(role))) {
+      return reply.code(403).send({ ok: false, error: "forbidden" });
+    }
+
+    const registered = await store.registerCollectorDevice({
+      sellerAccountExternalId,
+      externalDeviceId: deviceExternalId,
+      deviceName: deviceName || undefined
+    });
+    await store.appendAuditLog({
+      actorUserId: credentials.id,
+      action: "collector_device.activated",
+      targetType: "collector_device",
+      targetId: registered.id,
+      metadata: {
+        sellerAccountExternalId: registered.sellerAccountExternalId,
+        externalDeviceId: registered.externalDeviceId,
+        deviceName: registered.deviceName
+      }
+    });
+
+    return {
+      ok: true,
+      token: registered.token,
+      device: publicCollectorDevice(registered)
+    };
+  });
+
   app.post("/collector/v1/sync-batches", async (request, reply) => {
-    if (!(await isCollectorAuthorized(request.headers.authorization || "", store, deviceTokens))) {
+    if (!(await isCollectorAuthorized(request.headers.authorization || "", store))) {
       return reply.code(401).send({ ok: false, error: "unauthorized" });
     }
 
@@ -365,6 +406,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
 
     const registered = await store.registerCollectorDevice({
       sellerAccountExternalId: bodyStringField(request.body, "sellerAccountExternalId") || undefined,
+      externalDeviceId: bodyStringField(request.body, "deviceExternalId") || undefined,
       deviceName: bodyStringField(request.body, "deviceName") || undefined
     });
     await store.appendAuditLog({
@@ -374,6 +416,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       targetId: registered.id,
       metadata: {
         sellerAccountExternalId: registered.sellerAccountExternalId,
+        externalDeviceId: registered.externalDeviceId,
         deviceName: registered.deviceName
       }
     });
@@ -790,7 +833,6 @@ export async function createServerFromEnv(options: CreateServerFromEnvOptions = 
 
   return createServer({
     store,
-    deviceTokens: options.deviceTokens || envDeviceTokens(env),
     aiJobQueue,
     logger: options.logger
   });
@@ -814,21 +856,7 @@ async function createPostgresStore(
   return new PostgresSyncStore(client);
 }
 
-function envDeviceTokens(env: Record<string, string | undefined> = process.env): string[] {
-  return (env.WANGWANG_DEVICE_TOKENS || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function isBearerAuthorized(authorization: string, tokens: Set<string>): boolean {
-  const token = bearerToken(authorization);
-  return Boolean(token && tokens.has(token));
-}
-
-async function isCollectorAuthorized(authorization: string, store: SyncStore, fallbackTokens: Set<string>): Promise<boolean> {
-  if (isBearerAuthorized(authorization, fallbackTokens)) return true;
-
+async function isCollectorAuthorized(authorization: string, store: SyncStore): Promise<boolean> {
   const token = bearerToken(authorization);
   if (!token) return false;
 
@@ -921,6 +949,7 @@ function publicUserFromSession(session: InternalSession): PublicInternalUser {
 function publicCollectorDevice(device: CollectorDevice | RegisteredCollectorDevice): CollectorDevice {
   return {
     id: device.id,
+    externalDeviceId: device.externalDeviceId,
     sellerAccountExternalId: device.sellerAccountExternalId,
     deviceName: device.deviceName,
     status: device.status,

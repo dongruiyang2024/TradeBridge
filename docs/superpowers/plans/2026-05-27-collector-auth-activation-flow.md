@@ -148,7 +148,7 @@ Content-Type: application/json
 - 测试：`packages/database/test/sync-store.test.ts`
 - 测试：`packages/database/test/postgres-sync-store.test.ts`
 
-- [ ] **步骤 1：编写失败的内存存储测试**
+- [x] **步骤 1：编写失败的内存存储测试**
 
 在 `packages/database/test/sync-store.test.ts` 增加测试：
 
@@ -171,7 +171,7 @@ test("collector devices separate external device id from collector token", async
 });
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：
 
@@ -181,7 +181,7 @@ node --import tsx --test packages/database/test/sync-store.test.ts
 
 预期：FAIL，TypeScript 提示 `externalDeviceId` 不存在或断言失败。
 
-- [ ] **步骤 3：更新类型定义**
+- [x] **步骤 3：更新类型定义**
 
 在 `packages/database/src/sync-types.ts` 的 `CollectorDevice` 和 `RegisterCollectorDeviceInput` 增加字段：
 
@@ -206,7 +206,7 @@ export interface RegisterCollectorDeviceInput {
 }
 ```
 
-- [ ] **步骤 4：更新内存存储**
+- [x] **步骤 4：更新内存存储**
 
 在 `packages/database/src/sync-store.ts` 的 `registerCollectorDevice` 中保存 `externalDeviceId`，并让 `authenticateCollectorDevice` 返回公开设备信息：
 
@@ -223,7 +223,7 @@ const device: CollectorDevice & { tokenHash: string } = {
 };
 ```
 
-- [ ] **步骤 5：更新 Postgres 初始 schema**
+- [x] **步骤 5：更新 Postgres 初始 schema**
 
 在 `packages/database/migrations/001_internal_sync_schema.sql` 的 `collector_device` 表增加设备外部 ID：
 
@@ -235,13 +235,13 @@ UNIQUE (device_token_hash)
 
 保持 `device_token_hash` 只表示 collector token 的 hash。
 
-- [ ] **步骤 6：更新 Postgres 存储**
+- [x] **步骤 6：更新 Postgres 存储**
 
 在 `packages/database/src/postgres-sync-store.ts` 的 `registerCollectorDevice` 中写入 `external_device_id`，并在 `listCollectorDevices`、`authenticateCollectorDevice`、`mapCollectorDevice` 中读出 `externalDeviceId`。
 
 `acceptSyncBatch` 内部的 `upsertCollectorDevice` 改为优先按 `batch.device.deviceId` 匹配 `external_device_id`，不能再把 `batch.device.deviceId` 写入 `device_token_hash`。
 
-- [ ] **步骤 7：编写 Postgres 查询测试**
+- [x] **步骤 7：编写 Postgres 查询测试**
 
 在 `packages/database/test/postgres-sync-store.test.ts` 增加断言：
 
@@ -264,7 +264,7 @@ test("PostgresSyncStore uses external device id separately from collector token 
 });
 ```
 
-- [ ] **步骤 8：运行数据库测试验证通过**
+- [x] **步骤 8：运行数据库测试验证通过**
 
 运行：
 
@@ -274,7 +274,7 @@ npm test -w @wangwang/database
 
 预期：PASS。
 
-- [ ] **步骤 9：Commit**
+- [x] **步骤 9：Commit**
 
 ```bash
 git add packages/database/migrations/001_internal_sync_schema.sql packages/database/src/sync-types.ts packages/database/src/sync-store.ts packages/database/src/postgres-sync-store.ts packages/database/test/sync-store.test.ts packages/database/test/postgres-sync-store.test.ts
@@ -294,7 +294,7 @@ git commit -m "refactor(database): 拆分采集设备身份和密钥"
 - 测试：`apps/server/test/ai-routes.test.ts`
 - 测试：`apps/server/test/server-bootstrap.test.ts`
 
-- [ ] **步骤 1：编写失败的服务端测试**
+- [x] **步骤 1：编写失败的服务端测试**
 
 在 `apps/server/test/auth-routes.test.ts` 增加测试：
 
@@ -321,7 +321,7 @@ test("POST /collector/v1/auth/login activates a collector device for admin users
 });
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：
 
@@ -333,7 +333,7 @@ node --import tsx --test apps/server/test/auth-routes.test.ts
 
 预期：FAIL，返回 404。
 
-- [ ] **步骤 3：实现请求字段读取**
+- [x] **步骤 3：实现请求字段读取**
 
 在 `apps/server/src/server.ts` 增加请求字段：
 
@@ -351,7 +351,7 @@ const deviceName = bodyStringField(request.body, "deviceName");
 return reply.code(400).send({ ok: false, error: "invalid_collector_login_request" });
 ```
 
-- [ ] **步骤 4：实现凭据和角色校验**
+- [x] **步骤 4：实现凭据和角色校验**
 
 复用 `getInternalUserCredentials`、`verifyPassword` 和 `requireRole` 的规则。只允许 `admin` 激活采集设备：
 
@@ -367,7 +367,7 @@ if (!credentials.roles.some((role) => adminRoles.includes(role))) {
 }
 ```
 
-- [ ] **步骤 5：创建设备并返回 collector token**
+- [x] **步骤 5：创建设备并返回 collector token**
 
 调用 `store.registerCollectorDevice`：
 
@@ -385,7 +385,7 @@ return {
 };
 ```
 
-- [ ] **步骤 6：补充错误路径测试**
+- [x] **步骤 6：补充错误路径测试**
 
 在 `apps/server/test/auth-routes.test.ts` 增加两条测试：
 
@@ -432,7 +432,7 @@ test("POST /collector/v1/auth/login rejects non-admin users", async () => {
 });
 ```
 
-- [ ] **步骤 7：移除静态采集 token 认证分支**
+- [x] **步骤 7：移除静态采集 token 认证分支**
 
 在 `apps/server/src/server.ts` 中删除 `CreateServerOptions` 和 `CreateServerFromEnvOptions` 上的 `deviceTokens` 字段，删除 `envDeviceTokens` 和 `isBearerAuthorized`。`/collector/v1/sync-batches` 改为只通过数据库中的 collector token 认证：
 
@@ -476,7 +476,7 @@ async function isCollectorAuthorized(authorization: string, store: SyncStore): P
 }
 ```
 
-- [ ] **步骤 8：更新服务端测试移除静态 token 依赖**
+- [x] **步骤 8：更新服务端测试移除静态 token 依赖**
 
 在 `apps/server/test/sync-batches.test.ts` 中新增测试辅助函数，所有成功上传都先注册设备：
 
@@ -540,7 +540,7 @@ const response = await app.inject({ method: "GET", url: "/health" });
 assert.equal(response.statusCode, 200);
 ```
 
-- [ ] **步骤 9：运行服务端测试验证通过**
+- [x] **步骤 9：运行服务端测试验证通过**
 
 运行：
 
@@ -550,7 +550,7 @@ npm test -w @wangwang/server
 
 预期：PASS。
 
-- [ ] **步骤 10：Commit**
+- [x] **步骤 10：Commit**
 
 ```bash
 git add apps/server/src/server.ts apps/server/test/auth-routes.test.ts apps/server/test/collector-device-routes.test.ts apps/server/test/sync-batches.test.ts apps/server/test/customer-collaboration-routes.test.ts apps/server/test/customer-assignment-routes.test.ts apps/server/test/internal-query-routes.test.ts apps/server/test/ai-routes.test.ts apps/server/test/server-bootstrap.test.ts
