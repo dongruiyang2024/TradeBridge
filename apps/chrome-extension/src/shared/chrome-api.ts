@@ -31,12 +31,24 @@ export interface ChromeAlarmsApi {
   };
 }
 
+export interface ChromeCookie {
+  name: string;
+  value: string;
+  domain?: string;
+  path?: string;
+}
+
+export interface ChromeCookiesApi {
+  getAll(details: { domain?: string; url?: string; name?: string }): Promise<ChromeCookie[]>;
+}
+
 export interface ChromeApi {
   runtime: ChromeRuntimeApi;
   storage: {
     local: ChromeStorageArea;
   };
   alarms: ChromeAlarmsApi;
+  cookies?: ChromeCookiesApi;
 }
 
 export function getChrome(): ChromeApi {

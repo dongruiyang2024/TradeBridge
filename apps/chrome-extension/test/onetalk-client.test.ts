@@ -5,9 +5,11 @@ import { after, test } from "node:test";
 import { BrowserOnetalkClient } from "../src/background/onetalk-client.js";
 
 const originalFetch = globalThis.fetch;
+const originalChrome = (globalThis as unknown as { chrome?: unknown }).chrome;
 
 after(() => {
   globalThis.fetch = originalFetch;
+  (globalThis as unknown as { chrome?: unknown }).chrome = originalChrome;
 });
 
 test("fetchWeblite parses cached conversations and sends credentials include", async () => {
@@ -59,6 +61,55 @@ test("getChatMessages posts payload and parses message list", async () => {
   assert.equal(result.messages.length, 1);
   assert.equal(requests[0].method, "POST");
   assert.equal(requests[0].credentials, "include");
+});
+
+test("getChatMessages appends csrf query from Chrome cookies", async () => {
+  const requests: Request[] = [];
+  (globalThis as unknown as { chrome: unknown }).chrome = {
+    cookies: {
+      getAll: async () => [
+        { name: "xman_us_t", value: "ctoken%3Dcsrf-token" },
+        { name: "_tb_token_", value: "tb-token" }
+      ]
+    }
+  };
+  globalThis.fetch = async (input, init) => {
+    requests.push(new Request(input, init));
+    return Response.json({ code: 200, data: { list: [] } });
+  };
+
+  const client = new BrowserOnetalkClient();
+  await client.getChatMessages({
+    conversation: { cid: "conv-1", contactAccountId: "buyer-1" },
+    bootstrap: { aliId: "self-ali" },
+    before: null,
+    pageSize: 50
+  });
+
+  const url = new URL(requests[0].url);
+  assert.equal(url.searchParams.get("ctoken"), "csrf-token");
+  assert.equal(url.searchParams.get("_tb_token_"), "tb-token");
+});
+
+test("getChatMessages parses alternate message list paths", async () => {
+  globalThis.fetch = async () =>
+    Response.json({
+      code: 200,
+      data: {
+        messages: [{ messageId: "m-alt", content: "hello from alternate path", sendTime: 1779706200000 }]
+      }
+    });
+
+  const client = new BrowserOnetalkClient();
+  const result = await client.getChatMessages({
+    conversation: { cid: "conv-1", contactAccountId: "buyer-1" },
+    bootstrap: { aliId: "self-ali" },
+    before: null,
+    pageSize: 50
+  });
+
+  assert.equal(result.messages.length, 1);
+  assert.equal(result.messages[0].messageId, "m-alt");
 });
 
 test("fetchWeblite maps login pages to onetalk_login_required", async () => {

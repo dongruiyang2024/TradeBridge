@@ -6,6 +6,7 @@ import {
   type ChatMessageResponse,
   type WebliteData
 } from "@wangwang/onetalk-adapter/browser";
+import { getChrome, type ChromeCookie } from "../shared/chrome-api.js";
 
 const WEBLITE_URL = "https://onetalk.alibaba.com/message/weblitePWA.htm";
 const MESSAGE_URL = "https://onetalk.alibaba.com/message/getChatMessageList.htm";
@@ -32,8 +33,10 @@ export class BrowserOnetalkClient {
   }
 
   async getChatMessages(request: ChatMessageRequest): Promise<ChatMessageResponse> {
+    const query = await csrfQueryFromChromeCookies();
+    const endpoint = MESSAGE_URL + (query ? `?${query}` : "");
     const payload = buildPayload(request.conversation, request.bootstrap, request.before, request.pageSize);
-    const response = await fetch(MESSAGE_URL, {
+    const response = await fetch(endpoint, {
       method: "POST",
       credentials: "include",
       headers: {
@@ -53,7 +56,7 @@ export class BrowserOnetalkClient {
     const raw = safeJson(text);
     const code = isRecord(raw) ? (raw.code as string | number | null) ?? null : null;
     const data = isRecord(raw) && isRecord(raw.data) ? raw.data : {};
-    const list = Array.isArray(data.list) ? data.list.filter(isRecord) : [];
+    const list = messageListFromRaw(raw);
     return {
       status: response.status,
       contentType: response.headers.get("content-type"),
@@ -62,6 +65,62 @@ export class BrowserOnetalkClient {
       messages: list
     };
   }
+}
+
+async function csrfQueryFromChromeCookies(): Promise<string> {
+  const cookies = await readAlibabaCookies();
+  const cookieMap = Object.fromEntries(cookies.map((cookie) => [cookie.name, cookie.value]));
+  const params = new URLSearchParams();
+  const ctoken = ctokenFromXmanUsT(cookieMap.xman_us_t || "");
+  const tbToken = cookieMap._tb_token_ || "";
+  if (ctoken) params.set("ctoken", ctoken);
+  if (tbToken) params.set("_tb_token_", tbToken);
+  return params.toString();
+}
+
+async function readAlibabaCookies(): Promise<ChromeCookie[]> {
+  try {
+    return (await getChrome().cookies?.getAll({ domain: "alibaba.com" })) || [];
+  } catch {
+    return [];
+  }
+}
+
+function ctokenFromXmanUsT(raw: string): string {
+  let decoded = raw;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    decoded = raw;
+  }
+  const params = new URLSearchParams(decoded);
+  return params.get("ctoken") || params.get(" ctoken") || "";
+}
+
+function messageListFromRaw(raw: unknown): Record<string, unknown>[] {
+  for (const path of [
+    ["data", "list"],
+    ["data", "messages"],
+    ["data", "messageList"],
+    ["data", "data", "list"],
+    ["result", "list"],
+    ["result", "messages"],
+    ["list"],
+    ["messages"]
+  ]) {
+    const value = valueAtPath(raw, path);
+    if (Array.isArray(value)) return value.filter(isRecord);
+  }
+  return [];
+}
+
+function valueAtPath(source: unknown, path: string[]): unknown {
+  let current = source;
+  for (const key of path) {
+    if (!isRecord(current)) return undefined;
+    current = current[key];
+  }
+  return current;
 }
 
 function safeJson(text: string): unknown {

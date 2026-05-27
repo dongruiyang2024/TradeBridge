@@ -34,7 +34,7 @@
 
 ## 任务 1：消息接口补 CSRF 并兼容响应结构
 
-- [ ] **步骤 1：编写失败测试**
+- [x] **步骤 1：编写失败测试**
 
 在 `apps/chrome-extension/test/onetalk-client.test.ts` 增加两个测试：
 
@@ -50,7 +50,7 @@ test("getChatMessages parses alternate message list paths", async () => {
 });
 ```
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 ```bash
 npm test -w @wangwang/chrome-extension
@@ -58,7 +58,7 @@ npm test -w @wangwang/chrome-extension
 
 预期：新增测试失败，原因是 URL 没有 CSRF 查询参数，且只读取 `data.list`。
 
-- [ ] **步骤 3：实现最少代码**
+- [x] **步骤 3：实现最少代码**
 
 在 `BrowserOnetalkClient` 中：
 
@@ -79,13 +79,13 @@ list
 messages
 ```
 
-- [ ] **步骤 4：运行测试确认通过**
+- [x] **步骤 4：运行测试确认通过**
 
 ```bash
 npm test -w @wangwang/chrome-extension
 ```
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add apps/chrome-extension/src/background/onetalk-client.ts apps/chrome-extension/src/shared/chrome-api.ts apps/chrome-extension/test/onetalk-client.test.ts
@@ -194,4 +194,3 @@ npm run build -w @wangwang/chrome-extension
 git add docs/superpowers/plans/2026-05-27-onetalk-fuller-sync.md
 git commit -m "docs: 更新 OneTalk 增强同步计划"
 ```
-
