@@ -6,6 +6,7 @@ export type ExtensionMessage =
   | { type: "onetalk-login-required"; url: string }
   | { type: "onetalk-page-snapshot"; url: string; snapshot: WeblitePageSnapshot }
   | { type: "send-onetalk-message"; message: OutboundMessage }
+  | { type: "get-onetalk-im-token"; appKey: string; deviceId: string }
   | { type: "sync-now" }
   | { type: "open-options" }
   | { type: "read-status" };

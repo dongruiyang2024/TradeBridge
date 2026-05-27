@@ -8,6 +8,11 @@ interface PageBridgeWindow extends Window {
       };
     };
   };
+  lib?: {
+    mtop?: {
+      request?: (options: unknown, callback?: (response: unknown) => void) => Promise<unknown> | unknown;
+    };
+  };
   __tradeBridgeOneTalkPageBridgeInstalled?: boolean;
 }
 
@@ -23,9 +28,14 @@ if (!pageWindow.__tradeBridgeOneTalkPageBridgeInstalled) {
   pageWindow.__tradeBridgeOneTalkPageBridgeInstalled = true;
   window.addEventListener("message", (event) => {
     if (event.source !== window || !isRecord(event.data)) return;
-    if (event.data.source !== "tradebridge-extension" || event.data.type !== "send-onetalk-message") return;
-
-    void handleSendRequest(event.data);
+    if (event.data.source !== "tradebridge-extension") return;
+    if (event.data.type === "send-onetalk-message") {
+      void handleSendRequest(event.data);
+      return;
+    }
+    if (event.data.type === "get-onetalk-im-token") {
+      void handleTokenRequest(event.data);
+    }
   });
 }
 
@@ -43,6 +53,100 @@ async function handleSendRequest(data: Record<string, unknown>): Promise<void> {
   } catch (error) {
     publishResult(requestId, false, undefined, error instanceof Error ? error.message : "onetalk_send_failed");
   }
+}
+
+async function handleTokenRequest(data: Record<string, unknown>): Promise<void> {
+  const requestId = typeof data.requestId === "string" ? data.requestId : "";
+  const appKey = typeof data.appKey === "string" ? data.appKey : "12574478";
+  const deviceId = typeof data.deviceId === "string" ? data.deviceId : "";
+  if (!requestId || !deviceId) {
+    publishTokenResult(requestId, false, undefined, undefined, undefined, "invalid_token_request");
+    return;
+  }
+
+  try {
+    const result = await requestMtopToken(appKey, deviceId);
+    const object = tokenObjectFromMtopResult(result);
+    if (!object?.accessToken) throw new Error("onetalk_token_response_invalid");
+    publishTokenResult(
+      requestId,
+      true,
+      object.accessToken,
+      object.refreshToken,
+      object.accessTokenExpiredMillSeconds
+    );
+  } catch (error) {
+    publishTokenResult(
+      requestId,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      error instanceof Error ? error.message : "onetalk_token_fetch_failed"
+    );
+  }
+}
+
+function requestMtopToken(appKey: string, deviceId: string): Promise<unknown> {
+  const request = pageWindow.lib?.mtop?.request;
+  if (!request) return Promise.reject(new Error("onetalk_mtop_unavailable"));
+  const options = {
+    api: "mtop.alibaba.icbu.im.login.token.get",
+    v: "1.0",
+    appKey,
+    dataType: "json",
+    type: "GET",
+    data: { appKey, deviceId }
+  };
+  return new Promise((resolve, reject) => {
+    try {
+      const maybePromise = request(options, resolve);
+      if (maybePromise && typeof (maybePromise as Promise<unknown>).then === "function") {
+        (maybePromise as Promise<unknown>).then(resolve, reject);
+      }
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function tokenObjectFromMtopResult(value: unknown): {
+  accessToken?: string;
+  refreshToken?: string;
+  accessTokenExpiredMillSeconds?: number;
+} | null {
+  const data = isRecord(value) && isRecord(value.data) ? value.data : null;
+  const object = data && isRecord(data.object) ? data.object : null;
+  if (!object) return null;
+  return {
+    accessToken: firstString(object, ["accessToken"]),
+    refreshToken: firstString(object, ["refreshToken"]),
+    accessTokenExpiredMillSeconds:
+      typeof object.accessTokenExpiredMillSeconds === "number" ? object.accessTokenExpiredMillSeconds : undefined
+  };
+}
+
+function publishTokenResult(
+  requestId: string,
+  ok: boolean,
+  accessToken?: string,
+  refreshToken?: string,
+  expiresInMs?: number,
+  error?: string
+): void {
+  window.postMessage(
+    {
+      source: "tradebridge-onetalk-page",
+      type: "get-onetalk-im-token-result",
+      requestId,
+      ok,
+      accessToken,
+      refreshToken,
+      expiresInMs,
+      error
+    },
+    window.location.origin
+  );
 }
 
 async function sendTextMessage(message: OutboundMessage): Promise<unknown> {
