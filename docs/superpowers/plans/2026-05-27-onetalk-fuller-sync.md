@@ -177,16 +177,17 @@ git commit -m "feat(onetalk-adapter): 增强客户和消息字段映射"
 
 ## 任务 4：最终验证
 
-- [ ] **步骤 1：运行定向验证**
+- [x] **步骤 1：运行定向验证**
 
 ```bash
 npm test -w @wangwang/onetalk-adapter
 npm test -w @wangwang/chrome-extension
 npm run typecheck
 npm run build -w @wangwang/chrome-extension
+npm run test:e2e
 ```
 
-- [ ] **步骤 2：Commit 计划状态**
+- [x] **步骤 2：Commit 计划状态**
 
 如计划复选框有更新：
 
