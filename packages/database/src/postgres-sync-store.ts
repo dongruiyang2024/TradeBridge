@@ -12,6 +12,7 @@ import type {
   CreateCustomerNoteInput,
   CreateFollowUpTaskInput,
   CreateInternalUserInput,
+  CreateOutboundMessageInput,
   CreateReplySuggestionInput,
   CreateUserInvitationInput,
   CustomerScope,
@@ -22,7 +23,11 @@ import type {
   InternalUser,
   InternalUserCredentials,
   IssueInternalSessionInput,
+  ListOutboundMessagesInput,
+  ListPendingOutboundMessagesInput,
+  MarkOutboundMessageDeliveredInput,
   MessageDirection,
+  OutboundMessageStatus,
   RegisteredCollectorDevice,
   RegisterCollectorDeviceInput,
   RevokeCollectorDeviceInput,
@@ -36,6 +41,7 @@ import type {
   StoredCustomerTag,
   StoredFollowUpTask,
   StoredMessage,
+  StoredOutboundMessage,
   StoredSellerAccount,
   StoredReplySuggestion,
   StoredUserInvitation,
@@ -155,6 +161,23 @@ interface ReplySuggestionRow {
   createdByUserId: string | null;
   createdAt: string | Date;
   updatedAt: string | Date;
+}
+
+interface OutboundMessageRow {
+  id: string;
+  sellerAccountExternalId: string;
+  externalCustomerId: string;
+  externalConversationId: string;
+  content: string;
+  status: OutboundMessageStatus;
+  createdByUserId: string | null;
+  deliveredByDeviceId: string | null;
+  externalMessageId: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: string | Date;
+  updatedAt: string | Date;
+  deliveredAt: string | Date | null;
 }
 
 interface InternalUserRow {
@@ -864,6 +887,172 @@ export class PostgresSyncStore {
       [scope.sellerAccountExternalId, scope.externalConversationId]
     );
     return result.rows.map(mapReplySuggestion);
+  }
+
+  async createOutboundMessage(input: CreateOutboundMessageInput): Promise<StoredOutboundMessage> {
+    const result = await this.client.query<OutboundMessageRow>(
+      `
+      /* create_outbound_message */
+      WITH scoped_conversation AS (
+        SELECT
+          conv.id AS conversation_id,
+          c.id AS customer_id
+        FROM conversation conv
+        INNER JOIN seller_account s ON s.id = conv.seller_account_id
+        INNER JOIN customer c ON c.id = conv.customer_id
+        WHERE s.external_account_id = $1
+          AND c.external_customer_id = $2
+          AND conv.external_conversation_id = $3
+      )
+      INSERT INTO outbound_message (seller_account_id, customer_id, conversation_id, content, created_by)
+      SELECT s.id, customer_id, conversation_id, $4, $5::uuid
+      FROM scoped_conversation
+      INNER JOIN seller_account s ON s.external_account_id = $1
+      RETURNING
+        id::text AS "id",
+        $1::text AS "sellerAccountExternalId",
+        $2::text AS "externalCustomerId",
+        $3::text AS "externalConversationId",
+        content AS "content",
+        status AS "status",
+        created_by::text AS "createdByUserId",
+        delivered_by_device_id AS "deliveredByDeviceId",
+        external_message_id AS "externalMessageId",
+        error_code AS "errorCode",
+        error_message AS "errorMessage",
+        created_at AS "createdAt",
+        updated_at AS "updatedAt",
+        delivered_at AS "deliveredAt"
+      `,
+      [
+        input.sellerAccountExternalId,
+        input.externalCustomerId,
+        input.externalConversationId,
+        input.content,
+        input.createdByUserId || null
+      ]
+    );
+    return mapOutboundMessage(requiredRow(result.rows[0], "outbound_conversation"));
+  }
+
+  async listPendingOutboundMessages(input: ListPendingOutboundMessagesInput): Promise<StoredOutboundMessage[]> {
+    const limit = Math.max(1, Math.min(input.limit || 20, 100));
+    const result = await this.client.query<OutboundMessageRow>(
+      `
+      /* list_pending_outbound_messages */
+      SELECT
+        om.id::text AS "id",
+        s.external_account_id AS "sellerAccountExternalId",
+        c.external_customer_id AS "externalCustomerId",
+        conv.external_conversation_id AS "externalConversationId",
+        om.content AS "content",
+        om.status AS "status",
+        om.created_by::text AS "createdByUserId",
+        om.delivered_by_device_id AS "deliveredByDeviceId",
+        om.external_message_id AS "externalMessageId",
+        om.error_code AS "errorCode",
+        om.error_message AS "errorMessage",
+        om.created_at AS "createdAt",
+        om.updated_at AS "updatedAt",
+        om.delivered_at AS "deliveredAt"
+      FROM outbound_message om
+      INNER JOIN seller_account s ON s.id = om.seller_account_id
+      INNER JOIN customer c ON c.id = om.customer_id
+      INNER JOIN conversation conv ON conv.id = om.conversation_id
+      WHERE s.external_account_id = $1
+        AND om.status = 'queued'
+      ORDER BY om.created_at ASC, om.id ASC
+      LIMIT $2
+      `,
+      [input.sellerAccountExternalId, limit]
+    );
+    return result.rows.map(mapOutboundMessage);
+  }
+
+  async listOutboundMessages(input: ListOutboundMessagesInput): Promise<StoredOutboundMessage[]> {
+    const result = await this.client.query<OutboundMessageRow>(
+      `
+      /* list_outbound_messages */
+      SELECT
+        om.id::text AS "id",
+        s.external_account_id AS "sellerAccountExternalId",
+        c.external_customer_id AS "externalCustomerId",
+        conv.external_conversation_id AS "externalConversationId",
+        om.content AS "content",
+        om.status AS "status",
+        om.created_by::text AS "createdByUserId",
+        om.delivered_by_device_id AS "deliveredByDeviceId",
+        om.external_message_id AS "externalMessageId",
+        om.error_code AS "errorCode",
+        om.error_message AS "errorMessage",
+        om.created_at AS "createdAt",
+        om.updated_at AS "updatedAt",
+        om.delivered_at AS "deliveredAt"
+      FROM outbound_message om
+      INNER JOIN seller_account s ON s.id = om.seller_account_id
+      INNER JOIN customer c ON c.id = om.customer_id
+      INNER JOIN conversation conv ON conv.id = om.conversation_id
+      WHERE s.external_account_id = $1
+        AND ($2::text IS NULL OR conv.external_conversation_id = $2)
+      ORDER BY om.created_at ASC, om.id ASC
+      `,
+      [input.sellerAccountExternalId, input.externalConversationId || null]
+    );
+    return result.rows.map(mapOutboundMessage);
+  }
+
+  async markOutboundMessageDelivered(input: MarkOutboundMessageDeliveredInput): Promise<StoredOutboundMessage> {
+    const result = await this.client.query<OutboundMessageRow>(
+      `
+      /* mark_outbound_message_delivered */
+      WITH updated_message AS (
+        UPDATE outbound_message om
+        SET
+          status = $3,
+          external_message_id = COALESCE($4, external_message_id),
+          delivered_by_device_id = COALESCE($5, delivered_by_device_id),
+          delivered_at = COALESCE($6, now()),
+          error_code = $7,
+          error_message = $8,
+          updated_at = now()
+        FROM seller_account s
+        WHERE om.seller_account_id = s.id
+          AND om.id = $1::uuid
+          AND s.external_account_id = $2
+        RETURNING om.*
+      )
+      SELECT
+        om.id::text AS "id",
+        s.external_account_id AS "sellerAccountExternalId",
+        c.external_customer_id AS "externalCustomerId",
+        conv.external_conversation_id AS "externalConversationId",
+        om.content AS "content",
+        om.status AS "status",
+        om.created_by::text AS "createdByUserId",
+        om.delivered_by_device_id AS "deliveredByDeviceId",
+        om.external_message_id AS "externalMessageId",
+        om.error_code AS "errorCode",
+        om.error_message AS "errorMessage",
+        om.created_at AS "createdAt",
+        om.updated_at AS "updatedAt",
+        om.delivered_at AS "deliveredAt"
+      FROM updated_message om
+      INNER JOIN seller_account s ON s.id = om.seller_account_id
+      INNER JOIN customer c ON c.id = om.customer_id
+      INNER JOIN conversation conv ON conv.id = om.conversation_id
+      `,
+      [
+        input.id,
+        input.sellerAccountExternalId,
+        input.status,
+        input.externalMessageId || null,
+        input.deliveredByDeviceId || null,
+        input.deliveredAt || null,
+        input.errorCode || null,
+        input.errorMessage || null
+      ]
+    );
+    return mapOutboundMessage(requiredRow(result.rows[0], "outbound_message"));
   }
 
   async createInternalUser(input: CreateInternalUserInput): Promise<InternalUser> {
@@ -1822,6 +2011,27 @@ function mapReplySuggestion(row: ReplySuggestionRow): StoredReplySuggestion {
     updatedAt: isoString(row.updatedAt) || "",
     ...optionalProps({
       createdByUserId: row.createdByUserId
+    })
+  };
+}
+
+function mapOutboundMessage(row: OutboundMessageRow): StoredOutboundMessage {
+  return {
+    id: row.id,
+    sellerAccountExternalId: row.sellerAccountExternalId,
+    externalCustomerId: row.externalCustomerId,
+    externalConversationId: row.externalConversationId,
+    content: row.content,
+    status: row.status,
+    createdAt: isoString(row.createdAt) || "",
+    updatedAt: isoString(row.updatedAt) || "",
+    ...optionalProps({
+      createdByUserId: row.createdByUserId,
+      deliveredByDeviceId: row.deliveredByDeviceId,
+      externalMessageId: row.externalMessageId,
+      errorCode: row.errorCode,
+      errorMessage: row.errorMessage,
+      deliveredAt: isoString(row.deliveredAt)
     })
   };
 }

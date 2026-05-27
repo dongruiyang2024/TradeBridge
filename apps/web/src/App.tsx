@@ -27,6 +27,7 @@ import {
   addTagToSelectedCustomer,
   createInitialDashboardState,
   createNoteForSelectedCustomer,
+  createOutboundMessageForSelectedConversation,
   createTaskForSelectedCustomer,
   loadCustomerList,
   selectConversation,
@@ -316,6 +317,9 @@ export function App() {
       onAddNote={(body) => void runWorkflow((current) => createNoteForSelectedCustomer(current, apiClient, body))}
       onAddTag={(tagText) => void runWorkflow((current) => addTagToSelectedCustomer(current, apiClient, tagText))}
       onAddTask={(title) => void runWorkflow((current) => createTaskForSelectedCustomer(current, apiClient, title))}
+      onSendMessage={(content) =>
+        void runWorkflow((current) => createOutboundMessageForSelectedConversation(current, apiClient, content))
+      }
     />
   );
 }
@@ -494,6 +498,7 @@ interface DashboardViewProps {
   onAddNote(body: string): void;
   onAddTag(tag: string): void;
   onAddTask(title: string): void;
+  onSendMessage(content: string): void;
 }
 
 export function DashboardView(props: DashboardViewProps) {
@@ -501,6 +506,7 @@ export function DashboardView(props: DashboardViewProps) {
   const [noteDraft, setNoteDraft] = useState("");
   const [tagDraft, setTagDraft] = useState("");
   const [taskDraft, setTaskDraft] = useState("");
+  const [replyDraft, setReplyDraft] = useState("");
   const selectedCustomer = props.state.customers.find(
     (customer) => customer.externalCustomerId === props.state.selectedCustomerId
   );
@@ -602,6 +608,7 @@ export function DashboardView(props: DashboardViewProps) {
             <div className="summary-metrics">
               <Metric label="会话" value={props.state.conversations.length} />
               <Metric label="消息" value={props.state.messages.length} />
+              <Metric label="待发" value={props.state.outboundMessages.filter((item) => item.status === "queued").length} />
               <Metric label="任务" value={props.state.tasks.filter((task) => task.status !== "done").length} />
             </div>
           </header>
@@ -635,8 +642,44 @@ export function DashboardView(props: DashboardViewProps) {
                 </div>
               </article>
             ))}
-            {!props.state.messages.length && <div className="empty-state large">暂无消息</div>}
+            {props.state.outboundMessages.map((message) => (
+              <article className={`timeline-message sent outbound ${message.status}`} key={`outbound-${message.id}`}>
+                <div className="message-bubble">
+                  <p>{message.content}</p>
+                  <time>
+                    {outboundStatusLabel(message.status)} · {formatDateTime(message.deliveredAt || message.createdAt)}
+                  </time>
+                  {message.errorMessage && <small>{message.errorMessage}</small>}
+                </div>
+              </article>
+            ))}
+            {!props.state.messages.length && !props.state.outboundMessages.length && (
+              <div className="empty-state large">暂无消息</div>
+            )}
           </div>
+
+          <form
+            className="reply-composer"
+            onSubmit={(event) => {
+              event.preventDefault();
+              props.onSendMessage(replyDraft);
+              setReplyDraft("");
+            }}
+          >
+            <textarea
+              aria-label="发送消息内容"
+              value={replyDraft}
+              placeholder="输入回复内容"
+              onChange={(event) => setReplyDraft(event.target.value)}
+            />
+            <button
+              type="submit"
+              disabled={props.loading || !props.state.selectedConversationId || !replyDraft.trim()}
+            >
+              <Send size={16} />
+              <span>发送到 OneTalk</span>
+            </button>
+          </form>
         </section>
 
         <aside className="collaboration-pane">
@@ -941,6 +984,12 @@ function customerSubtitle(customer: NonNullable<DashboardState["customers"][numb
 
 function renderNonText(messageType?: string | number): string {
   return `[${messageType ?? "message"}]`;
+}
+
+function outboundStatusLabel(status: string): string {
+  if (status === "sent") return "已发送";
+  if (status === "failed") return "发送失败";
+  return "待发送";
 }
 
 function formatDateTime(value?: string): string {

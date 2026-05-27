@@ -248,6 +248,47 @@ test("AI summaries and reply suggestions are scoped and retrievable", async () =
   );
 });
 
+test("outbound messages are queued and marked delivered by collector devices", async () => {
+  const store = new InMemorySyncStore();
+  await store.acceptSyncBatch({
+    sellerAccount: { externalAccountId: "seller-1" },
+    device: { deviceId: "device-1" },
+    customers: [{ externalCustomerId: "customer-1" }],
+    conversations: [{ externalConversationId: "conv-1", externalCustomerId: "customer-1" }]
+  });
+
+  const queued = await store.createOutboundMessage({
+    sellerAccountExternalId: "seller-1",
+    externalCustomerId: "customer-1",
+    externalConversationId: "conv-1",
+    content: "Thanks, I will send the quotation today.",
+    createdByUserId: "sales-1"
+  });
+
+  assert.equal(queued.status, "queued");
+  assert.equal(queued.content, "Thanks, I will send the quotation today.");
+
+  const pending = await store.listPendingOutboundMessages({
+    sellerAccountExternalId: "seller-1",
+    limit: 10
+  });
+  assert.deepEqual(pending, [queued]);
+
+  const sent = await store.markOutboundMessageDelivered({
+    id: queued.id,
+    sellerAccountExternalId: "seller-1",
+    status: "sent",
+    externalMessageId: "onetalk-msg-1",
+    deliveredByDeviceId: "device-1",
+    deliveredAt: "2026-05-27T07:00:00.000Z"
+  });
+
+  assert.equal(sent.status, "sent");
+  assert.equal(sent.externalMessageId, "onetalk-msg-1");
+  assert.equal(sent.deliveredByDeviceId, "device-1");
+  assert.equal((await store.listPendingOutboundMessages({ sellerAccountExternalId: "seller-1", limit: 10 })).length, 0);
+});
+
 test("internal user invitations can be created, inspected, and accepted once", async () => {
   const store = new InMemorySyncStore();
   const invitation = await store.createUserInvitation({

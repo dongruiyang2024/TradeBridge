@@ -44,7 +44,7 @@ test("fetchWeblite attaches the latest OneTalk page snapshot from extension stor
         get: async () => ({
           tradebridgeOnetalkPageSnapshot: {
             url: "https://onetalk.alibaba.com/message/weblitePWA.htm",
-            savedAt: "2026-05-27T04:39:59.000Z",
+            savedAt: new Date().toISOString(),
             snapshot: {
               capturedAt: "2026-05-27T04:39:59.000Z",
               conversations: [{ displayName: "Peter SHU", country: "CN" }]

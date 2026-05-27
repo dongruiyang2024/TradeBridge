@@ -30,6 +30,25 @@ export interface StoredMessage {
   uniqueKey: string;
 }
 
+export type OutboundMessageStatus = "queued" | "sent" | "failed";
+
+export interface StoredOutboundMessage {
+  id: string;
+  sellerAccountExternalId: string;
+  externalCustomerId: string;
+  externalConversationId: string;
+  content: string;
+  status: OutboundMessageStatus;
+  createdByUserId?: string;
+  deliveredByDeviceId?: string;
+  externalMessageId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+  deliveredAt?: string;
+}
+
 export interface CustomerScope {
   sellerAccountExternalId: string;
   externalCustomerId: string;
@@ -149,6 +168,12 @@ export interface InternalApiClient {
   listCustomers(): Promise<StoredCustomer[]>;
   listConversations(): Promise<StoredConversation[]>;
   listMessages(externalConversationId: string): Promise<StoredMessage[]>;
+  listOutboundMessages(scope: CustomerScope, externalConversationId: string): Promise<StoredOutboundMessage[]>;
+  createOutboundMessage(
+    scope: CustomerScope,
+    externalConversationId: string,
+    input: { content: string }
+  ): Promise<StoredOutboundMessage>;
   getCustomerAssignment(scope: CustomerScope): Promise<StoredCustomerAssignment | null>;
   listCustomerNotes(scope: CustomerScope): Promise<StoredCustomerNote[]>;
   createCustomerNote(scope: CustomerScope, input: { body: string }): Promise<StoredCustomerNote>;
@@ -170,6 +195,7 @@ export interface DashboardState {
   selectedConversationId?: string;
   assignment?: StoredCustomerAssignment | null;
   messages: StoredMessage[];
+  outboundMessages: StoredOutboundMessage[];
   notes: StoredCustomerNote[];
   tags: StoredCustomerTag[];
   tasks: StoredFollowUpTask[];

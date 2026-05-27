@@ -32,6 +32,8 @@ test("internal API client sends bearer-scoped customer workflow requests", async
   await client.listCustomers();
   await client.listConversations();
   await client.listMessages("conv-1");
+  await client.listOutboundMessages(scope, "conv-1");
+  await client.createOutboundMessage(scope, "conv-1", { content: "Hello from web" });
   await client.login({ email: "admin@example.com", password: "secret" });
   await client.logout();
   await client.listCustomerNotes(scope);
@@ -46,6 +48,8 @@ test("internal API client sends bearer-scoped customer workflow requests", async
       "/base/internal/v1/customers",
       "/base/internal/v1/conversations",
       "/base/internal/v1/conversations/conv-1/messages",
+      "/base/internal/v1/conversations/conv-1/outbound-messages",
+      "/base/internal/v1/conversations/conv-1/outbound-messages",
       "/base/internal/v1/auth/login",
       "/base/internal/v1/auth/logout",
       "/base/internal/v1/customers/customer-1/notes",
@@ -55,24 +59,27 @@ test("internal API client sends bearer-scoped customer workflow requests", async
       "/base/internal/v1/customers/customer-1/follow-up-tasks"
     ]
   );
-  assert.deepEqual(calls.map((call) => call.url.searchParams.get(["org", "Id"].join(""))), Array(10).fill(null));
-  assert.equal(calls[5].url.searchParams.get("sellerAccountExternalId"), "seller-1");
-  assert.equal(calls[3].init.method, "POST");
+  assert.deepEqual(calls.map((call) => call.url.searchParams.get(["org", "Id"].join(""))), Array(12).fill(null));
+  assert.equal(calls[3].url.searchParams.get("sellerAccountExternalId"), "seller-1");
+  assert.equal(calls[4].url.searchParams.get("sellerAccountExternalId"), "seller-1");
   assert.equal(calls[4].init.method, "POST");
-  assert.equal(calls[7].init.method, "POST");
-  assert.equal(calls[8].init.method, "POST");
+  assert.equal(calls[5].init.method, "POST");
+  assert.equal(calls[6].init.method, "POST");
   assert.equal(calls[9].init.method, "POST");
-  assert.deepEqual(JSON.parse(String(calls[3].init.body)), {
+  assert.equal(calls[10].init.method, "POST");
+  assert.equal(calls[11].init.method, "POST");
+  assert.deepEqual(JSON.parse(String(calls[4].init.body)), { content: "Hello from web" });
+  assert.deepEqual(JSON.parse(String(calls[5].init.body)), {
     email: "admin@example.com",
     password: "secret"
   });
-  assert.deepEqual(JSON.parse(String(calls[7].init.body)), { body: "Customer asked for updated MOQ." });
-  assert.deepEqual(JSON.parse(String(calls[8].init.body)), { tag: "hot-lead" });
-  assert.deepEqual(JSON.parse(String(calls[9].init.body)), { title: "Send revised quotation" });
+  assert.deepEqual(JSON.parse(String(calls[9].init.body)), { body: "Customer asked for updated MOQ." });
+  assert.deepEqual(JSON.parse(String(calls[10].init.body)), { tag: "hot-lead" });
+  assert.deepEqual(JSON.parse(String(calls[11].init.body)), { title: "Send revised quotation" });
 
   for (const [index, call] of calls.entries()) {
     const headers = call.init.headers as Record<string, string>;
-    if (index === 3) {
+    if (index === 5) {
       assert.equal(headers.authorization, undefined);
     } else {
       assert.equal(headers.authorization, "Bearer internal-token");
@@ -199,6 +206,22 @@ test("login sends email credentials without org scope", async () => {
 function responseFor(pathname: string, method: string): unknown {
   if (pathname.endsWith("/customers")) return { ok: true, customers: [] };
   if (pathname.endsWith("/conversations")) return { ok: true, conversations: [] };
+  if (method === "POST" && pathname.endsWith("/outbound-messages")) {
+    return {
+      ok: true,
+      message: {
+        id: "outbound-1",
+        sellerAccountExternalId: "seller-1",
+        externalCustomerId: "customer-1",
+        externalConversationId: "conv-1",
+        content: "Hello from web",
+        status: "queued",
+        createdAt: "2026-05-27T07:00:00.000Z",
+        updatedAt: "2026-05-27T07:00:00.000Z"
+      }
+    };
+  }
+  if (pathname.endsWith("/outbound-messages")) return { ok: true, outboundMessages: [] };
   if (pathname.endsWith("/messages")) return { ok: true, messages: [] };
   if (pathname.endsWith("/auth/login")) return { ok: true, token: "session-token", user: { email: "admin@example.com" } };
   if (pathname.endsWith("/setup/admin")) return { ok: true, user: { id: "admin-1", email: "owner@example.com" } };

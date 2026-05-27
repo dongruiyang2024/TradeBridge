@@ -21,6 +21,7 @@ export interface ChromeRuntimeApi {
     ): void;
   };
   sendMessage(message: unknown): Promise<unknown>;
+  getURL(path: string): string;
   openOptionsPage(): void;
 }
 
@@ -42,6 +43,17 @@ export interface ChromeCookiesApi {
   getAll(details: { domain?: string; url?: string; name?: string }): Promise<ChromeCookie[]>;
 }
 
+export interface ChromeTab {
+  id?: number;
+  url?: string;
+  active?: boolean;
+}
+
+export interface ChromeTabsApi {
+  query(queryInfo: { url?: string | string[]; active?: boolean; currentWindow?: boolean }): Promise<ChromeTab[]>;
+  sendMessage(tabId: number, message: unknown): Promise<unknown>;
+}
+
 export interface ChromeApi {
   runtime: ChromeRuntimeApi;
   storage: {
@@ -49,6 +61,7 @@ export interface ChromeApi {
   };
   alarms: ChromeAlarmsApi;
   cookies?: ChromeCookiesApi;
+  tabs?: ChromeTabsApi;
 }
 
 export function getChrome(): ChromeApi {

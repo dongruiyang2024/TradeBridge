@@ -11,7 +11,8 @@ import type {
   StoredCustomerTag,
   StoredFollowUpTask,
   LoginResult,
-  StoredMessage
+  StoredMessage,
+  StoredOutboundMessage
 } from "./types";
 
 export interface CreateInternalApiClientOptions {
@@ -26,7 +27,9 @@ interface ApiEnvelope<T> {
   customers?: StoredCustomer[];
   conversations?: StoredConversation[];
   messages?: StoredMessage[];
+  message?: StoredOutboundMessage;
   assignment?: StoredCustomerAssignment | null;
+  outboundMessages?: StoredOutboundMessage[];
   notes?: StoredCustomerNote[];
   note?: StoredCustomerNote;
   tags?: StoredCustomerTag[];
@@ -169,6 +172,21 @@ export function createInternalApiClient(options: CreateInternalApiClientOptions)
       );
       return data.messages || [];
     },
+    async listOutboundMessages(scope, externalConversationId) {
+      const data = await request<StoredOutboundMessage[]>(
+        conversationPath(externalConversationId, "outbound-messages"),
+        { query: scopeQuery(scope) }
+      );
+      return data.outboundMessages || [];
+    },
+    async createOutboundMessage(scope, externalConversationId, input) {
+      const data = await request<StoredOutboundMessage>(conversationPath(externalConversationId, "outbound-messages"), {
+        method: "POST",
+        query: scopeQuery(scope),
+        body: input
+      });
+      return requireField(data.message, "message");
+    },
     async getCustomerAssignment(scope) {
       const data = await request<StoredCustomerAssignment>(customerPath(scope, "assignment"), {
         query: scopeQuery(scope)
@@ -218,6 +236,10 @@ export function createInternalApiClient(options: CreateInternalApiClientOptions)
 
 function customerPath(scope: CustomerScope, child: string): string {
   return `/internal/v1/customers/${encodeURIComponent(scope.externalCustomerId)}/${child}`;
+}
+
+function conversationPath(externalConversationId: string, child: string): string {
+  return `/internal/v1/conversations/${encodeURIComponent(externalConversationId)}/${child}`;
 }
 
 function scopeQuery(scope: CustomerScope): Record<string, string> {

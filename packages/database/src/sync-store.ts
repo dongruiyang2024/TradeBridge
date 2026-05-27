@@ -11,6 +11,7 @@ import type {
   CreateCustomerNoteInput,
   CreateFollowUpTaskInput,
   CreateInternalUserInput,
+  CreateOutboundMessageInput,
   CreateReplySuggestionInput,
   CreateUserInvitationInput,
   CustomerScope,
@@ -20,6 +21,9 @@ import type {
   InternalUser,
   InternalUserCredentials,
   IssueInternalSessionInput,
+  ListOutboundMessagesInput,
+  ListPendingOutboundMessagesInput,
+  MarkOutboundMessageDeliveredInput,
   RegisteredCollectorDevice,
   RegisterCollectorDeviceInput,
   RevokeInternalSessionInput,
@@ -33,6 +37,7 @@ import type {
   StoredCustomerTag,
   StoredFollowUpTask,
   StoredMessage,
+  StoredOutboundMessage,
   StoredReplySuggestion,
   StoredSellerAccount,
   StoredUserInvitation,
@@ -56,6 +61,7 @@ export class InMemorySyncStore {
   private readonly customerAssignments = new Map<string, StoredCustomerAssignment>();
   private readonly aiSummaries = new Map<string, StoredAiSummary>();
   private readonly replySuggestions = new Map<string, StoredReplySuggestion>();
+  private readonly outboundMessages = new Map<string, StoredOutboundMessage>();
   private readonly auditLogs: StoredAuditLog[] = [];
   private readonly internalUsers = new Map<string, InternalUser & { passwordHash: string }>();
   private readonly internalSessions = new Map<string, InternalSession>();
@@ -66,6 +72,7 @@ export class InMemorySyncStore {
   private collectorDeviceSequence = 0;
   private auditLogSequence = 0;
   private aiSequence = 0;
+  private outboundMessageSequence = 0;
 
   async acceptSyncBatch(batch: SyncBatch): Promise<SyncBatchResult> {
     const warnings: string[] = [];
@@ -281,6 +288,61 @@ export class InMemorySyncStore {
     return Array.from(this.replySuggestions.values()).filter((item) => isSameConversationCustomerScope(item, scope));
   }
 
+  async createOutboundMessage(input: CreateOutboundMessageInput): Promise<StoredOutboundMessage> {
+    const conversation = this.conversations.get(
+      conversationKey(input.sellerAccountExternalId, input.externalConversationId)
+    );
+    if (!conversation || conversation.externalCustomerId !== input.externalCustomerId) {
+      throw new Error("outbound_conversation_not_found");
+    }
+
+    const now = new Date().toISOString();
+    const message: StoredOutboundMessage = {
+      ...input,
+      id: this.nextOutboundMessageId(),
+      status: "queued",
+      createdAt: now,
+      updatedAt: now
+    };
+    this.outboundMessages.set(message.id, message);
+    return message;
+  }
+
+  async listPendingOutboundMessages(input: ListPendingOutboundMessagesInput): Promise<StoredOutboundMessage[]> {
+    const limit = Math.max(1, Math.min(input.limit || 20, 100));
+    return this.sortedOutboundMessages()
+      .filter((item) => item.sellerAccountExternalId === input.sellerAccountExternalId && item.status === "queued")
+      .slice(0, limit);
+  }
+
+  async listOutboundMessages(input: ListOutboundMessagesInput): Promise<StoredOutboundMessage[]> {
+    return this.sortedOutboundMessages().filter(
+      (item) =>
+        item.sellerAccountExternalId === input.sellerAccountExternalId &&
+        (!input.externalConversationId || item.externalConversationId === input.externalConversationId)
+    );
+  }
+
+  async markOutboundMessageDelivered(input: MarkOutboundMessageDeliveredInput): Promise<StoredOutboundMessage> {
+    const existing = this.outboundMessages.get(input.id);
+    if (!existing || existing.sellerAccountExternalId !== input.sellerAccountExternalId) {
+      throw new Error("outbound_message_not_found");
+    }
+
+    const updated: StoredOutboundMessage = {
+      ...existing,
+      status: input.status,
+      updatedAt: new Date().toISOString(),
+      deliveredAt: input.deliveredAt || new Date().toISOString(),
+      externalMessageId: input.externalMessageId ?? existing.externalMessageId,
+      deliveredByDeviceId: input.deliveredByDeviceId ?? existing.deliveredByDeviceId,
+      errorCode: input.errorCode ?? existing.errorCode,
+      errorMessage: input.errorMessage ?? existing.errorMessage
+    };
+    this.outboundMessages.set(updated.id, updated);
+    return updated;
+  }
+
   private nextCollaborationId(prefix: string): string {
     this.collaborationSequence += 1;
     return `${prefix}_${this.collaborationSequence}`;
@@ -490,6 +552,18 @@ export class InMemorySyncStore {
   private nextAiId(prefix: string): string {
     this.aiSequence += 1;
     return `${prefix}_${this.aiSequence}`;
+  }
+
+  private nextOutboundMessageId(): string {
+    this.outboundMessageSequence += 1;
+    return `outbound_${this.outboundMessageSequence}`;
+  }
+
+  private sortedOutboundMessages(): StoredOutboundMessage[] {
+    return Array.from(this.outboundMessages.values()).sort((left, right) => {
+      const timeDiff = Date.parse(left.createdAt) - Date.parse(right.createdAt);
+      return timeDiff || left.id.localeCompare(right.id);
+    });
   }
 }
 

@@ -204,6 +204,23 @@ CREATE TABLE IF NOT EXISTS reply_suggestion (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS outbound_message (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  seller_account_id UUID NOT NULL REFERENCES seller_account(id) ON DELETE CASCADE,
+  customer_id UUID NOT NULL REFERENCES customer(id) ON DELETE CASCADE,
+  conversation_id UUID NOT NULL REFERENCES conversation(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'sent', 'failed')),
+  external_message_id TEXT,
+  created_by UUID REFERENCES app_user(id) ON DELETE SET NULL,
+  delivered_by_device_id TEXT,
+  error_code TEXT,
+  error_message TEXT,
+  delivered_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   actor_user_id UUID REFERENCES app_user(id) ON DELETE SET NULL,
@@ -215,6 +232,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_message_conversation_sent_at ON message (conversation_id, sent_at);
+CREATE INDEX IF NOT EXISTS idx_outbound_message_pending ON outbound_message (seller_account_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_outbound_message_conversation ON outbound_message (conversation_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_customer_owner ON customer (owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_follow_up_task_due ON follow_up_task (status, due_at);
 CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log (created_at);

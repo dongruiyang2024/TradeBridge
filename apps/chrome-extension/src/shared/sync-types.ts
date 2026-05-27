@@ -31,6 +31,25 @@ export interface CollectorActivationResult {
   };
 }
 
+export type OutboundMessageStatus = "queued" | "sent" | "failed";
+
+export interface OutboundMessage {
+  id: string;
+  sellerAccountExternalId: string;
+  externalCustomerId: string;
+  externalConversationId: string;
+  content: string;
+  status: OutboundMessageStatus;
+  createdByUserId?: string;
+  deliveredByDeviceId?: string;
+  externalMessageId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+  deliveredAt?: string;
+}
+
 export interface ExtensionConfig {
   serverUrl: string;
   collectorToken: string;

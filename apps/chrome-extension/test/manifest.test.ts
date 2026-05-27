@@ -11,6 +11,8 @@ test("manifest uses minimal permissions for internal OneTalk collector", () => {
     permissions?: string[];
     host_permissions?: string[];
     background?: { service_worker?: string; type?: string };
+    content_scripts?: Array<{ run_at?: string }>;
+    web_accessible_resources?: Array<{ resources?: string[]; matches?: string[] }>;
   };
 
   assert.equal(manifest.manifest_version, 3);
@@ -21,4 +23,6 @@ test("manifest uses minimal permissions for internal OneTalk collector", () => {
   assert.equal(manifest.permissions?.includes("webRequest"), false);
   assert.equal(manifest.background?.service_worker, "background/index.js");
   assert.equal(manifest.background?.type, "module");
+  assert.equal(manifest.content_scripts?.[0]?.run_at, "document_start");
+  assert.equal(manifest.web_accessible_resources?.[0]?.resources?.includes("content/onetalk-page-script.js"), true);
 });

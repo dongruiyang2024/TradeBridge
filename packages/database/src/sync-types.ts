@@ -184,6 +184,48 @@ export interface StoredReplySuggestion extends CreateReplySuggestionInput {
   updatedAt: string;
 }
 
+export type OutboundMessageStatus = "queued" | "sent" | "failed";
+
+export interface CreateOutboundMessageInput extends ConversationCustomerScope {
+  content: string;
+  createdByUserId?: string;
+}
+
+export interface ListPendingOutboundMessagesInput {
+  sellerAccountExternalId: string;
+  limit?: number;
+}
+
+export interface ListOutboundMessagesInput {
+  sellerAccountExternalId: string;
+  externalConversationId?: string;
+}
+
+export interface MarkOutboundMessageDeliveredInput {
+  id: string;
+  sellerAccountExternalId: string;
+  status: "sent" | "failed";
+  externalMessageId?: string;
+  deliveredByDeviceId?: string;
+  deliveredAt?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface StoredOutboundMessage extends ConversationCustomerScope {
+  id: string;
+  content: string;
+  status: OutboundMessageStatus;
+  createdByUserId?: string;
+  deliveredByDeviceId?: string;
+  externalMessageId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+  deliveredAt?: string;
+}
+
 export type InternalRole = "admin" | "supervisor" | "sales";
 
 export interface InternalUser {

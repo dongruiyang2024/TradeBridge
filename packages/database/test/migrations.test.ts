@@ -3,10 +3,23 @@ import { test } from "node:test";
 import { INTERNAL_SYNC_MIGRATIONS } from "../src/index.js";
 
 test("internal sync migrations expose the initial schema in order", () => {
-  assert.equal(INTERNAL_SYNC_MIGRATIONS.length, 1);
-  assert.equal(INTERNAL_SYNC_MIGRATIONS[0].id, "001_internal_sync_schema");
-  assert.equal(INTERNAL_SYNC_MIGRATIONS[0].filename, "001_internal_sync_schema.sql");
+  assert.deepEqual(
+    INTERNAL_SYNC_MIGRATIONS.map((migration) => [migration.id, migration.filename]),
+    [
+      ["001_internal_sync_schema", "001_internal_sync_schema.sql"],
+      ["002_outbound_message_queue", "002_outbound_message_queue.sql"]
+    ]
+  );
   assert.doesNotMatch(INTERNAL_SYNC_MIGRATIONS[0].sql, /CREATE TABLE IF NOT EXISTS org/i);
+});
+
+test("outbound queue migration upgrades existing databases", () => {
+  const normalized = INTERNAL_SYNC_MIGRATIONS[1].sql.replace(/\s+/g, " ").toLowerCase();
+
+  assert.match(normalized, /create table if not exists outbound_message\b/);
+  assert.match(normalized, /status text not null default 'queued' check \(status in \('queued', 'sent', 'failed'\)\)/);
+  assert.match(normalized, /create index if not exists idx_outbound_message_pending/);
+  assert.match(normalized, /create index if not exists idx_outbound_message_conversation/);
 });
 
 test("initial schema contains the core platform tables", () => {
@@ -30,6 +43,7 @@ test("initial schema contains the core platform tables", () => {
     "follow_up_task",
     "ai_summary",
     "reply_suggestion",
+    "outbound_message",
     "audit_log"
   ];
 

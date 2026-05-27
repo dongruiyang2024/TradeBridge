@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
-import { activateCollectorDevice, uploadSyncBatch } from "../src/background/tradebridge-client.js";
+import {
+  activateCollectorDevice,
+  listOutboundMessages,
+  markOutboundMessageDelivered,
+  uploadSyncBatch
+} from "../src/background/tradebridge-client.js";
 
 const originalFetch = globalThis.fetch;
 
@@ -93,6 +98,73 @@ test("activateCollectorDevice posts credentials and device metadata", async () =
     deviceExternalId: "chrome-extension-demo",
     deviceName: "Chrome Extension"
   });
+});
+
+test("listOutboundMessages reads queued replies with collector token", async () => {
+  const requests: Request[] = [];
+  globalThis.fetch = async (input, init) => {
+    requests.push(new Request(input, init));
+    return Response.json({
+      ok: true,
+      messages: [
+        {
+          id: "outbound-1",
+          sellerAccountExternalId: "seller-1",
+          externalCustomerId: "customer-1",
+          externalConversationId: "conv-1",
+          content: "Hello",
+          status: "queued",
+          createdAt: "2026-05-27T07:00:00.000Z",
+          updatedAt: "2026-05-27T07:00:00.000Z"
+        }
+      ]
+    });
+  };
+
+  const messages = await listOutboundMessages({
+    serverUrl: "http://127.0.0.1:5032",
+    collectorToken: "device-token"
+  });
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].id, "outbound-1");
+  assert.equal(requests[0].url, "http://127.0.0.1:5032/collector/v1/outbound-messages");
+  assert.equal(requests[0].headers.get("authorization"), "Bearer device-token");
+});
+
+test("markOutboundMessageDelivered posts send result", async () => {
+  const requests: Request[] = [];
+  globalThis.fetch = async (input, init) => {
+    requests.push(new Request(input, init));
+    return Response.json({
+      ok: true,
+      message: {
+        id: "outbound-1",
+        sellerAccountExternalId: "seller-1",
+        externalCustomerId: "customer-1",
+        externalConversationId: "conv-1",
+        content: "Hello",
+        status: "sent",
+        externalMessageId: "onetalk-msg-1",
+        createdAt: "2026-05-27T07:00:00.000Z",
+        updatedAt: "2026-05-27T07:00:01.000Z"
+      }
+    });
+  };
+
+  const result = await markOutboundMessageDelivered({
+    serverUrl: "http://127.0.0.1:5032",
+    collectorToken: "device-token",
+    outboundMessageId: "outbound-1",
+    status: "sent",
+    externalMessageId: "onetalk-msg-1"
+  });
+
+  assert.equal(result.status, "sent");
+  assert.equal(result.externalMessageId, "onetalk-msg-1");
+  assert.equal(requests[0].url, "http://127.0.0.1:5032/collector/v1/outbound-messages/outbound-1/delivery");
+  assert.equal(requests[0].method, "POST");
+  assert.equal(await requests[0].text(), JSON.stringify({ status: "sent", externalMessageId: "onetalk-msg-1" }));
 });
 
 test("activateCollectorDevice can post only credentials and let the server assign collector scope", async () => {

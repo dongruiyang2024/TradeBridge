@@ -133,6 +133,22 @@ test("GET /internal/v1/conversations/:id/messages returns conversation messages"
   assert.equal(response.json().messages[0].content, "hello");
 });
 
+test("POST /internal/v1/conversations/:id/outbound-messages queues a manual reply", async () => {
+  const app = await createSeededApp();
+  const response = await app.inject({
+    method: "POST",
+    url: "/internal/v1/conversations/conv-1/outbound-messages?sellerAccountExternalId=seller-1",
+    headers: await createInternalAuthHeaders(app),
+    payload: { content: "Thanks, I will check and reply soon." }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().ok, true);
+  assert.equal(response.json().message.status, "queued");
+  assert.equal(response.json().message.externalConversationId, "conv-1");
+  assert.equal(response.json().message.content, "Thanks, I will check and reply soon.");
+});
+
 test("collector device tokens cannot read internal query APIs", async () => {
   const app = await createSeededApp();
   const response = await app.inject({

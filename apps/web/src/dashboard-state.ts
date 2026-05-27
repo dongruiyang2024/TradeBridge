@@ -13,6 +13,7 @@ export function createInitialDashboardState(): DashboardState {
     conversations: [],
     assignment: null,
     messages: [],
+    outboundMessages: [],
     notes: [],
     tags: [],
     tasks: []
@@ -48,6 +49,7 @@ export async function selectCustomer(
       conversations: [],
       assignment: null,
       messages: [],
+      outboundMessages: [],
       notes: [],
       tags: [],
       tasks: [],
@@ -61,8 +63,9 @@ export async function selectCustomer(
     allConversations.filter((conversation) => conversation.externalCustomerId === externalCustomerId)
   );
   const selectedConversationId = conversations[0]?.externalConversationId;
-  const [messages, assignment, notes, tags, tasks] = await Promise.all([
+  const [messages, outboundMessages, assignment, notes, tags, tasks] = await Promise.all([
     selectedConversationId ? client.listMessages(selectedConversationId) : Promise.resolve([]),
+    selectedConversationId ? client.listOutboundMessages(scope, selectedConversationId) : Promise.resolve([]),
     client.getCustomerAssignment(scope),
     client.listCustomerNotes(scope),
     client.listCustomerTags(scope),
@@ -76,6 +79,7 @@ export async function selectCustomer(
     selectedConversationId,
     assignment,
     messages: sortMessages(messages),
+    outboundMessages: sortMessages(outboundMessages),
     notes,
     tags,
     tasks,
@@ -89,12 +93,36 @@ export async function selectConversation(
   client: InternalApiClient,
   externalConversationId: string
 ): Promise<DashboardState> {
-  const messages = await client.listMessages(externalConversationId);
+  const scope = selectedCustomerScope(state);
+  const [messages, outboundMessages] = await Promise.all([
+    client.listMessages(externalConversationId),
+    scope ? client.listOutboundMessages(scope, externalConversationId) : Promise.resolve([])
+  ]);
   return {
     ...state,
     selectedConversationId: externalConversationId,
     messages: sortMessages(messages),
+    outboundMessages: sortMessages(outboundMessages),
     status: `已加载 ${messages.length} 条消息`,
+    error: undefined
+  };
+}
+
+export async function createOutboundMessageForSelectedConversation(
+  state: DashboardState,
+  client: InternalApiClient,
+  content: string
+): Promise<DashboardState> {
+  const scope = selectedCustomerScope(state);
+  const externalConversationId = state.selectedConversationId;
+  const trimmed = content.trim();
+  if (!scope || !externalConversationId || !trimmed) return state;
+
+  const outboundMessage = await client.createOutboundMessage(scope, externalConversationId, { content: trimmed });
+  return {
+    ...state,
+    outboundMessages: [...state.outboundMessages, outboundMessage],
+    status: "消息已加入发送队列",
     error: undefined
   };
 }
@@ -177,6 +205,7 @@ function clearSelection(state: DashboardState): DashboardState {
     conversations: [],
     assignment: null,
     messages: [],
+    outboundMessages: [],
     notes: [],
     tags: [],
     tasks: []
@@ -193,8 +222,12 @@ function sortConversations(conversations: StoredConversation[]): StoredConversat
   return [...conversations].sort((left, right) => timestamp(right.lastMessageAt) - timestamp(left.lastMessageAt));
 }
 
-function sortMessages<T extends { sentAt?: string }>(messages: T[]): T[] {
-  return [...messages].sort((left, right) => timestamp(left.sentAt) - timestamp(right.sentAt));
+function sortMessages<T extends { sentAt?: string; createdAt?: string; deliveredAt?: string }>(messages: T[]): T[] {
+  return [...messages].sort((left, right) => messageTimestamp(left) - messageTimestamp(right));
+}
+
+function messageTimestamp(message: { sentAt?: string; createdAt?: string; deliveredAt?: string }): number {
+  return timestamp(message.sentAt || message.deliveredAt || message.createdAt);
 }
 
 function timestamp(value?: string): number {

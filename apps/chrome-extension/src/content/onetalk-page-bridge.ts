@@ -1,18 +1,53 @@
 import type { WeblitePageConversation, WeblitePageSnapshot } from "@wangwang/onetalk-adapter/browser";
 import { getChrome } from "../shared/chrome-api.js";
+import type { ExtensionMessage } from "../shared/extension-messages.js";
 import { ONETALK_PAGE_SNAPSHOT_STORAGE_KEY } from "../shared/onetalk-page-snapshot.js";
+import type { OutboundMessage } from "../shared/sync-types.js";
 
 const loginRequired =
   /login\.alibaba\.com|newlogin/i.test(location.href) || Boolean(document.querySelector("input[type='password']"));
 
 let snapshotTimer: number | undefined;
 
+injectPageScript();
+
 void getChrome().runtime.sendMessage({
   type: loginRequired ? "onetalk-login-required" : "onetalk-page-ready",
   url: location.href
 }).catch(() => undefined);
 
-if (!loginRequired && document.body) {
+getChrome().runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  const typed = message as ExtensionMessage;
+  if (typed.type !== "send-onetalk-message") return false;
+
+  void sendOutboundMessageToPage(typed.message).then(sendResponse);
+  return true;
+});
+
+if (!loginRequired) {
+  startSnapshotObserverWhenReady();
+}
+
+function injectPageScript(): void {
+  const target = document.documentElement || document.head;
+  if (!target) {
+    document.addEventListener("DOMContentLoaded", injectPageScript, { once: true });
+    return;
+  }
+
+  const script = document.createElement("script");
+  script.src = getChrome().runtime.getURL("content/onetalk-page-script.js");
+  script.async = false;
+  script.onload = () => script.remove();
+  target.append(script);
+}
+
+function startSnapshotObserverWhenReady(): void {
+  if (!document.body) {
+    document.addEventListener("DOMContentLoaded", startSnapshotObserverWhenReady, { once: true });
+    return;
+  }
+
   scheduleSnapshot();
   new MutationObserver(scheduleSnapshot).observe(document.body, {
     childList: true,
@@ -20,6 +55,41 @@ if (!loginRequired && document.body) {
     characterData: true
   });
   window.setInterval(scheduleSnapshot, 10_000);
+}
+
+async function sendOutboundMessageToPage(message: OutboundMessage) {
+  const requestId = `tradebridge-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return new Promise((resolve) => {
+    const timeout = window.setTimeout(() => {
+      window.removeEventListener("message", handleMessage);
+      resolve({ ok: false, error: "onetalk_send_timeout" });
+    }, 15_000);
+
+    function handleMessage(event: MessageEvent): void {
+      if (event.source !== window || !isRecord(event.data)) return;
+      if (event.data.source !== "tradebridge-onetalk-page") return;
+      if (event.data.type !== "send-onetalk-message-result" || event.data.requestId !== requestId) return;
+
+      window.clearTimeout(timeout);
+      window.removeEventListener("message", handleMessage);
+      resolve({
+        ok: event.data.ok === true,
+        externalMessageId: typeof event.data.externalMessageId === "string" ? event.data.externalMessageId : undefined,
+        error: typeof event.data.error === "string" ? event.data.error : undefined
+      });
+    }
+
+    window.addEventListener("message", handleMessage);
+    window.postMessage(
+      {
+        source: "tradebridge-extension",
+        type: "send-onetalk-message",
+        requestId,
+        message
+      },
+      window.location.origin
+    );
+  });
 }
 
 function scheduleSnapshot(): void {
@@ -117,4 +187,8 @@ function isIgnoredLabel(text: string): boolean {
     /^[A-Z]{2}$/.test(text) ||
     /^(全部|未读|待回复|待跟进|消息|搜索|自动接待|客户|订单|物流报价|\d{4}-\d{2}-\d{2})$/.test(text)
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }

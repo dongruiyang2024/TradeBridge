@@ -7,6 +7,7 @@ import {
   addTagToSelectedCustomer,
   createInitialDashboardState,
   createNoteForSelectedCustomer,
+  createOutboundMessageForSelectedConversation,
   createTaskForSelectedCustomer,
   loadCustomerList,
   selectCustomer
@@ -147,6 +148,7 @@ test("dashboard renders customer list, selected timeline, and collaboration pane
       onAddNote={() => undefined}
       onAddTag={() => undefined}
       onAddTask={() => undefined}
+      onSendMessage={() => undefined}
     />
   );
 
@@ -155,6 +157,8 @@ test("dashboard renders customer list, selected timeline, and collaboration pane
   assert.match(html, /Customer asked for updated MOQ/);
   assert.match(html, /hot-lead/);
   assert.match(html, /Send revised quotation/);
+  assert.match(html, /Queued reply from web/);
+  assert.match(html, /发送到 OneTalk/);
   assert.match(html, /客户外部 ID/);
   assert.match(html, /customer-1/);
   assert.match(html, /seller-1/);
@@ -182,6 +186,7 @@ test("dashboard hides user management entry for non-admin users", () => {
       onAddNote={() => undefined}
       onAddTag={() => undefined}
       onAddTask={() => undefined}
+      onSendMessage={() => undefined}
     />
   );
 
@@ -230,10 +235,13 @@ test("customer workflow loads selected customer conversations and updates collab
   state = await createNoteForSelectedCustomer(state, client, "Needs export paperwork.");
   state = await addTagToSelectedCustomer(state, client, "export-ready");
   state = await createTaskForSelectedCustomer(state, client, "Send PI tomorrow");
+  state = await createOutboundMessageForSelectedConversation(state, client, "Thanks, I will send it today.");
 
   assert.equal(state.notes.at(-1)?.body, "Needs export paperwork.");
   assert.equal(state.tags.at(-1)?.tag, "export-ready");
   assert.equal(state.tasks.at(-1)?.title, "Send PI tomorrow");
+  assert.equal(state.outboundMessages.at(-1)?.content, "Thanks, I will send it today.");
+  assert.equal(state.outboundMessages.at(-1)?.status, "queued");
 });
 
 function sampleDashboardState(): DashboardState {
@@ -276,6 +284,18 @@ function sampleDashboardState(): DashboardState {
         sentAt: "2026-05-25T09:00:00.000Z",
         contentHash: "hash-1",
         uniqueKey: "msg-1"
+      }
+    ],
+    outboundMessages: [
+      {
+        id: "outbound-1",
+        sellerAccountExternalId: "seller-1",
+        externalCustomerId: "customer-1",
+        externalConversationId: "conv-1",
+        content: "Queued reply from web",
+        status: "queued",
+        createdAt: "2026-05-25T09:05:00.000Z",
+        updatedAt: "2026-05-25T09:05:00.000Z"
       }
     ],
     notes: [
@@ -449,6 +469,32 @@ function createFakeClient(): InternalApiClient {
           uniqueKey: `message-${externalConversationId}`
         }
       ];
+    },
+    async listOutboundMessages(scope, externalConversationId) {
+      return externalConversationId === "conv-2"
+        ? [
+            {
+              id: "outbound-existing",
+              ...scope,
+              externalConversationId,
+              content: "Existing queued reply",
+              status: "queued" as const,
+              createdAt: "2026-05-25T10:00:00.000Z",
+              updatedAt: "2026-05-25T10:00:00.000Z"
+            }
+          ]
+        : [];
+    },
+    async createOutboundMessage(scope, externalConversationId, input) {
+      return {
+        id: "outbound-created",
+        ...scope,
+        externalConversationId,
+        content: input.content,
+        status: "queued" as const,
+        createdAt: "2026-05-25T10:00:00.000Z",
+        updatedAt: "2026-05-25T10:00:00.000Z"
+      };
     },
     async listCustomerNotes() {
       return [];

@@ -164,6 +164,51 @@ test("POST /collector/v1/sync-batches returns idempotent counts for duplicate me
   assert.equal(store.listMessages().length, 1);
 });
 
+test("collector devices can claim and mark outbound messages for their seller account", async () => {
+  const store = new InMemorySyncStore();
+  const token = await createCollectorToken(store);
+  await store.acceptSyncBatch({
+    sellerAccount: { externalAccountId: "seller-1" },
+    device: { deviceId: "device-1" },
+    customers: [{ externalCustomerId: "customer-1" }],
+    conversations: [{ externalConversationId: "conv-1", externalCustomerId: "customer-1" }]
+  });
+  const queued = await store.createOutboundMessage({
+    sellerAccountExternalId: "seller-1",
+    externalCustomerId: "customer-1",
+    externalConversationId: "conv-1",
+    content: "Hello from web"
+  });
+  const app = await createServer({ store });
+
+  const listResponse = await app.inject({
+    method: "GET",
+    url: "/collector/v1/outbound-messages",
+    headers: { authorization: `Bearer ${token}` }
+  });
+
+  assert.equal(listResponse.statusCode, 200);
+  assert.equal(listResponse.json().ok, true);
+  assert.equal(listResponse.json().messages.length, 1);
+  assert.equal(listResponse.json().messages[0].id, queued.id);
+
+  const deliveryResponse = await app.inject({
+    method: "POST",
+    url: `/collector/v1/outbound-messages/${queued.id}/delivery`,
+    headers: { authorization: `Bearer ${token}` },
+    payload: {
+      status: "sent",
+      externalMessageId: "onetalk-msg-1",
+      deliveredAt: "2026-05-27T07:00:00.000Z"
+    }
+  });
+
+  assert.equal(deliveryResponse.statusCode, 200);
+  assert.equal(deliveryResponse.json().ok, true);
+  assert.equal(deliveryResponse.json().message.status, "sent");
+  assert.equal((await store.listPendingOutboundMessages({ sellerAccountExternalId: "seller-1", limit: 10 })).length, 0);
+});
+
 test("GET /health returns internal server status", async () => {
   const app = await createServer({ store: new InMemorySyncStore() });
   const response = await app.inject({ method: "GET", url: "/health" });

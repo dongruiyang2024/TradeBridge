@@ -22,6 +22,7 @@ import {
   type CreateUserInvitationInput,
   type CreateCustomerNoteInput,
   type CreateFollowUpTaskInput,
+  type CreateOutboundMessageInput,
   type CreateReplySuggestionInput,
   type CustomerScope,
   type GetInternalUserCredentialsByEmailInput,
@@ -31,6 +32,9 @@ import {
   type InternalUser,
   type InternalUserCredentials,
   type IssueInternalSessionInput,
+  type ListOutboundMessagesInput,
+  type ListPendingOutboundMessagesInput,
+  type MarkOutboundMessageDeliveredInput,
   type StoredConversation,
   type StoredAuditLog,
   type StoredAiSummary,
@@ -40,6 +44,7 @@ import {
   type StoredCustomerTag,
   type StoredFollowUpTask,
   type StoredMessage,
+  type StoredOutboundMessage,
   type StoredReplySuggestion,
   type StoredUserInvitation,
   type SqlClient,
@@ -93,6 +98,10 @@ export interface SyncStore {
   getLatestAiSummary(scope: CustomerScope): Promise<StoredAiSummary | null> | StoredAiSummary | null;
   createReplySuggestion(input: CreateReplySuggestionInput): Promise<StoredReplySuggestion> | StoredReplySuggestion;
   listReplySuggestions(scope: ConversationCustomerScope): Promise<StoredReplySuggestion[]> | StoredReplySuggestion[];
+  createOutboundMessage(input: CreateOutboundMessageInput): Promise<StoredOutboundMessage> | StoredOutboundMessage;
+  listPendingOutboundMessages(input: ListPendingOutboundMessagesInput): Promise<StoredOutboundMessage[]> | StoredOutboundMessage[];
+  listOutboundMessages(input: ListOutboundMessagesInput): Promise<StoredOutboundMessage[]> | StoredOutboundMessage[];
+  markOutboundMessageDelivered(input: MarkOutboundMessageDeliveredInput): Promise<StoredOutboundMessage> | StoredOutboundMessage;
   createInternalUser(input: CreateInternalUserInput): Promise<InternalUser> | InternalUser;
   listInternalUsers(): Promise<InternalUser[]> | InternalUser[];
   getInternalUserCredentials(input: GetInternalUserCredentialsInput): Promise<InternalUserCredentials | null> | InternalUserCredentials | null;
@@ -119,6 +128,13 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   let setupInProgress = false;
   const app = Fastify({
     logger: options.logger ?? false
+  });
+
+  app.addHook("onRequest", async (request, reply) => {
+    applyCorsHeaders(request, reply);
+    if (request.method === "OPTIONS") {
+      return reply.code(204).send();
+    }
   });
 
   app.get("/health", async () => ({
@@ -188,6 +204,54 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       ok: true,
       ...result
     };
+  });
+
+  app.get("/collector/v1/outbound-messages", async (request, reply) => {
+    const collectorDevice = await collectorDeviceFromAuthorization(request.headers.authorization || "", store);
+    if (!collectorDevice) {
+      return reply.code(401).send({ ok: false, error: "unauthorized" });
+    }
+
+    return {
+      ok: true,
+      messages: await store.listPendingOutboundMessages({
+        sellerAccountExternalId: collectorSellerAccountExternalId(collectorDevice),
+        limit: queryNumberField(request.query, "limit") || 20
+      })
+    };
+  });
+
+  app.post("/collector/v1/outbound-messages/:messageId/delivery", async (request, reply) => {
+    const collectorDevice = await collectorDeviceFromAuthorization(request.headers.authorization || "", store);
+    if (!collectorDevice) {
+      return reply.code(401).send({ ok: false, error: "unauthorized" });
+    }
+
+    const messageId = queryStringField(request.params, "messageId");
+    const status = bodyDeliveryStatusField(request.body);
+    if (!messageId || !status) {
+      return reply.code(400).send({ ok: false, error: "invalid_outbound_delivery" });
+    }
+
+    try {
+      const message = await store.markOutboundMessageDelivered({
+        id: messageId,
+        sellerAccountExternalId: collectorSellerAccountExternalId(collectorDevice),
+        status,
+        externalMessageId: bodyStringField(request.body, "externalMessageId") || undefined,
+        deliveredByDeviceId: collectorDevice.externalDeviceId || collectorDevice.id,
+        deliveredAt: bodyStringField(request.body, "deliveredAt") || undefined,
+        errorCode: bodyStringField(request.body, "errorCode") || undefined,
+        errorMessage: bodyStringField(request.body, "errorMessage") || undefined
+      });
+
+      return { ok: true, message };
+    } catch (error) {
+      if (isNotFoundError(error, "outbound_message")) {
+        return reply.code(404).send({ ok: false, error: "outbound_message_not_found" });
+      }
+      throw error;
+    }
   });
 
   app.post("/internal/v1/auth/login", async (request, reply) => {
@@ -506,6 +570,65 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       ok: true,
       messages: await store.listMessages(params.externalConversationId)
     };
+  });
+
+  app.get("/internal/v1/conversations/:externalConversationId/outbound-messages", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
+    if (!auth) return;
+
+    const conversationScope = await resolveConversationScope(store, request.query, request.params);
+    if (!conversationScope) {
+      return reply.code(400).send({ ok: false, error: "conversation_scope_required" });
+    }
+
+    return {
+      ok: true,
+      outboundMessages: await store.listOutboundMessages({
+        sellerAccountExternalId: conversationScope.scope.sellerAccountExternalId,
+        externalConversationId: conversationScope.scope.externalConversationId
+      })
+    };
+  });
+
+  app.post("/internal/v1/conversations/:externalConversationId/outbound-messages", async (request, reply) => {
+    const auth = await requireInternalAuth(request, reply, store, internalAccessRoles);
+    if (!auth) return;
+
+    const conversationScope = await resolveConversationScope(store, request.query, request.params);
+    if (!conversationScope) {
+      return reply.code(400).send({ ok: false, error: "conversation_scope_required" });
+    }
+
+    const content = bodyStringField(request.body, "content");
+    if (!content) {
+      return reply.code(400).send({ ok: false, error: "outbound_content_required" });
+    }
+
+    try {
+      const message = await store.createOutboundMessage({
+        ...conversationScope.scope,
+        content,
+        createdByUserId: auth.user.id
+      });
+      await store.appendAuditLog({
+        actorUserId: auth.user.id,
+        action: "outbound_message.queued",
+        targetType: "outbound_message",
+        targetId: message.id,
+        metadata: {
+          sellerAccountExternalId: message.sellerAccountExternalId,
+          externalCustomerId: message.externalCustomerId,
+          externalConversationId: message.externalConversationId
+        }
+      });
+
+      return { ok: true, message };
+    } catch (error) {
+      if (isNotFoundError(error, "outbound_conversation")) {
+        return reply.code(404).send({ ok: false, error: "outbound_conversation_not_found" });
+      }
+      throw error;
+    }
   });
 
   app.post("/internal/v1/customers/:externalCustomerId/ai-summary", async (request, reply) => {
@@ -870,7 +993,7 @@ async function collectorDeviceFromAuthorization(authorization: string, store: Sy
 }
 
 function collectorScopedBatch(batch: SyncBatch, device: CollectorDevice): SyncBatch {
-  const sellerAccountExternalId = device.sellerAccountExternalId || DEFAULT_SELLER_ACCOUNT_EXTERNAL_ID;
+  const sellerAccountExternalId = collectorSellerAccountExternalId(device);
   const deviceId = device.externalDeviceId || batch.device.deviceId;
   return {
     ...batch,
@@ -884,6 +1007,38 @@ function collectorScopedBatch(batch: SyncBatch, device: CollectorDevice): SyncBa
       deviceName: device.deviceName || batch.device.deviceName
     }
   };
+}
+
+function collectorSellerAccountExternalId(device: CollectorDevice): string {
+  return device.sellerAccountExternalId || DEFAULT_SELLER_ACCOUNT_EXTERNAL_ID;
+}
+
+function applyCorsHeaders(request: FastifyRequest, reply: FastifyReply): void {
+  const origin = requestOrigin(request);
+  if (!origin || !isAllowedCorsOrigin(origin)) return;
+
+  reply.header("Access-Control-Allow-Origin", origin);
+  reply.header("Vary", "Origin");
+  reply.header("Access-Control-Allow-Methods", "GET,POST,PATCH,OPTIONS");
+  reply.header("Access-Control-Allow-Headers", allowedCorsHeaders(request));
+  reply.header("Access-Control-Max-Age", "600");
+}
+
+function requestOrigin(request: FastifyRequest): string | null {
+  const origin = request.headers.origin;
+  return typeof origin === "string" && origin.trim() ? origin.trim() : null;
+}
+
+function isAllowedCorsOrigin(origin: string): boolean {
+  return (
+    /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin) ||
+    /^chrome-extension:\/\/[a-p]{32}$/.test(origin)
+  );
+}
+
+function allowedCorsHeaders(request: FastifyRequest): string {
+  const requested = request.headers["access-control-request-headers"];
+  return typeof requested === "string" && requested.trim() ? requested : "authorization,content-type";
 }
 
 function defaultCollectorDeviceExternalId(): string {
@@ -1146,6 +1301,17 @@ function queryStringField(source: unknown, field: string): string | null {
 function bodyStringField(source: unknown, field: string): string | null {
   const value = (source as Record<string, unknown> | null | undefined)?.[field];
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function bodyDeliveryStatusField(source: unknown): "sent" | "failed" | null {
+  const value = bodyStringField(source, "status");
+  return value === "sent" || value === "failed" ? value : null;
+}
+
+function queryNumberField(source: unknown, field: string): number | null {
+  const value = (source as Record<string, unknown> | null | undefined)?.[field];
+  const raw = typeof value === "string" ? Number(value) : typeof value === "number" ? value : NaN;
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : null;
 }
 
 function bodyRolesField(source: unknown): InternalRole[] {

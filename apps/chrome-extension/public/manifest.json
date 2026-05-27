@@ -17,7 +17,13 @@
     {
       "matches": ["https://onetalk.alibaba.com/*"],
       "js": ["content/onetalk-page-bridge.js"],
-      "run_at": "document_idle"
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["content/onetalk-page-script.js"],
+      "matches": ["https://onetalk.alibaba.com/*"]
     }
   ],
   "action": {
