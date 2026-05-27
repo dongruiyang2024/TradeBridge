@@ -228,7 +228,7 @@ class FakePostgresClient implements SqlClient {
           {
             id: "device-db-id",
             externalDeviceId: "chrome-extension-demo",
-            sellerAccountExternalId: null,
+            sellerAccountExternalId: params[0] || null,
             deviceName: "MacBook",
             status: "active",
             tokenHash: "device-token-hash",
@@ -1154,6 +1154,25 @@ test("PostgresSyncStore manages collector devices without storing raw tokens", a
   assert.equal(registerQuery.params[0], null);
   assert.equal(registerQuery.params[1], "chrome-extension-demo");
   assert.equal(registerQuery.params[2], "MacBook");
+});
+
+test("PostgresSyncStore registers collector devices with a persisted seller binding", async () => {
+  const client = new FakePostgresClient();
+  const store = new PostgresSyncStore(client);
+
+  const registered = await store.registerCollectorDevice({
+    sellerAccountExternalId: "default-seller",
+    externalDeviceId: "chrome-extension-demo",
+    deviceName: "Chrome Extension",
+    token: "collector-token"
+  });
+
+  const registerQuery = client.queries.find((query) => /register_collector_device/i.test(query.sql));
+  assert.ok(registerQuery);
+  assert.match(registerQuery.sql, /INSERT INTO seller_account/i);
+  assert.match(registerQuery.sql, /ON CONFLICT \(external_account_id\)/i);
+  assert.equal(registerQuery.params[0], "default-seller");
+  assert.equal(registered.sellerAccountExternalId, "default-seller");
 });
 
 test("PostgresSyncStore sync batch upserts collector devices by external device id", async () => {

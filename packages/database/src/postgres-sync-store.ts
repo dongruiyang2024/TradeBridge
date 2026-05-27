@@ -1334,9 +1334,12 @@ export class PostgresSyncStore {
       `
       /* register_collector_device */
       WITH seller AS (
-        SELECT id, external_account_id
-        FROM seller_account
-        WHERE external_account_id = $1
+        INSERT INTO seller_account (external_account_id)
+        SELECT $1
+        WHERE $1 IS NOT NULL
+        ON CONFLICT (external_account_id)
+        DO UPDATE SET updated_at = now()
+        RETURNING id, external_account_id
       ),
       upsert_device AS (
         INSERT INTO collector_device (seller_account_id, external_device_id, device_name, device_token_hash, status)
