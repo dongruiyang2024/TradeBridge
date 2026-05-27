@@ -66,13 +66,17 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
   const rawConversations = options.weblite.conversations.filter(isRecord);
   for (let index = 0; index < rawConversations.length; index += 1) {
     const conversation = rawConversations[index];
-    const externalConversationId = firstString(conversation, ["cid", "conversationCode", "conversationId", "id"]);
-    const externalCustomerId = firstString(conversation, [
-      "contactAccountId",
-      "contactAccountIdEncrypt",
-      "buyerAccountId",
-      "contactAliId"
-    ]);
+    const lwpConversation = lwpSingleChatConversation(conversation);
+    const externalConversationId =
+      firstString(conversation, ["cid", "conversationCode", "conversationId", "id"]) ||
+      firstString(lwpConversation, ["cid"]);
+    const externalCustomerId =
+      firstString(conversation, [
+        "contactAccountId",
+        "contactAccountIdEncrypt",
+        "buyerAccountId",
+        "contactAliId"
+      ]) || lwpCustomerId(lwpConversation, options.weblite.bootstrap);
     if (!externalConversationId || !externalCustomerId) continue;
     const pageConversation = pageConversationFor(
       options.weblite,
@@ -145,7 +149,9 @@ function firstMessageTime(conversation: Record<string, unknown>): unknown {
     "lastMessage.sendTime",
     "lastMessage.time",
     "lastMessage.gmtCreate",
-    "lastMessage.createdAt"
+    "lastMessage.createdAt",
+    "singleChatUserConversation.lastMessage.message.createAt",
+    "singleChatUserConversation.modifyTime"
   ]);
 }
 
@@ -165,20 +171,32 @@ function pageConversationFor(
 }
 
 function mapMessage(
-  message: Record<string, unknown>,
+  raw: Record<string, unknown>,
   externalConversationId: string,
   bootstrap: Record<string, string>,
   conversation: Record<string, unknown>
 ): BrowserSyncMessageInput | null {
-  const sentAt = isoTime(firstValue(message, ["sendTime", "sentAt", "time", "gmtCreate", "createdAt"]));
+  const message = lwpMessage(raw) || raw;
+  const sentAt = isoTime(firstValue(message, ["sendTime", "sentAt", "time", "gmtCreate", "createdAt", "createAt"]));
   return compact({
     externalConversationId,
     externalMessageId: firstString(message, ["messageId", "msgId", "messageID", "msgIdStr", "id"]),
     direction: directionOf(message, bootstrap, conversation),
-    messageType: firstString(message, ["messageType", "type", "msgType"]) || "text",
-    content: firstString(message, ["content", "text", "message", "summary", "messageContent", "textContent", "showText", "plainText"]),
+    messageType: firstString(message, ["messageType", "type", "msgType", "content.contentType", "displayStyle"]) || "text",
+    content: firstString(message, [
+      "content",
+      "text",
+      "message",
+      "summary",
+      "messageContent",
+      "textContent",
+      "showText",
+      "plainText",
+      "content.text.content",
+      "searchableContent.summary"
+    ]),
     sentAt,
-    rawSanitized: message
+    rawSanitized: raw
   });
 }
 
@@ -189,8 +207,11 @@ function directionOf(
 ): MessageDirection {
   const explicit = firstString(message, ["direction"]);
   if (explicit === "sent" || explicit === "received" || explicit === "unknown") return explicit;
-  const sender = firstString(message, ["senderAliId", "fromAliId", "senderId", "fromId"]);
-  const self = firstString(conversation, ["selfAliId"]) || bootstrap.aliId;
+  const sender = firstString(message, ["senderAliId", "fromAliId", "senderId", "fromId", "sender.uid"]);
+  const self =
+    firstString(conversation, ["selfAliId"]) ||
+    firstString(lwpSingleChatConversation(conversation), ["pairFirst"]) ||
+    bootstrap.aliId;
   if (!sender || !self) return "unknown";
   return sender === self ? "sent" : "received";
 }
@@ -201,9 +222,11 @@ function isAfterCursor(sentAt: string | undefined, cursor: string | null): boole
 }
 
 function firstString(source: Record<string, unknown>, keys: string[]): string | undefined {
-  const value = firstValue(source, keys);
-  if (typeof value === "string" && value.trim()) return value.trim();
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  for (const key of keys) {
+    const value = key.includes(".") ? valueAtPath(source, key.split(".")) : source[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
   return undefined;
 }
 
@@ -242,6 +265,25 @@ function numericTime(value: unknown): number | null {
 
 function compact<T extends Record<string, unknown>>(source: T): T {
   return Object.fromEntries(Object.entries(source).filter(([, value]) => value !== undefined && value !== null)) as T;
+}
+
+function lwpSingleChatConversation(conversation: Record<string, unknown>): Record<string, unknown> {
+  const wrapper = valueAtPath(conversation, ["singleChatUserConversation", "singleChatConversation"]);
+  return isRecord(wrapper) ? wrapper : {};
+}
+
+function lwpCustomerId(lwpConversation: Record<string, unknown>, bootstrap: Record<string, string>): string | undefined {
+  const pairFirst = firstString(lwpConversation, ["pairFirst"]);
+  const pairSecond = firstString(lwpConversation, ["pairSecond"]);
+  const self = bootstrap.aliId;
+  if (self && pairFirst === self) return pairSecond;
+  if (self && pairSecond === self) return pairFirst;
+  return pairSecond || pairFirst;
+}
+
+function lwpMessage(raw: Record<string, unknown>): Record<string, unknown> | null {
+  const value = raw.message;
+  return isRecord(value) ? value : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

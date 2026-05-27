@@ -37,7 +37,13 @@ async function renderStatus(): Promise<void> {
 
 function diagnosticSummary(diagnostics?: SyncDiagnostics): string {
   if (!diagnostics) return "";
+  const lines: string[] = [];
   const requests = diagnostics.messageRequests.length;
   const withMessages = diagnostics.messageRequests.filter((item) => item.listLength > 0).length;
-  return `消息接口：${withMessages}/${requests || diagnostics.conversations} 个会话有消息`;
+  lines.push(`消息接口：${withMessages}/${requests || diagnostics.conversations} 个会话有消息`);
+  const lwpRoutes = diagnostics.lwpRoutes || [];
+  if (lwpRoutes.length) {
+    lines.push(`LWP：${lwpRoutes.filter((item) => item.status === 200).length}/${lwpRoutes.length} 个请求成功`);
+  }
+  return lines.join("\n");
 }

@@ -1,4 +1,5 @@
-import { BrowserOnetalkClient } from "./onetalk-client.js";
+import { BrowserOnetalkLwpClient } from "./onetalk-lwp-client.js";
+import { requestOneTalkImToken } from "./onetalk-token-client.js";
 import { runOutboundDelivery } from "./outbound-orchestrator.js";
 import { ExtensionStateStore } from "./storage.js";
 import { runSyncOnce } from "./sync-orchestrator.js";
@@ -36,10 +37,21 @@ chromeApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return false;
 });
 
-function runDefaultSync() {
+async function runDefaultSync() {
+  const config = await stateStore.getConfig();
   return runSyncOnce({
     stateStore,
-    onetalkClient: new BrowserOnetalkClient(),
+    onetalkClient: new BrowserOnetalkLwpClient({
+      appKey: "12574478",
+      deviceId: config?.deviceId || "chrome-extension",
+      userAgent: navigator.userAgent,
+      tokenProvider: async () =>
+        requestOneTalkImToken({
+          chromeApi,
+          appKey: "12574478",
+          deviceId: config?.deviceId || "chrome-extension"
+        })
+    }),
     uploadSyncBatch
   });
 }

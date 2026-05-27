@@ -69,6 +69,26 @@ test("runOutboundDelivery marks queued messages failed when no OneTalk tab is op
   assert.equal(delivered[0].errorCode, "onetalk_tab_required");
 });
 
+test("runOutboundDelivery marks sent when OneTalk page reports success without external message id", async () => {
+  const store = new MemoryStateStore();
+  const delivered: Array<{ outboundMessageId: string; status: string; externalMessageId?: string }> = [];
+
+  const result = await runOutboundDelivery({
+    stateStore: store,
+    chromeApi: fakeChromeApi([], { ok: true }),
+    listOutboundMessages: async () => [outboundMessage()],
+    markOutboundMessageDelivered: async (options) => {
+      delivered.push(options);
+      return { ...outboundMessage(), status: options.status, externalMessageId: options.externalMessageId };
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.sentCount, 1);
+  assert.equal(delivered[0].status, "sent");
+  assert.equal(delivered[0].externalMessageId, undefined);
+});
+
 function fakeChromeApi(sentToTab: unknown[], response: unknown, tabs = [{ id: 9 }]): ChromeApi {
   return {
     runtime: {

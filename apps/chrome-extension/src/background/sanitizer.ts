@@ -8,6 +8,11 @@ const SENSITIVE_KEY_PATTERNS = [
   /^sgcookie$/i,
   /^x5sec$/i,
   /^chattoken$/i,
+  /^sid$/i,
+  /^reg-sid$/i,
+  /^reg-uid$/i,
+  /^accesstoken$/i,
+  /^refreshtoken$/i,
   /token/i,
   /csrf/i
 ];
@@ -19,6 +24,8 @@ const SENSITIVE_TEXT_PATTERNS = [
   /(?:^|[?&;"'\s])sgcookie=/i,
   /(?:^|[?&;"'\s])x5sec=/i,
   /(?:^|[?&;"'\s])chatToken=/i,
+  /(?:^|[?&;"'\s])accessToken=/i,
+  /(?:^|[?&;"'\s])refreshToken=/i,
   /Authorization:\s*/i,
   /Cookie:\s*/i,
   /Set-Cookie:\s*/i

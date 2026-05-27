@@ -121,7 +121,13 @@ async function fetchMessagesByConversation(options: {
   let conversations = 0;
 
   for (const conversation of options.weblite.conversations.filter(isRecord)) {
-    const conversationId = firstString(conversation, ["cid", "conversationCode", "conversationId", "id"]);
+    const conversationId = firstString(conversation, [
+      "cid",
+      "conversationCode",
+      "conversationId",
+      "id",
+      "singleChatUserConversation.singleChatConversation.cid"
+    ]);
     if (!conversationId) continue;
     conversations += 1;
     const messages: Record<string, unknown>[] = [];
@@ -150,7 +156,15 @@ async function fetchMessagesByConversation(options: {
     messagesByConversationId: output,
     diagnostics: {
       conversations,
-      messageRequests: diagnostics
+      messageRequests: diagnostics,
+      lwpRoutes: [
+        { route: "/r/Conversation/listNewestPagination", status: 200, listLength: conversations },
+        ...diagnostics.map((item) => ({
+          route: "/r/MessageManager/listUserMessages",
+          status: item.status,
+          listLength: item.listLength
+        }))
+      ]
     }
   };
 }
@@ -178,7 +192,7 @@ function objectKeys(value: unknown): string[] {
 
 function oldestTimestamp(records: Record<string, unknown>[]): number | null {
   const times = records
-    .map((record) => numericTime(firstValue(record, ["sendTime", "sentAt", "time", "gmtCreate", "createdAt"])))
+    .map((record) => numericTime(firstValue(record, ["sendTime", "sentAt", "time", "gmtCreate", "createdAt", "message.createAt"])))
     .filter((value): value is number => value != null);
   return times.length ? Math.min(...times) : null;
 }
@@ -198,10 +212,19 @@ function firstString(source: Record<string, unknown>, keys: string[]): string | 
 
 function firstValue(source: Record<string, unknown>, keys: string[]): unknown {
   for (const key of keys) {
-    const value = source[key];
+    const value = key.includes(".") ? valueAtPath(source, key.split(".")) : source[key];
     if (value != null && value !== "") return value;
   }
   return undefined;
+}
+
+function valueAtPath(source: unknown, path: string[]): unknown {
+  let current = source;
+  for (const key of path) {
+    if (!isRecord(current)) return undefined;
+    current = current[key];
+  }
+  return current;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

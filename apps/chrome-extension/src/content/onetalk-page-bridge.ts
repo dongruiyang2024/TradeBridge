@@ -18,10 +18,15 @@ void getChrome().runtime.sendMessage({
 
 getChrome().runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const typed = message as ExtensionMessage;
-  if (typed.type !== "send-onetalk-message") return false;
-
-  void sendOutboundMessageToPage(typed.message).then(sendResponse);
-  return true;
+  if (typed.type === "send-onetalk-message") {
+    void sendOutboundMessageToPage(typed.message).then(sendResponse);
+    return true;
+  }
+  if (typed.type === "get-onetalk-im-token") {
+    void requestImTokenFromPage(typed.appKey, typed.deviceId).then(sendResponse);
+    return true;
+  }
+  return false;
 });
 
 if (!loginRequired) {
@@ -86,6 +91,44 @@ async function sendOutboundMessageToPage(message: OutboundMessage) {
         type: "send-onetalk-message",
         requestId,
         message
+      },
+      window.location.origin
+    );
+  });
+}
+
+async function requestImTokenFromPage(appKey: string, deviceId: string) {
+  const requestId = `tradebridge-token-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return new Promise((resolve) => {
+    const timeout = window.setTimeout(() => {
+      window.removeEventListener("message", handleMessage);
+      resolve({ ok: false, error: "onetalk_token_timeout" });
+    }, 15_000);
+
+    function handleMessage(event: MessageEvent): void {
+      if (event.source !== window || !isRecord(event.data)) return;
+      if (event.data.source !== "tradebridge-onetalk-page") return;
+      if (event.data.type !== "get-onetalk-im-token-result" || event.data.requestId !== requestId) return;
+
+      window.clearTimeout(timeout);
+      window.removeEventListener("message", handleMessage);
+      resolve({
+        ok: event.data.ok === true,
+        accessToken: typeof event.data.accessToken === "string" ? event.data.accessToken : undefined,
+        refreshToken: typeof event.data.refreshToken === "string" ? event.data.refreshToken : undefined,
+        expiresInMs: typeof event.data.expiresInMs === "number" ? event.data.expiresInMs : undefined,
+        error: typeof event.data.error === "string" ? event.data.error : undefined
+      });
+    }
+
+    window.addEventListener("message", handleMessage);
+    window.postMessage(
+      {
+        source: "tradebridge-extension",
+        type: "get-onetalk-im-token",
+        requestId,
+        appKey,
+        deviceId
       },
       window.location.origin
     );

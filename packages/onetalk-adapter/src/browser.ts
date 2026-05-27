@@ -1,3 +1,5 @@
+export * from "./lwp-normalizer.js";
+export * from "./lwp-protocol.js";
 export { buildPayload } from "./payload.js";
 export { extractJsonAfter, pageBootstrap } from "./weblite-parser.js";
 export type {
