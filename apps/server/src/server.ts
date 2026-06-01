@@ -633,6 +633,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
           externalConversationId: message.externalConversationId
         }
       });
+      realtimeHub.notifyOutboundAvailable(message.sellerAccountExternalId, 1);
 
       return { ok: true, message };
     } catch (error) {
