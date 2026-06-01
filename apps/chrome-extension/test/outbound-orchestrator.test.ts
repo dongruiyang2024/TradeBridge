@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { runOutboundDelivery } from "../src/background/outbound-orchestrator.js";
+import { runOutboundDelivery, sendOutboundMessagesViaOneTalk } from "../src/background/outbound-orchestrator.js";
 import type { ChromeApi } from "../src/shared/chrome-api.js";
 import type { ExtensionConfig, ExtensionStatus, OutboundMessage } from "../src/shared/sync-types.js";
 
@@ -87,6 +87,24 @@ test("runOutboundDelivery marks sent when OneTalk page reports success without e
   assert.equal(result.sentCount, 1);
   assert.equal(delivered[0].status, "sent");
   assert.equal(delivered[0].externalMessageId, undefined);
+});
+
+test("sendOutboundMessagesViaOneTalk sends provided messages and returns delivery reports", async () => {
+  const sentToTab: unknown[] = [];
+
+  const reports = await sendOutboundMessagesViaOneTalk({
+    chromeApi: fakeChromeApi(sentToTab, { ok: true, externalMessageId: "onetalk-msg-1" }),
+    messages: [outboundMessage()]
+  });
+
+  assert.deepEqual(reports, [
+    {
+      outboundMessageId: "outbound-1",
+      status: "sent",
+      externalMessageId: "onetalk-msg-1"
+    }
+  ]);
+  assert.deepEqual(sentToTab, [{ type: "send-onetalk-message", message: outboundMessage() }]);
 });
 
 function fakeChromeApi(sentToTab: unknown[], response: unknown, tabs = [{ id: 9 }]): ChromeApi {

@@ -32,6 +32,14 @@ export interface RunOutboundDeliveryResult {
   error?: string;
 }
 
+export interface OutboundDeliveryReport {
+  outboundMessageId: string;
+  status: "sent" | "failed";
+  externalMessageId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
 interface PageSendResponse {
   ok: boolean;
   externalMessageId?: string;
@@ -52,19 +60,19 @@ export async function runOutboundDelivery(options: RunOutboundDeliveryOptions): 
     let sentCount = 0;
     let failedCount = 0;
 
-    for (const message of messages) {
-      const result = await sendViaOneTalkTab(options.chromeApi, message);
+    const reports = await sendOutboundMessagesViaOneTalk({ chromeApi: options.chromeApi, messages });
+    for (const report of reports) {
       await options.markOutboundMessageDelivered({
         serverUrl: config.serverUrl,
         collectorToken: config.collectorToken,
-        outboundMessageId: message.id,
-        status: result.ok ? "sent" : "failed",
-        externalMessageId: result.externalMessageId,
-        errorCode: result.ok ? undefined : result.error || "onetalk_send_failed",
-        errorMessage: result.ok ? undefined : result.error || "OneTalk send failed",
+        outboundMessageId: report.outboundMessageId,
+        status: report.status,
+        externalMessageId: report.externalMessageId,
+        errorCode: report.errorCode,
+        errorMessage: report.errorMessage,
         deliveredAt: new Date().toISOString()
       });
-      if (result.ok) sentCount += 1;
+      if (report.status === "sent") sentCount += 1;
       else failedCount += 1;
     }
 
@@ -84,6 +92,32 @@ export async function runOutboundDelivery(options: RunOutboundDeliveryOptions): 
     });
     return { ok: false, error: code };
   }
+}
+
+export async function sendOutboundMessagesViaOneTalk(options: {
+  chromeApi: ChromeApi;
+  messages: OutboundMessage[];
+}): Promise<OutboundDeliveryReport[]> {
+  const reports: OutboundDeliveryReport[] = [];
+  for (const message of options.messages) {
+    const result = await sendViaOneTalkTab(options.chromeApi, message);
+    if (result.ok) {
+      const report: OutboundDeliveryReport = {
+        outboundMessageId: message.id,
+        status: "sent"
+      };
+      if (result.externalMessageId) report.externalMessageId = result.externalMessageId;
+      reports.push(report);
+    } else {
+      reports.push({
+        outboundMessageId: message.id,
+        status: "failed",
+        errorCode: result.error || "onetalk_send_failed",
+        errorMessage: result.error || "OneTalk send failed"
+      });
+    }
+  }
+  return reports;
 }
 
 async function sendViaOneTalkTab(chromeApi: ChromeApi, message: OutboundMessage): Promise<PageSendResponse> {
