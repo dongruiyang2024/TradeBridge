@@ -1,7 +1,9 @@
 import crypto from "node:crypto";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
+import websocket from "@fastify/websocket";
 import { loadWorkspaceEnv } from "@wangwang/env";
 import {
+  type ClaimPendingOutboundMessagesInput,
   InMemorySyncStore,
   PostgresSyncStore,
   createNodePostgresClient,
@@ -61,6 +63,8 @@ import {
 } from "./ai-queue.js";
 import { createDeterministicAiProvider, type AiProvider } from "./ai-service.js";
 import { hashPassword, verifyPassword } from "./auth.js";
+import { createCollectorRealtimeHub } from "./collector-realtime-hub.js";
+import { registerCollectorWsRoutes } from "./collector-ws.js";
 
 const DEFAULT_SELLER_ACCOUNT_EXTERNAL_ID = "default-seller";
 const DEFAULT_COLLECTOR_DEVICE_NAME = "TradeBridge Collector";
@@ -100,6 +104,7 @@ export interface SyncStore {
   listReplySuggestions(scope: ConversationCustomerScope): Promise<StoredReplySuggestion[]> | StoredReplySuggestion[];
   createOutboundMessage(input: CreateOutboundMessageInput): Promise<StoredOutboundMessage> | StoredOutboundMessage;
   listPendingOutboundMessages(input: ListPendingOutboundMessagesInput): Promise<StoredOutboundMessage[]> | StoredOutboundMessage[];
+  claimPendingOutboundMessages(input: ClaimPendingOutboundMessagesInput): Promise<StoredOutboundMessage[]> | StoredOutboundMessage[];
   listOutboundMessages(input: ListOutboundMessagesInput): Promise<StoredOutboundMessage[]> | StoredOutboundMessage[];
   markOutboundMessageDelivered(input: MarkOutboundMessageDeliveredInput): Promise<StoredOutboundMessage> | StoredOutboundMessage;
   createInternalUser(input: CreateInternalUserInput): Promise<InternalUser> | InternalUser;
@@ -123,12 +128,19 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   const store = options.store || new InMemorySyncStore();
   const aiProvider = options.aiProvider || createDeterministicAiProvider();
   const aiJobQueue = options.aiJobQueue || createSyncAiJobQueue();
+  const realtimeHub = createCollectorRealtimeHub();
   const internalAccessRoles: InternalRole[] = ["admin", "supervisor", "sales"];
   const adminRoles: InternalRole[] = ["admin"];
   let setupInProgress = false;
   const app = Fastify({
     logger: options.logger ?? false
   });
+
+  await app.register(websocket, {
+    options: { maxPayload: 1024 * 1024 },
+    preClose: terminateWebsocketServer
+  });
+  await registerCollectorWsRoutes(app, { store, hub: realtimeHub });
 
   app.addHook("onRequest", async (request, reply) => {
     applyCorsHeaders(request, reply);
@@ -621,6 +633,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
           externalConversationId: message.externalConversationId
         }
       });
+      realtimeHub.notifyOutboundAvailable(message.sellerAccountExternalId, 1);
 
       return { ok: true, message };
     } catch (error) {
@@ -1366,4 +1379,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const host = process.env.WANGWANG_SERVER_HOST || "127.0.0.1";
   const port = Number(process.env.WANGWANG_SERVER_PORT || 5032);
   await app.listen({ host, port });
+}
+
+function terminateWebsocketServer(this: FastifyInstance, done: () => void): void {
+  for (const socket of this.websocketServer.clients) {
+    socket.terminate();
+  }
+  this.websocketServer.close(done);
 }

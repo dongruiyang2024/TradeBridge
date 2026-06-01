@@ -11,6 +11,9 @@ export interface ChromeRuntimeApi {
   onInstalled: {
     addListener(callback: () => void): void;
   };
+  onStartup?: {
+    addListener(callback: () => void): void;
+  };
   onMessage: {
     addListener(
       callback: (

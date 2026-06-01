@@ -289,6 +289,57 @@ test("outbound messages are queued and marked delivered by collector devices", a
   assert.equal((await store.listPendingOutboundMessages({ sellerAccountExternalId: "seller-1", limit: 10 })).length, 0);
 });
 
+test("outbound messages are claimed once until lease expires", async () => {
+  const store = new InMemorySyncStore();
+  await store.acceptSyncBatch({
+    sellerAccount: { externalAccountId: "seller-1" },
+    device: { deviceId: "device-1" },
+    customers: [{ externalCustomerId: "customer-1" }],
+    conversations: [{ externalConversationId: "conv-1", externalCustomerId: "customer-1" }]
+  });
+  await store.createOutboundMessage({
+    sellerAccountExternalId: "seller-1",
+    externalCustomerId: "customer-1",
+    externalConversationId: "conv-1",
+    content: "Please check the updated quote."
+  });
+
+  const first = await store.claimPendingOutboundMessages({
+    sellerAccountExternalId: "seller-1",
+    deviceId: "device-a",
+    limit: 10,
+    leaseMs: 120000,
+    now: new Date("2026-06-01T00:00:00.000Z")
+  });
+  const second = await store.claimPendingOutboundMessages({
+    sellerAccountExternalId: "seller-1",
+    deviceId: "device-b",
+    limit: 10,
+    leaseMs: 120000,
+    now: new Date("2026-06-01T00:00:30.000Z")
+  });
+  const hiddenFromPolling = await store.listPendingOutboundMessages({
+    sellerAccountExternalId: "seller-1",
+    limit: 10,
+    now: new Date("2026-06-01T00:00:30.000Z")
+  });
+  const expired = await store.claimPendingOutboundMessages({
+    sellerAccountExternalId: "seller-1",
+    deviceId: "device-b",
+    limit: 10,
+    leaseMs: 120000,
+    now: new Date("2026-06-01T00:03:00.000Z")
+  });
+
+  assert.equal(first.length, 1);
+  assert.equal(first[0].claimedByDeviceId, "device-a");
+  assert.equal(first[0].claimExpiresAt, "2026-06-01T00:02:00.000Z");
+  assert.equal(second.length, 0);
+  assert.equal(hiddenFromPolling.length, 0);
+  assert.equal(expired.length, 1);
+  assert.equal(expired[0].claimedByDeviceId, "device-b");
+});
+
 test("internal user invitations can be created, inspected, and accepted once", async () => {
   const store = new InMemorySyncStore();
   const invitation = await store.createUserInvitation({

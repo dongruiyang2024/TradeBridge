@@ -7,7 +7,8 @@ test("internal sync migrations expose the initial schema in order", () => {
     INTERNAL_SYNC_MIGRATIONS.map((migration) => [migration.id, migration.filename]),
     [
       ["001_internal_sync_schema", "001_internal_sync_schema.sql"],
-      ["002_outbound_message_queue", "002_outbound_message_queue.sql"]
+      ["002_outbound_message_queue", "002_outbound_message_queue.sql"],
+      ["003_outbound_message_claim_lease", "003_outbound_message_claim_lease.sql"]
     ]
   );
   assert.doesNotMatch(INTERNAL_SYNC_MIGRATIONS[0].sql, /CREATE TABLE IF NOT EXISTS org/i);
@@ -20,6 +21,14 @@ test("outbound queue migration upgrades existing databases", () => {
   assert.match(normalized, /status text not null default 'queued' check \(status in \('queued', 'sent', 'failed'\)\)/);
   assert.match(normalized, /create index if not exists idx_outbound_message_pending/);
   assert.match(normalized, /create index if not exists idx_outbound_message_conversation/);
+});
+
+test("outbound claim lease migration adds claim tracking columns", () => {
+  const normalized = INTERNAL_SYNC_MIGRATIONS[2].sql.replace(/\s+/g, " ").toLowerCase();
+
+  assert.match(normalized, /alter table outbound_message add column if not exists claimed_by_device_id text/);
+  assert.match(normalized, /alter table outbound_message add column if not exists claim_expires_at timestamptz/);
+  assert.match(normalized, /create index if not exists idx_outbound_message_claimable/);
 });
 
 test("initial schema contains the core platform tables", () => {

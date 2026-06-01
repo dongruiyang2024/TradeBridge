@@ -11,9 +11,9 @@
     "dev": "npm run build -w @wangwang/env && npm run build -w @wangwang/onetalk-adapter && npm run build -w @wangwang/database && concurrently -n server,web -c cyan,magenta \"npm run dev -w @wangwang/server\" \"npm run dev -w @wangwang/web\"",
     "dev:server": "npm run build -w @wangwang/env && npm run build -w @wangwang/database && npm run dev -w @wangwang/server",
     "dev:web": "npm run dev -w @wangwang/web",
-    "build": "npm run build -w @wangwang/env && npm run build -w @wangwang/onetalk-adapter && npm run build -w @wangwang/database && npm run build -w @wangwang/collector-desktop && npm run build -w @wangwang/server && npm run build -w @wangwang/web && npm run build -w @wangwang/chrome-extension",
-    "typecheck": "npm run build -w @wangwang/env && npm run build -w @wangwang/onetalk-adapter && npm run build -w @wangwang/database && npm run typecheck -w @wangwang/collector-desktop && npm run typecheck -w @wangwang/server && npm run typecheck -w @wangwang/web && npm run typecheck -w @wangwang/chrome-extension",
-    "test:e2e": "npm run build -w @wangwang/env && npm run build -w @wangwang/onetalk-adapter && npm run build -w @wangwang/database && npm run build -w @wangwang/collector-desktop && npm run build -w @wangwang/server && npm run build -w @wangwang/web && node --import tsx --test test/e2e/*.test.ts"
+    "build": "npm run build -w @wangwang/env && npm run build -w @wangwang/collector-protocol && npm run build -w @wangwang/onetalk-adapter && npm run build -w @wangwang/database && npm run build -w @wangwang/collector-desktop && npm run build -w @wangwang/server && npm run build -w @wangwang/web && npm run build -w @wangwang/chrome-extension",
+    "typecheck": "npm run build -w @wangwang/env && npm run build -w @wangwang/collector-protocol && npm run build -w @wangwang/onetalk-adapter && npm run build -w @wangwang/database && npm run typecheck -w @wangwang/collector-desktop && npm run typecheck -w @wangwang/server && npm run typecheck -w @wangwang/web && npm run typecheck -w @wangwang/chrome-extension",
+    "test:e2e": "npm run build -w @wangwang/env && npm run build -w @wangwang/collector-protocol && npm run build -w @wangwang/onetalk-adapter && npm run build -w @wangwang/database && npm run build -w @wangwang/collector-desktop && npm run build -w @wangwang/server && npm run build -w @wangwang/web && node --import tsx --test test/e2e/*.test.ts"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

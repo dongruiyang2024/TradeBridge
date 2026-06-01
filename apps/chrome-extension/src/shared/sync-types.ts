@@ -63,11 +63,22 @@ export interface ExtensionConfig {
 export interface ExtensionStatus {
   lastSyncedAt?: string;
   nextCursor?: string | null;
+  realtime?: ExtensionRealtimeStatus;
   lastDiagnostics?: SyncDiagnostics;
   lastError?: {
     code: string;
     message: string;
   };
+}
+
+export interface ExtensionRealtimeStatus {
+  state: "idle" | "connecting" | "connected" | "closed" | "error";
+  sessionId?: string;
+  connectedAt?: string;
+  disconnectedAt?: string;
+  lastChangedAt: string;
+  lastError?: string;
+  reconnectCount?: number;
 }
 
 export interface SyncDiagnostics {

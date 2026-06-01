@@ -3,11 +3,13 @@
   "name": "TradeBridge OneTalk Collector",
   "version": "0.1.0",
   "description": "Sync authorized OneTalk conversations to TradeBridge without uploading OneTalk credentials.",
+  "minimum_chrome_version": "116",
   "permissions": ["storage", "alarms", "cookies", "scripting"],
   "host_permissions": [
     "https://onetalk.alibaba.com/*",
     "https://*.alibaba.com/*",
-    "http://127.0.0.1:5032/*"
+    "http://127.0.0.1:5032/*",
+    "ws://127.0.0.1:5032/*"
   ],
   "background": {
     "service_worker": "background/index.js",

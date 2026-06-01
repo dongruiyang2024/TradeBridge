@@ -543,6 +543,31 @@ class FakePostgresClient implements SqlClient {
         rowCount: 1
       };
     }
+    if (/claim_pending_outbound_messages/i.test(sql)) {
+      return {
+        rows: [
+          {
+            id: "outbound-db-id",
+            sellerAccountExternalId: "seller-1",
+            externalCustomerId: "customer-1",
+            externalConversationId: "conv-1",
+            content: "Quote is ready.",
+            status: "queued",
+            createdByUserId: null,
+            deliveredByDeviceId: null,
+            externalMessageId: null,
+            errorCode: null,
+            errorMessage: null,
+            createdAt: "2026-06-01T00:00:00.000Z",
+            updatedAt: "2026-06-01T00:00:01.000Z",
+            deliveredAt: null,
+            claimedByDeviceId: "device-1",
+            claimExpiresAt: "2026-06-01T00:02:01.000Z"
+          }
+        ] as T[],
+        rowCount: 1
+      };
+    }
 
     return { rows: [], rowCount: 0 };
   }
@@ -1246,4 +1271,25 @@ test("PostgresSyncStore creates and reads AI summaries and reply suggestions wit
     "draft",
     "user-1"
   ]);
+});
+
+test("PostgresSyncStore claims pending outbound messages with a lease", async () => {
+  const client = new FakePostgresClient();
+  const store = new PostgresSyncStore(client);
+
+  const claimed = await store.claimPendingOutboundMessages({
+    sellerAccountExternalId: "seller-1",
+    deviceId: "device-1",
+    limit: 5,
+    leaseMs: 120000
+  });
+
+  const claimQuery = client.queries.find((query) => /claim_pending_outbound_messages/i.test(query.sql));
+  assert.ok(claimQuery);
+  assert.match(claimQuery.sql, /FOR UPDATE SKIP LOCKED/i);
+  assert.match(claimQuery.sql, /claim_expires_at/i);
+  assert.deepEqual(claimQuery.params, ["seller-1", 5, "device-1", 120000]);
+  assert.equal(claimed.length, 1);
+  assert.equal(claimed[0].claimedByDeviceId, "device-1");
+  assert.equal(claimed[0].claimExpiresAt, "2026-06-01T00:02:01.000Z");
 });
