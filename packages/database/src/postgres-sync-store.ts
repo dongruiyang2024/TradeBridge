@@ -5,6 +5,7 @@ import type {
   AcceptUserInvitationInput,
   AcceptUserInvitationResult,
   AssignCustomerInput,
+  ClaimPendingOutboundMessagesInput,
   CollectorDevice,
   ConversationCustomerScope,
   CreateAiSummaryInput,
@@ -178,6 +179,8 @@ interface OutboundMessageRow {
   createdAt: string | Date;
   updatedAt: string | Date;
   deliveredAt: string | Date | null;
+  claimedByDeviceId?: string | null;
+  claimExpiresAt?: string | Date | null;
 }
 
 interface InternalUserRow {
@@ -954,17 +957,74 @@ export class PostgresSyncStore {
         om.error_message AS "errorMessage",
         om.created_at AS "createdAt",
         om.updated_at AS "updatedAt",
-        om.delivered_at AS "deliveredAt"
+        om.delivered_at AS "deliveredAt",
+        om.claimed_by_device_id AS "claimedByDeviceId",
+        om.claim_expires_at AS "claimExpiresAt"
       FROM outbound_message om
       INNER JOIN seller_account s ON s.id = om.seller_account_id
       INNER JOIN customer c ON c.id = om.customer_id
       INNER JOIN conversation conv ON conv.id = om.conversation_id
       WHERE s.external_account_id = $1
         AND om.status = 'queued'
+        AND (om.claim_expires_at IS NULL OR om.claim_expires_at <= now())
       ORDER BY om.created_at ASC, om.id ASC
       LIMIT $2
       `,
       [input.sellerAccountExternalId, limit]
+    );
+    return result.rows.map(mapOutboundMessage);
+  }
+
+  async claimPendingOutboundMessages(input: ClaimPendingOutboundMessagesInput): Promise<StoredOutboundMessage[]> {
+    const limit = Math.max(1, Math.min(input.limit || 20, 100));
+    const leaseMs = Math.max(30_000, Math.min(input.leaseMs || 120_000, 600_000));
+    const result = await this.client.query<OutboundMessageRow>(
+      `
+      /* claim_pending_outbound_messages */
+      WITH candidates AS (
+        SELECT om.id
+        FROM outbound_message om
+        INNER JOIN seller_account s ON s.id = om.seller_account_id
+        WHERE s.external_account_id = $1
+          AND om.status = 'queued'
+          AND (om.claim_expires_at IS NULL OR om.claim_expires_at <= now())
+        ORDER BY om.created_at ASC, om.id ASC
+        LIMIT $2
+        FOR UPDATE SKIP LOCKED
+      ),
+      updated_message AS (
+        UPDATE outbound_message om
+        SET
+          claimed_by_device_id = $3,
+          claim_expires_at = now() + ($4::text || ' milliseconds')::interval,
+          updated_at = now()
+        FROM candidates
+        WHERE om.id = candidates.id
+        RETURNING om.*
+      )
+      SELECT
+        om.id::text AS "id",
+        s.external_account_id AS "sellerAccountExternalId",
+        c.external_customer_id AS "externalCustomerId",
+        conv.external_conversation_id AS "externalConversationId",
+        om.content AS "content",
+        om.status AS "status",
+        om.created_by::text AS "createdByUserId",
+        om.delivered_by_device_id AS "deliveredByDeviceId",
+        om.external_message_id AS "externalMessageId",
+        om.error_code AS "errorCode",
+        om.error_message AS "errorMessage",
+        om.created_at AS "createdAt",
+        om.updated_at AS "updatedAt",
+        om.delivered_at AS "deliveredAt",
+        om.claimed_by_device_id AS "claimedByDeviceId",
+        om.claim_expires_at AS "claimExpiresAt"
+      FROM updated_message om
+      INNER JOIN seller_account s ON s.id = om.seller_account_id
+      INNER JOIN customer c ON c.id = om.customer_id
+      INNER JOIN conversation conv ON conv.id = om.conversation_id
+      `,
+      [input.sellerAccountExternalId, limit, input.deviceId, leaseMs]
     );
     return result.rows.map(mapOutboundMessage);
   }
@@ -987,7 +1047,9 @@ export class PostgresSyncStore {
         om.error_message AS "errorMessage",
         om.created_at AS "createdAt",
         om.updated_at AS "updatedAt",
-        om.delivered_at AS "deliveredAt"
+        om.delivered_at AS "deliveredAt",
+        om.claimed_by_device_id AS "claimedByDeviceId",
+        om.claim_expires_at AS "claimExpiresAt"
       FROM outbound_message om
       INNER JOIN seller_account s ON s.id = om.seller_account_id
       INNER JOIN customer c ON c.id = om.customer_id
@@ -1035,7 +1097,9 @@ export class PostgresSyncStore {
         om.error_message AS "errorMessage",
         om.created_at AS "createdAt",
         om.updated_at AS "updatedAt",
-        om.delivered_at AS "deliveredAt"
+        om.delivered_at AS "deliveredAt",
+        om.claimed_by_device_id AS "claimedByDeviceId",
+        om.claim_expires_at AS "claimExpiresAt"
       FROM updated_message om
       INNER JOIN seller_account s ON s.id = om.seller_account_id
       INNER JOIN customer c ON c.id = om.customer_id
@@ -2031,7 +2095,9 @@ function mapOutboundMessage(row: OutboundMessageRow): StoredOutboundMessage {
       externalMessageId: row.externalMessageId,
       errorCode: row.errorCode,
       errorMessage: row.errorMessage,
-      deliveredAt: isoString(row.deliveredAt)
+      deliveredAt: isoString(row.deliveredAt),
+      claimedByDeviceId: row.claimedByDeviceId,
+      claimExpiresAt: isoString(row.claimExpiresAt ?? null)
     })
   };
 }

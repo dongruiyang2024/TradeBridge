@@ -194,6 +194,15 @@ export interface CreateOutboundMessageInput extends ConversationCustomerScope {
 export interface ListPendingOutboundMessagesInput {
   sellerAccountExternalId: string;
   limit?: number;
+  now?: Date;
+}
+
+export interface ClaimPendingOutboundMessagesInput {
+  sellerAccountExternalId: string;
+  deviceId: string;
+  limit?: number;
+  leaseMs?: number;
+  now?: Date;
 }
 
 export interface ListOutboundMessagesInput {
@@ -224,6 +233,8 @@ export interface StoredOutboundMessage extends ConversationCustomerScope {
   createdAt: string;
   updatedAt: string;
   deliveredAt?: string;
+  claimedByDeviceId?: string;
+  claimExpiresAt?: string;
 }
 
 export type InternalRole = "admin" | "supervisor" | "sales";

@@ -4,6 +4,7 @@ import type {
   AcceptUserInvitationInput,
   AcceptUserInvitationResult,
   AssignCustomerInput,
+  ClaimPendingOutboundMessagesInput,
   CollectorDevice,
   ConversationCustomerScope,
   CreateAiSummaryInput,
@@ -310,9 +311,40 @@ export class InMemorySyncStore {
 
   async listPendingOutboundMessages(input: ListPendingOutboundMessagesInput): Promise<StoredOutboundMessage[]> {
     const limit = Math.max(1, Math.min(input.limit || 20, 100));
+    const now = input.now || new Date();
     return this.sortedOutboundMessages()
-      .filter((item) => item.sellerAccountExternalId === input.sellerAccountExternalId && item.status === "queued")
+      .filter(
+        (item) =>
+          item.sellerAccountExternalId === input.sellerAccountExternalId &&
+          item.status === "queued" &&
+          isClaimExpired(item, now)
+      )
       .slice(0, limit);
+  }
+
+  async claimPendingOutboundMessages(input: ClaimPendingOutboundMessagesInput): Promise<StoredOutboundMessage[]> {
+    const limit = Math.max(1, Math.min(input.limit || 20, 100));
+    const leaseMs = Math.max(30_000, Math.min(input.leaseMs || 120_000, 600_000));
+    const now = input.now || new Date();
+    const claimExpiresAt = new Date(now.getTime() + leaseMs).toISOString();
+    const claimed: StoredOutboundMessage[] = [];
+
+    for (const message of this.sortedOutboundMessages()) {
+      if (claimed.length >= limit) break;
+      if (message.sellerAccountExternalId !== input.sellerAccountExternalId || message.status !== "queued") continue;
+      if (!isClaimExpired(message, now)) continue;
+
+      const updated: StoredOutboundMessage = {
+        ...message,
+        claimedByDeviceId: input.deviceId,
+        claimExpiresAt,
+        updatedAt: now.toISOString()
+      };
+      this.outboundMessages.set(updated.id, updated);
+      claimed.push(updated);
+    }
+
+    return claimed;
   }
 
   async listOutboundMessages(input: ListOutboundMessagesInput): Promise<StoredOutboundMessage[]> {
@@ -611,6 +643,10 @@ function isSameCustomerScope(left: CustomerScope, right: CustomerScope): boolean
 
 function isSameConversationCustomerScope(left: ConversationCustomerScope, right: ConversationCustomerScope): boolean {
   return isSameCustomerScope(left, right) && left.externalConversationId === right.externalConversationId;
+}
+
+function isClaimExpired(message: StoredOutboundMessage, now: Date): boolean {
+  return !message.claimExpiresAt || new Date(message.claimExpiresAt).getTime() <= now.getTime();
 }
 
 function internalUserKey(email: string): string {
