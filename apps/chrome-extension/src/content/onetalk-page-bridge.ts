@@ -37,6 +37,10 @@ function installBridge(): void {
       void requestCustomerProfilesFromPage(typed.contacts).then(sendResponse);
       return true;
     }
+    if (typed.type === "get-onetalk-conversations") {
+      void requestConversationsFromPage(typed.cursor, typed.count).then(sendResponse);
+      return true;
+    }
     return false;
   });
 
@@ -160,6 +164,47 @@ async function requestCustomerProfilesFromPage(contacts: OneTalkCustomerProfileC
         type: "get-onetalk-customer-profiles",
         requestId,
         contacts
+      },
+      window.location.origin
+    );
+  });
+}
+
+async function requestConversationsFromPage(cursor: number, count: number) {
+  const requestId = `tradebridge-conversations-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return new Promise((resolve) => {
+    const timeout = window.setTimeout(() => {
+      window.removeEventListener("message", handleMessage);
+      resolve({ ok: false, error: "onetalk_conversation_timeout" });
+    }, 15_000);
+
+    function handleMessage(event: MessageEvent): void {
+      if (event.source !== window || !isRecord(event.data)) return;
+      if (event.data.source !== "tradebridge-onetalk-page") return;
+      if (event.data.type !== "get-onetalk-conversations-result" || event.data.requestId !== requestId) return;
+
+      window.clearTimeout(timeout);
+      window.removeEventListener("message", handleMessage);
+      resolve({
+        ok: event.data.ok === true,
+        conversations: Array.isArray(event.data.conversations) ? event.data.conversations : [],
+        nextCursor:
+          typeof event.data.nextCursor === "number" || typeof event.data.nextCursor === "string"
+            ? event.data.nextCursor
+            : undefined,
+        hasMore: event.data.hasMore === true,
+        error: typeof event.data.error === "string" ? event.data.error : undefined
+      });
+    }
+
+    window.addEventListener("message", handleMessage);
+    window.postMessage(
+      {
+        source: "tradebridge-extension",
+        type: "get-onetalk-conversations",
+        requestId,
+        cursor,
+        count
       },
       window.location.origin
     );

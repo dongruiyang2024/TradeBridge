@@ -12,6 +12,7 @@ interface PostedMessage {
   appKey?: string;
   deviceId?: string;
   profiles?: unknown[];
+  conversations?: unknown[];
   error?: string;
 }
 
@@ -82,7 +83,7 @@ test("OneTalk page token request reuses page runtime token parameters", async ()
       }
     }
   ]);
-  assert.equal(posted[0]?.ok, true);
+  assert.equal(posted[0]?.ok, true, posted[0]?.error);
   assert.equal(posted[0]?.accessToken, "access-token");
   assert.equal(posted[0]?.appKey, pageDataAppKey);
   assert.equal(posted[0]?.deviceId, pageDeviceId);
@@ -151,7 +152,7 @@ test("OneTalk page token request retries with JSON string data when object data 
       deviceId: pageDeviceId
     })
   );
-  assert.equal(posted[0]?.ok, true);
+  assert.equal(posted[0]?.ok, true, posted[0]?.error);
   assert.equal(posted[0]?.accessToken, "access-token");
 });
 
@@ -278,10 +279,125 @@ test("OneTalk page customer profile request queries CRM helper and returns white
   ]);
 });
 
+test("OneTalk page conversation request returns sanitized SDK conversation fields", async () => {
+  const posted: PostedMessage[] = [];
+  const conversationRequests: unknown[] = [];
+  const contactDetailRequests: unknown[] = [];
+  const fakeWindow = createFakeWindow({
+    resources: [],
+    request: () => undefined,
+    conversationPage: async (options) => {
+      conversationRequests.push(options);
+      return {
+        hasMore: false,
+        nextCursor: 1779862804000,
+        list: [
+          {
+            cid: "conversation-code",
+            name: "Buyer Natural Name",
+            loginId: "buyer-login",
+            accountIdEncrypt: "root-account-should-not-win",
+            aliIdEncrypt: "root-ali-should-not-win",
+            chatToken: "root-token-should-not-win",
+            contact: {
+              loginId: "buyer-contact-login",
+              accountIdEncrypt: "buyer-account-encrypted",
+              aliIdEncrypt: "buyer-ali-encrypted",
+              chatToken: "buyer-contact-token"
+            },
+            latestMessage: {
+              gmtChatLong: 1779862800000,
+              content: "must-not-leave-page",
+              message: {
+                sendTime: 1779862800000,
+                contact: {
+                  name: "Stale Active Contact Name",
+                  companyName: "Stale Active Contact Co.",
+                  loginId: "stale-active-contact-login",
+                  accountIdEncrypt: "stale-active-account-encrypted",
+                  aliIdEncrypt: "stale-active-ali-encrypted",
+                  chatToken: "stale-active-token"
+                }
+              }
+            }
+          }
+        ]
+      };
+    },
+    conversationContactDetails: async (contacts) => {
+      contactDetailRequests.push(contacts);
+      return [
+        {
+          name: "Detail Natural Name",
+          companyName: "Detail Company",
+          loginId: "detail-login",
+          fullPortrait: "https://img.example/avatar.png",
+          kHTAccessToken: "must-not-leave-page"
+        }
+      ];
+    },
+    posted
+  });
+
+  Reflect.set(globalThis, "window", fakeWindow);
+  await import(`../src/content/onetalk-page-script?sdk-conversations-${Date.now()}`);
+
+  fakeWindow.dispatchMessage({
+    source: "tradebridge-extension",
+    type: "get-onetalk-conversations",
+    requestId: "request-conversations",
+    cursor: 1779862805000,
+    count: 20
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(posted[0]?.ok, true, posted[0]?.error);
+  assert.deepEqual(conversationRequests, [{ cursor: 1779862805000, count: 20 }]);
+  assert.deepEqual(contactDetailRequests, [[{ encryptAccountId: "buyer-account-encrypted", chatToken: "buyer-contact-token" }]]);
+  assert.deepEqual(posted[0]?.conversations, [
+    {
+      cid: "conversation-code",
+      name: "Buyer Natural Name",
+      loginId: "buyer-login",
+      accountIdEncrypt: "root-account-should-not-win",
+      aliIdEncrypt: "root-ali-should-not-win",
+      contact: {
+        name: "Detail Natural Name",
+        companyName: "Detail Company",
+        loginId: "detail-login",
+        accountIdEncrypt: "buyer-account-encrypted",
+        aliIdEncrypt: "buyer-ali-encrypted",
+        fullPortrait: "https://img.example/avatar.png"
+      },
+      latestMessage: {
+        gmtChatLong: 1779862800000,
+        message: {
+          sendTime: 1779862800000
+        }
+      }
+    }
+  ]);
+  const serializedPosted = JSON.stringify(posted[0]);
+  for (const secret of [
+    "must-not-leave-page",
+    "root-token-should-not-win",
+    "top-contact-token-should-not-win",
+    "buyer-contact-token",
+    "stale-active-token",
+    "Stale Active Contact Name"
+  ]) {
+    assert.equal(serializedPosted.includes(secret), false);
+  }
+});
+
 function createFakeWindow(input: {
   resources: FakeResourceEntry[];
   request: (options: unknown, callback: (response: unknown) => void) => void;
   jsonp?: (endpoint: string, options: unknown) => Promise<unknown>;
+  conversationPage?: (options: unknown) => Promise<unknown> | unknown;
+  legacyConversationPage?: (options: unknown) => Promise<unknown> | unknown;
+  conversationContactDetails?: (contacts: unknown[]) => Promise<unknown> | unknown;
   posted: PostedMessage[];
 }) {
   const listeners: Array<(event: { source: unknown; data: unknown }) => void> = [];
@@ -298,6 +414,27 @@ function createFakeWindow(input: {
       }
     },
     IcbuIM: {
+      IMBaaSSDK: {
+        default: {
+          getConversationServiceV2: () => ({
+            getConversationListByPagination: input.conversationPage
+          }),
+          getConversationServiceHttp: () => ({
+            getConversationContactDetailList:
+              input.conversationContactDetails ??
+              (() => {
+                throw new Error("conversation_contact_detail_should_not_be_called");
+              })
+          }),
+          getConversationService: () => ({
+            getConversationListByPagination:
+              input.legacyConversationPage ??
+              (() => {
+                throw new Error("legacy_conversation_service_should_not_be_called");
+              })
+          })
+        }
+      },
       lib: {
         requestHelper: {
           jsonp: input.jsonp

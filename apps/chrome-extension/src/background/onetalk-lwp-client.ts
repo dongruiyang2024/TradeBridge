@@ -30,6 +30,7 @@ export interface BrowserOnetalkLwpClientOptions {
   deviceId: string;
   userAgent: string;
   tokenProvider(): Promise<TokenProviderResult>;
+  conversationProvider?: () => Promise<Record<string, unknown>[]>;
   customerProfileProvider?: (conversations: Record<string, unknown>[]) => Promise<Record<string, unknown>[]>;
   rpcFactory?: () => LwpTransport;
   now?: () => Date;
@@ -44,12 +45,13 @@ export class BrowserOnetalkLwpClient {
   async fetchWeblite(): Promise<WebliteData> {
     const transport = await this.ensureTransport();
     const state = await transport.request(LWP_ROUTES.getState, [{ topic: "sync" }]);
-    const conversations = lwpConversationPageFromFrame(
+    const lwpConversations = lwpConversationPageFromFrame(
       await transport.request(LWP_ROUTES.conversations, [this.options.now?.().getTime() || Date.now(), 100])
     );
     if (isRecord(state.body)) {
       await transport.request(LWP_ROUTES.ackDiff, [state.body]);
     }
+    const conversations = await this.fetchConversations(lwpConversations.conversations);
     const customerProfiles = await this.fetchCustomerProfiles(conversations.conversations);
     return {
       html: "",
@@ -65,11 +67,11 @@ export class BrowserOnetalkLwpClient {
     before: number | null;
     pageSize: number;
   }): Promise<ChatMessageResponse> {
-    const transport = await this.ensureTransport();
     const cid = conversationId(request.conversation);
     if (!cid) throw new Error("onetalk_conversation_id_missing");
     const cursor = request.before || Number.MAX_SAFE_INTEGER;
-    const frame = await transport.request(LWP_ROUTES.messages, [cid, false, cursor, request.pageSize, false]);
+    const body = [cid, false, cursor, request.pageSize, false];
+    const frame = await this.requestWithReconnect(LWP_ROUTES.messages, body);
     const page = lwpMessagesPageFromFrame(frame);
     return {
       status: frame.code || 0,
@@ -112,6 +114,16 @@ export class BrowserOnetalkLwpClient {
     return transport;
   }
 
+  private async requestWithReconnect(route: string, body: unknown): Promise<ParsedLwpFrame> {
+    try {
+      return await (await this.ensureTransport()).request(route, body);
+    } catch (error) {
+      if (!isRetryableTransportError(error)) throw error;
+      this.close();
+      return (await this.ensureTransport()).request(route, body);
+    }
+  }
+
   private async fetchCustomerProfiles(conversations: Record<string, unknown>[]): Promise<Record<string, unknown>[] | undefined> {
     if (!this.options.customerProfileProvider) return undefined;
     try {
@@ -121,6 +133,25 @@ export class BrowserOnetalkLwpClient {
       return undefined;
     }
   }
+
+  private async fetchConversations(fallback: Record<string, unknown>[]): Promise<{ conversations: Record<string, unknown>[] }> {
+    if (!this.options.conversationProvider) return { conversations: fallback };
+    try {
+      const conversations = await this.options.conversationProvider();
+      return { conversations: conversations.length ? conversations : fallback };
+    } catch {
+      return { conversations: fallback };
+    }
+  }
+}
+
+function isRetryableTransportError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.message === "lwp_socket_not_open" ||
+    error.message === "lwp_socket_closed" ||
+    error.message.startsWith("lwp_request_timeout:")
+  );
 }
 
 async function registerWithTransport(

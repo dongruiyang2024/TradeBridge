@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mapWebliteToSyncBatch } from "../src/browser.js";
 
-test("mapWebliteToSyncBatch maps LWP account identity and CRM profile natural name", () => {
+test("mapWebliteToSyncBatch maps stable LWP customer id and CRM profile natural name", () => {
   const batch = mapWebliteToSyncBatch({
     sellerAccount: { externalAccountId: "seller-demo" },
     device: { deviceId: "chrome-extension-demo" },
@@ -41,9 +41,9 @@ test("mapWebliteToSyncBatch maps LWP account identity and CRM profile natural na
           data: {
             data: {
               buyerInfo: {
-                firstName: "Peter",
-                lastName: "SHU",
-                companyName: "Peter Tools Co.",
+                firstName: "Buyer",
+                lastName: "Sample",
+                companyName: "Buyer Tools Co.",
                 country: "CN"
               }
             }
@@ -56,16 +56,16 @@ test("mapWebliteToSyncBatch maps LWP account identity and CRM profile natural na
 
   assert.deepEqual(batch.customers, [
     {
-      externalCustomerId: "buyer-account-encrypted",
+      externalCustomerId: "buyer-ali",
       loginId: "buyer-login",
-      displayName: "Peter SHU",
+      displayName: "Buyer Sample",
       country: "CN"
     }
   ]);
   assert.deepEqual(batch.conversations, [
     {
       externalConversationId: "conv-lwp-profile",
-      externalCustomerId: "buyer-account-encrypted",
+      externalCustomerId: "buyer-ali",
       lastMessageAt: "2026-05-27T04:33:20.000Z"
     }
   ]);

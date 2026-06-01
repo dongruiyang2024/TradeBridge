@@ -45,5 +45,17 @@ function diagnosticSummary(diagnostics?: SyncDiagnostics): string {
   if (lwpRoutes.length) {
     lines.push(`LWP：${lwpRoutes.filter((item) => item.status === 200).length}/${lwpRoutes.length} 个请求成功`);
   }
+  const failures = diagnostics.messageRequests
+    .filter((item) => item.status !== 200 || isFailureCode(item.code))
+    .map((item) => String(isFailureCode(item.code) ? item.code : `status_${item.status}`));
+  if (failures.length) {
+    lines.push(`消息失败：${Array.from(new Set(failures)).slice(0, 3).join("、")}`);
+  }
   return lines.join("\n");
+}
+
+function isFailureCode(code: string | number | null | undefined): boolean {
+  if (code == null) return false;
+  if (typeof code === "number") return code !== 200;
+  return code !== "200" && code.toLowerCase() !== "success";
 }

@@ -65,6 +65,28 @@ export interface MapWebliteToSyncBatchOptions {
   messagesByConversationId: Record<string, Record<string, unknown>[]>;
 }
 
+const STABLE_CUSTOMER_ID_PATHS = [
+  "contact.accountId",
+  "contact.aliId",
+  "latestMessage.message.contact.accountId",
+  "latestMessage.message.contact.aliId",
+  "contactAccountId",
+  "buyerAccountId",
+  "contactAliId",
+  "accountId",
+  "aliId"
+];
+
+const ENCRYPTED_CUSTOMER_ID_FALLBACK_PATHS = [
+  "contact.accountIdEncrypt",
+  "contact.aliIdEncrypt",
+  "latestMessage.message.contact.accountIdEncrypt",
+  "latestMessage.message.contact.aliIdEncrypt",
+  "contactAccountIdEncrypt",
+  "accountIdEncrypt",
+  "aliIdEncrypt"
+];
+
 export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): BrowserSyncBatch {
   const customers = new Map<string, BrowserSyncCustomerInput>();
   const conversations: BrowserSyncConversationInput[] = [];
@@ -80,16 +102,13 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
       firstString(conversation, ["cid", "conversationCode", "conversationId", "id"]) ||
       firstString(lwpConversation, ["cid"]);
     const externalCustomerId =
-      firstString(conversation, [
-        "contactAccountId",
-        "contactAccountIdEncrypt",
-        "buyerAccountId",
-        "contactAliId"
-      ]) ||
-      lwpIdentity.accountIdEncrypt ||
+      lwpIdentity.pairCustomerId ||
+      customerIdFromConversationId(externalConversationId, options.weblite.bootstrap) ||
       lwpIdentity.accountId ||
+      firstString(conversation, STABLE_CUSTOMER_ID_PATHS) ||
+      lwpIdentity.accountIdEncrypt ||
       lwpIdentity.aliIdEncrypt ||
-      lwpIdentity.pairCustomerId;
+      firstString(conversation, ENCRYPTED_CUSTOMER_ID_FALLBACK_PATHS);
     if (!externalConversationId || !externalCustomerId) continue;
     const customerProfile = customerProfileFor(options.weblite.customerProfiles, {
       externalCustomerId,
@@ -102,10 +121,17 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
       compact({
         externalCustomerId,
         loginId:
-          firstString(conversation, ["loginId", "contactLoginId"]) ||
+          firstString(conversation, [
+            "contact.loginId",
+            "latestMessage.message.contact.loginId",
+            "loginId",
+            "contactLoginId"
+          ]) ||
           loginIdFromProfile(customerProfile),
         displayName:
           firstString(conversation, [
+            "contact.name",
+            "latestMessage.message.contact.name",
             "contactNick",
             "contactName",
             "contactDisplayName",
@@ -114,11 +140,21 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
             "nickName",
             "displayName",
             "nick",
-            "name"
+            "name",
+            "contact.companyName",
+            "latestMessage.message.contact.companyName"
           ]) ||
           displayNameFromProfile(customerProfile),
         country:
-          firstString(conversation, ["country"]) ||
+          firstString(conversation, [
+            "contact.country",
+            "contact.countryCode",
+            "contact.complianceCountryCode",
+            "latestMessage.message.contact.country",
+            "latestMessage.message.contact.countryCode",
+            "latestMessage.message.contact.complianceCountryCode",
+            "country"
+          ]) ||
           countryFromProfile(customerProfile)
       })
     );
@@ -163,6 +199,8 @@ function firstMessageTime(conversation: Record<string, unknown>): unknown {
     "latestMessage.time",
     "latestMessage.gmtCreate",
     "latestMessage.createdAt",
+    "latestMessage.gmtChatLong",
+    "latestMessage.message.sendTime",
     "lastMessage.sendTime",
     "lastMessage.time",
     "lastMessage.gmtCreate",
@@ -281,6 +319,26 @@ function lwpCustomerId(lwpConversation: Record<string, unknown>, bootstrap: Reco
   if (self && pairFirst === self) return pairSecond;
   if (self && pairSecond === self) return pairFirst;
   return pairSecond || pairFirst;
+}
+
+function customerIdFromConversationId(
+  externalConversationId: string | undefined,
+  bootstrap: Record<string, string>
+): string | undefined {
+  const pair = conversationIdPair(externalConversationId);
+  if (!pair) return undefined;
+  const [left, right] = pair;
+  const self = bootstrap.aliId;
+  if (self && left === self) return right;
+  if (self && right === self) return left;
+  return left;
+}
+
+function conversationIdPair(externalConversationId: string | undefined): [string, string] | null {
+  const head = externalConversationId?.split("#")[0]?.split("@")[0];
+  if (!head) return null;
+  const match = /^(\d+)-(\d+)$/.exec(head);
+  return match ? [match[1], match[2]] : null;
 }
 
 function lwpMessage(raw: Record<string, unknown>): Record<string, unknown> | null {

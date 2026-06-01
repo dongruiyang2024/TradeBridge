@@ -101,6 +101,70 @@ test("runSyncOnce fetches OneTalk data, sanitizes it, uploads batch, and saves c
   ]);
 });
 
+test("runSyncOnce uploads fetched messages even when local status has an old cursor", async () => {
+  const store = new MemoryStateStore();
+  store.status = { nextCursor: "2026-05-28T08:00:00.000Z" };
+  const uploaded: SyncBatch[] = [];
+
+  const result = await runSyncOnce({
+    now: () => new Date("2026-05-28T08:10:00.000Z"),
+    stateStore: store,
+    onetalkClient: {
+      fetchWeblite: async () => ({
+        html: "",
+        bootstrap: { aliId: "self-ali" },
+        conversations: [
+          {
+            singleChatUserConversation: {
+              singleChatConversation: { cid: "conv-1", pairFirst: "self-ali", pairSecond: "buyer-ali" }
+            }
+          }
+        ]
+      }),
+      getChatMessages: async () => ({
+        status: 200,
+        contentType: "application/lwp+json",
+        code: 200,
+        raw: {},
+        messages: [
+          {
+            message: {
+              messageId: "m-old-local-cursor",
+              cid: "conv-1",
+              sender: { uid: "buyer-ali" },
+              content: { text: { content: "existing recent message" } },
+              createAt: 1779706200000
+            }
+          }
+        ],
+        diagnostics: {
+          status: 200,
+          contentType: "application/lwp+json",
+          code: 200,
+          listLength: 1,
+          listPath: "body.userMessageModels",
+          topLevelKeys: ["body", "code", "headers"],
+          dataKeys: ["hasMore", "nextCursor", "userMessageModels"]
+        }
+      })
+    },
+    uploadSyncBatch: async (options) => {
+      uploaded.push(options.batch);
+      return {
+        acceptedCount: options.batch.messages?.length || 0,
+        rejectedCount: 0,
+        nextCursor: "2026-05-25T10:50:00.000Z",
+        warnings: []
+      };
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(uploaded.length, 1);
+  assert.equal(uploaded[0].messages?.length, 1);
+  assert.equal(uploaded[0].messages?.[0].externalMessageId, "m-old-local-cursor");
+});
+
 test("runSyncOnce stores collector_activation_required errors", async () => {
   const store = new MemoryStateStore();
   store.config = null;

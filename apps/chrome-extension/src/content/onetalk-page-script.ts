@@ -1,4 +1,5 @@
 import { requestCustomerProfilesFromPageRuntime } from "./onetalk-customer-profile.js";
+import { requestConversationsFromPageRuntime } from "./onetalk-conversation.js";
 import { requestImTokenFromPageRuntime } from "./onetalk-im-token.js";
 import type { OneTalkCustomerProfileContact } from "../shared/extension-messages.js";
 import type { OutboundMessage } from "../shared/sync-types.js";
@@ -37,6 +38,10 @@ if (!pageWindow.__tradeBridgeOneTalkPageBridgeInstalled) {
     }
     if (event.data.type === "get-onetalk-customer-profiles") {
       void handleCustomerProfilesRequest(event.data);
+      return;
+    }
+    if (event.data.type === "get-onetalk-conversations") {
+      void handleConversationsRequest(event.data);
     }
   });
 }
@@ -112,6 +117,30 @@ async function handleCustomerProfilesRequest(data: Record<string, unknown>): Pro
   }
 }
 
+async function handleConversationsRequest(data: Record<string, unknown>): Promise<void> {
+  const requestId = typeof data.requestId === "string" ? data.requestId : "";
+  const cursor = numericValue(data.cursor) || Date.now();
+  const count = numericValue(data.count) || 20;
+  if (!requestId) {
+    publishConversationsResult(requestId, false, [], undefined, false, "invalid_conversation_request");
+    return;
+  }
+
+  try {
+    const page = await requestConversationsFromPageRuntime(pageWindow, { cursor, count });
+    publishConversationsResult(requestId, true, page.conversations, page.nextCursor, page.hasMore);
+  } catch (error) {
+    publishConversationsResult(
+      requestId,
+      false,
+      [],
+      undefined,
+      false,
+      error instanceof Error ? error.message : "onetalk_conversation_fetch_failed"
+    );
+  }
+}
+
 function publishTokenResult(
   requestId: string,
   ok: boolean,
@@ -152,6 +181,29 @@ function publishCustomerProfilesResult(
       requestId,
       ok,
       profiles,
+      error
+    },
+    window.location.origin
+  );
+}
+
+function publishConversationsResult(
+  requestId: string,
+  ok: boolean,
+  conversations: Record<string, unknown>[],
+  nextCursor?: string | number,
+  hasMore = false,
+  error?: string
+): void {
+  window.postMessage(
+    {
+      source: "tradebridge-onetalk-page",
+      type: "get-onetalk-conversations-result",
+      requestId,
+      ok,
+      conversations,
+      nextCursor,
+      hasMore,
       error
     },
     window.location.origin
@@ -204,6 +256,12 @@ function firstString(source: Record<string, unknown>, keys: string[]): string | 
     if (typeof value === "string" && value.trim()) return value.trim();
     if (typeof value === "number" && Number.isFinite(value)) return String(value);
   }
+  return undefined;
+}
+
+function numericValue(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
   return undefined;
 }
 

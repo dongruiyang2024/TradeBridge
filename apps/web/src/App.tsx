@@ -15,7 +15,7 @@ import {
   UserPlus,
   UserRound
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createInternalApiClient } from "./api";
 import type {
   CreateInternalUserInput,

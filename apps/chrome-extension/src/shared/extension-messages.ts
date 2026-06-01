@@ -11,6 +11,7 @@ export type ExtensionMessage =
   | { type: "send-onetalk-message"; message: OutboundMessage }
   | { type: "get-onetalk-im-token"; appKey: string; deviceId: string }
   | { type: "get-onetalk-customer-profiles"; contacts: OneTalkCustomerProfileContact[] }
+  | { type: "get-onetalk-conversations"; cursor: number; count: number }
   | { type: "sync-now" }
   | { type: "open-options" }
   | { type: "read-status" };

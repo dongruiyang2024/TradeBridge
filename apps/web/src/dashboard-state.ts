@@ -3,6 +3,8 @@ import type {
   InternalApiClient,
   StoredConversation,
   StoredCustomer,
+  StoredMessage,
+  StoredOutboundMessage,
   DashboardState
 } from "./types";
 
@@ -79,7 +81,7 @@ export async function selectCustomer(
     selectedConversationId,
     assignment,
     messages: sortMessages(messages),
-    outboundMessages: sortMessages(outboundMessages),
+    outboundMessages: visibleOutboundMessages(messages, outboundMessages),
     notes,
     tags,
     tasks,
@@ -102,7 +104,7 @@ export async function selectConversation(
     ...state,
     selectedConversationId: externalConversationId,
     messages: sortMessages(messages),
-    outboundMessages: sortMessages(outboundMessages),
+    outboundMessages: visibleOutboundMessages(messages, outboundMessages),
     status: `已加载 ${messages.length} 条消息`,
     error: undefined
   };
@@ -224,6 +226,30 @@ function sortConversations(conversations: StoredConversation[]): StoredConversat
 
 function sortMessages<T extends { sentAt?: string; createdAt?: string; deliveredAt?: string }>(messages: T[]): T[] {
   return [...messages].sort((left, right) => messageTimestamp(left) - messageTimestamp(right));
+}
+
+function visibleOutboundMessages(
+  messages: StoredMessage[],
+  outboundMessages: StoredOutboundMessage[]
+): StoredOutboundMessage[] {
+  return sortMessages(outboundMessages).filter((outbound) => !isSyncedOutboundMessage(outbound, messages));
+}
+
+function isSyncedOutboundMessage(outbound: StoredOutboundMessage, messages: StoredMessage[]): boolean {
+  if (outbound.status !== "sent") return false;
+  return messages.some((message) => isSameSentMessage(message, outbound));
+}
+
+function isSameSentMessage(message: StoredMessage, outbound: StoredOutboundMessage): boolean {
+  if (message.direction !== "sent") return false;
+  if (message.externalConversationId !== outbound.externalConversationId) return false;
+  if (outbound.externalMessageId && message.externalMessageId === outbound.externalMessageId) return true;
+  if (normalizedContent(message.content) !== normalizedContent(outbound.content)) return false;
+  return Math.abs(messageTimestamp(message) - messageTimestamp(outbound)) <= 5000;
+}
+
+function normalizedContent(value?: string): string {
+  return (value || "").trim();
 }
 
 function messageTimestamp(message: { sentAt?: string; createdAt?: string; deliveredAt?: string }): number {

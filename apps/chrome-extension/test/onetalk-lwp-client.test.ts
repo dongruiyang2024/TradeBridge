@@ -57,7 +57,7 @@ test("BrowserOnetalkLwpClient ignores stored OneTalk page snapshots", async () =
             savedAt: new Date().toISOString(),
             snapshot: {
               capturedAt: "2026-05-27T04:39:59.000Z",
-              conversations: [{ displayName: "Peter SHU", country: "CN" }]
+              conversations: [{ displayName: "Buyer Sample", country: "CN" }]
             }
           }
         })
@@ -142,6 +142,97 @@ test("BrowserOnetalkLwpClient getChatMessages loads messages for a conversation"
   );
   assert.deepEqual(requests[1].body, ["conv-1", false, 9007199254740991, 20, false]);
 });
+
+for (const retryError of ["lwp_socket_not_open", "lwp_request_timeout:/r/MessageManager/listUserMessages"]) {
+  test(`BrowserOnetalkLwpClient reconnects when ${retryError} happens before messages`, async () => {
+    const firstRequests: LwpRequestRecord[] = [];
+    const secondRequests: LwpRequestRecord[] = [];
+    let factoryCalls = 0;
+    let firstTransportClosed = false;
+    const client = new BrowserOnetalkLwpClient({
+      appKey: "12574478",
+      deviceId: "chrome-extension-demo",
+      userAgent: "Mozilla/5.0",
+      tokenProvider: async () => ({ accessToken: "access-token", expiresInMs: 3600000 }),
+      rpcFactory: () => {
+        factoryCalls += 1;
+        if (factoryCalls === 1) {
+          return {
+            connect: async () => undefined,
+            requestFrame: async (frameText: string) => {
+              const frame = parseLwpFrame(frameText);
+              firstRequests.push({ route: frame.route || "", body: frame.body, headers: frame.headers });
+              return parseLwpFrame(
+                JSON.stringify({ code: 200, headers: { mid: "reg", "reg-uid": "seller-ali" }, body: { unitName: "icbu" } })
+              );
+            },
+            request: async (route: string, body: unknown) => {
+              firstRequests.push({ route, body });
+              if (route === LWP_ROUTES.messages) throw new Error(retryError);
+              const frames: Record<string, Record<string, unknown>> = {
+                [LWP_ROUTES.getState]: { code: 200, headers: { mid: "state" }, body: { topic: "sync", pts: 1 } },
+                [LWP_ROUTES.conversations]: {
+                  code: 200,
+                  headers: { mid: "conv" },
+                  body: {
+                    hasMore: false,
+                    userConvs: [
+                      {
+                        singleChatUserConversation: {
+                          singleChatConversation: { cid: "conv-1", pairFirst: "seller-ali", pairSecond: "buyer-ali" }
+                        }
+                      }
+                    ]
+                  }
+                },
+                [LWP_ROUTES.ackDiff]: { code: 200, headers: { mid: "ack" } }
+              };
+              return parseLwpFrame(JSON.stringify(frames[route]));
+            },
+            close: () => {
+              firstTransportClosed = true;
+            }
+          };
+        }
+        return fakeRpc(secondRequests, {
+          [LWP_ROUTES.register]: { code: 200, headers: { mid: "reg-2", "reg-uid": "seller-ali" }, body: { unitName: "icbu" } },
+          [LWP_ROUTES.messages]: {
+            code: 200,
+            headers: { mid: "msg" },
+            body: {
+              hasMore: false,
+              userMessageModels: [{ message: { messageId: "msg-after-reconnect", cid: "conv-1" } }]
+            }
+          }
+        });
+      }
+    });
+
+    await client.fetchWeblite();
+    const response = await client.getChatMessages({
+      conversation: { cid: "conv-1" },
+      bootstrap: { aliId: "seller-ali" },
+      before: null,
+      pageSize: 20
+    });
+
+    assert.equal(response.messages.length, 1);
+    assert.equal((response.messages[0].message as Record<string, unknown>).messageId, "msg-after-reconnect");
+    assert.equal(factoryCalls, 2);
+    assert.equal(firstTransportClosed, true);
+    assert.deepEqual(
+      firstRequests.map((item) => item.route),
+      [
+        "/reg",
+        "/r/SyncStatus/getState",
+        "/r/Conversation/listNewestPagination",
+        "/r/SyncStatus/ackDiff",
+        "/r/MessageManager/listUserMessages"
+      ]
+    );
+    assert.deepEqual(secondRequests.map((item) => item.route), ["/reg", "/r/MessageManager/listUserMessages"]);
+  });
+}
 
 test("BrowserOnetalkLwpClient registers with runtime token appKey and deviceId", async () => {
   const requests: LwpRequestRecord[] = [];
@@ -231,6 +322,57 @@ test("BrowserOnetalkLwpClient attaches customer profiles from optional provider"
       conversationCount: 1
     }
   ]);
+});
+
+test("BrowserOnetalkLwpClient prefers SDK conversations from optional provider", async () => {
+  const requests: LwpRequestRecord[] = [];
+  const client = new BrowserOnetalkLwpClient({
+    appKey: "12574478",
+    deviceId: "chrome-extension-demo",
+    userAgent: "Mozilla/5.0",
+    tokenProvider: async () => ({ accessToken: "access-token", expiresInMs: 3600000 }),
+    conversationProvider: async () => [
+      {
+        cid: "conv-sdk",
+        name: "Buyer Natural Name",
+        accountIdEncrypt: "buyer-account-encrypted"
+      }
+    ],
+    rpcFactory: () =>
+      fakeRpc(requests, {
+        [LWP_ROUTES.register]: { code: 200, headers: { mid: "reg", "reg-uid": "seller-ali" }, body: { unitName: "icbu" } },
+        [LWP_ROUTES.getState]: { code: 200, headers: { mid: "state" }, body: { topic: "sync", pts: 1 } },
+        [LWP_ROUTES.conversations]: {
+          code: 200,
+          headers: { mid: "conv" },
+          body: {
+            hasMore: false,
+            userConvs: [
+              {
+                singleChatUserConversation: {
+                  singleChatConversation: { cid: "conv-lwp", pairFirst: "seller-ali", pairSecond: "buyer-ali" }
+                }
+              }
+            ]
+          }
+        },
+        [LWP_ROUTES.ackDiff]: { code: 200, headers: { mid: "ack" } }
+      })
+  });
+
+  const result = await client.fetchWeblite();
+
+  assert.deepEqual(result.conversations, [
+    {
+      cid: "conv-sdk",
+      name: "Buyer Natural Name",
+      accountIdEncrypt: "buyer-account-encrypted"
+    }
+  ]);
+  assert.deepEqual(
+    requests.map((item) => item.route),
+    ["/reg", "/r/SyncStatus/getState", "/r/Conversation/listNewestPagination", "/r/SyncStatus/ackDiff"]
+  );
 });
 
 interface LwpRequestRecord {

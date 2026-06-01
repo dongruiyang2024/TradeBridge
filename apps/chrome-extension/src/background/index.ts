@@ -2,6 +2,7 @@ import {
   contactProfileRequestsFromConversations,
   requestOneTalkCustomerProfiles
 } from "./onetalk-customer-profile-client.js";
+import { requestOneTalkConversations } from "./onetalk-conversation-client.js";
 import { BrowserOnetalkLwpClient } from "./onetalk-lwp-client.js";
 import { requestOneTalkImToken } from "./onetalk-token-client.js";
 import { runOutboundDelivery } from "./outbound-orchestrator.js";
@@ -55,6 +56,14 @@ async function runDefaultSync() {
           appKey: "12574478",
           deviceId: config?.deviceId || "chrome-extension"
         }),
+      conversationProvider: async () => {
+        const page = await requestOneTalkConversations({
+          chromeApi,
+          cursor: Date.now(),
+          count: 100
+        });
+        return page.conversations;
+      },
       customerProfileProvider: async (conversations) =>
         requestOneTalkCustomerProfiles({
           chromeApi,

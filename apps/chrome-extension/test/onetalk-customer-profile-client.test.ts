@@ -38,6 +38,29 @@ test("contactProfileRequestsFromConversations extracts encrypted buyer account i
   ]);
 });
 
+test("contactProfileRequestsFromConversations prefers SDK contact identity over stale latest contact", () => {
+  const contacts = contactProfileRequestsFromConversations([
+    {
+      accountIdEncrypt: "root-account-should-not-win",
+      loginId: "root-login-should-not-win",
+      contact: {
+        accountIdEncrypt: "buyer-account-encrypted",
+        loginId: "buyer-login"
+      },
+      latestMessage: {
+        message: {
+          contact: {
+            accountIdEncrypt: "stale-active-account-encrypted",
+            loginId: "stale-active-login"
+          }
+        }
+      }
+    }
+  ]);
+
+  assert.deepEqual(contacts, [{ buyerAccountId: "buyer-account-encrypted", buyerLoginId: "buyer-login" }]);
+});
+
 test("requestOneTalkCustomerProfiles returns profile records from an open OneTalk tab", async () => {
   const sentMessages: unknown[] = [];
   const profiles = await requestOneTalkCustomerProfiles({

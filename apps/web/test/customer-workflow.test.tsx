@@ -10,6 +10,7 @@ import {
   createOutboundMessageForSelectedConversation,
   createTaskForSelectedCustomer,
   loadCustomerList,
+  selectConversation,
   selectCustomer
 } from "../src/dashboard-state.ts";
 import type { DashboardState, InternalApiClient } from "../src/types.ts";
@@ -242,6 +243,66 @@ test("customer workflow loads selected customer conversations and updates collab
   assert.equal(state.tasks.at(-1)?.title, "Send PI tomorrow");
   assert.equal(state.outboundMessages.at(-1)?.content, "Thanks, I will send it today.");
   assert.equal(state.outboundMessages.at(-1)?.status, "queued");
+});
+
+test("customer workflow hides delivered outbound messages after they are synced back", async () => {
+  const client: InternalApiClient = {
+    ...createFakeClient(),
+    async listMessages(externalConversationId) {
+      return [
+        {
+          sellerAccountExternalId: "seller-1",
+          externalConversationId,
+          externalMessageId: "msg-synced",
+          direction: "sent",
+          content: "hello from web",
+          sentAt: "2026-06-01T02:48:06.000Z",
+          contentHash: "hash-synced",
+          uniqueKey: "msg-synced"
+        }
+      ];
+    },
+    async listOutboundMessages(scope, externalConversationId) {
+      return [
+        {
+          id: "outbound-delivered",
+          ...scope,
+          externalConversationId,
+          content: "hello from web",
+          status: "sent",
+          createdAt: "2026-06-01T02:48:06.000Z",
+          updatedAt: "2026-06-01T02:48:06.000Z",
+          deliveredAt: "2026-06-01T02:48:06.000Z"
+        }
+      ];
+    }
+  };
+  const state = await selectConversation(
+    {
+      ...createInitialDashboardState(),
+      customers: [
+        {
+          sellerAccountExternalId: "seller-1",
+          externalCustomerId: "customer-1",
+          displayName: "Buyer One"
+        }
+      ],
+      selectedCustomerId: "customer-1",
+      conversations: [
+        {
+          sellerAccountExternalId: "seller-1",
+          externalConversationId: "conv-1",
+          externalCustomerId: "customer-1"
+        }
+      ],
+      selectedConversationId: "conv-1"
+    },
+    client,
+    "conv-1"
+  );
+
+  assert.equal(state.messages.length, 1);
+  assert.equal(state.outboundMessages.length, 0);
 });
 
 function sampleDashboardState(): DashboardState {

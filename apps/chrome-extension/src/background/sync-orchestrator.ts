@@ -71,7 +71,7 @@ export async function runSyncOnce(options: RunSyncOnceOptions): Promise<RunSyncR
       },
       collectedAt: now().toISOString(),
       source: "chrome-extension",
-      previousCursor: previousStatus.nextCursor || null,
+      previousCursor: null,
       weblite,
       messagesByConversationId: messageFetch.messagesByConversationId
     });

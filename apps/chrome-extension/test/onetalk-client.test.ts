@@ -47,7 +47,7 @@ test("fetchWeblite ignores stored OneTalk page snapshots", async () => {
             savedAt: new Date().toISOString(),
             snapshot: {
               capturedAt: "2026-05-27T04:39:59.000Z",
-              conversations: [{ displayName: "Peter SHU", country: "CN" }]
+              conversations: [{ displayName: "Buyer Sample", country: "CN" }]
             }
           }
         })

@@ -33,11 +33,27 @@ export function contactProfileRequestsFromConversations(
     ]));
     const buyerAccountId =
       firstString(custom, ["toAccIdE", "buyerAccountId", "contactAccountIdEncrypt"]) ||
-      firstString(conversation, ["buyerAccountId", "contactAccountIdEncrypt", "contactAccountId"]);
+      firstString(conversation, [
+        "contact.accountIdEncrypt",
+        "contact.accountId",
+        "latestMessage.message.contact.accountIdEncrypt",
+        "latestMessage.message.contact.accountId",
+        "buyerAccountId",
+        "contactAccountIdEncrypt",
+        "contactAccountId",
+        "accountIdEncrypt",
+        "accountId"
+      ]);
     if (!buyerAccountId || contacts.has(buyerAccountId)) continue;
     contacts.set(buyerAccountId, {
       buyerAccountId,
-      buyerLoginId: firstString(conversation, ["buyerLoginId", "contactLoginId", "loginId"])
+      buyerLoginId: firstString(conversation, [
+        "contact.loginId",
+        "latestMessage.message.contact.loginId",
+        "buyerLoginId",
+        "contactLoginId",
+        "loginId"
+      ])
     });
   }
   return Array.from(contacts.values()).map(compactContact);
