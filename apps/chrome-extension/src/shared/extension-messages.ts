@@ -13,6 +13,7 @@ export type ExtensionMessage =
   | { type: "get-onetalk-customer-profiles"; contacts: OneTalkCustomerProfileContact[] }
   | { type: "get-onetalk-conversations"; cursor: number; count: number }
   | { type: "sync-now" }
+  | { type: "realtime-reconnect" }
   | { type: "open-options" }
   | { type: "read-status" };
 

@@ -96,6 +96,7 @@ export class TradeBridgeWsClient {
       socket.onclose = () => {
         this.stopKeepalive();
         this.setState({ kind: "closed" });
+        if (!resolved) reject(new Error("collector_ws_closed"));
       };
     });
   }

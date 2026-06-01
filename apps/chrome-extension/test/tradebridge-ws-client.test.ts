@@ -55,6 +55,31 @@ test("TradeBridgeWsClient sends hello and handles ready", async () => {
   assert.equal(client.state.kind, "connected");
 });
 
+test("TradeBridgeWsClient rejects connect when socket closes before ready", async () => {
+  const sockets: FakeWebSocket[] = [];
+  const client = new TradeBridgeWsClient({
+    socketFactory: (url) => {
+      const socket = new FakeWebSocket(url);
+      sockets.push(socket);
+      return socket;
+    },
+    setInterval: () => 1,
+    clearInterval: () => undefined
+  });
+
+  const ready = client.connect({
+    serverUrl: "http://127.0.0.1:5032",
+    collectorToken: "collector-token",
+    sellerAccountExternalId: "seller-1",
+    deviceId: "device-1"
+  });
+  sockets[0].open();
+  sockets[0].close();
+
+  await assert.rejects(ready, /collector_ws_closed/);
+  assert.equal(client.state.kind, "closed");
+});
+
 class FakeWebSocket {
   static OPEN = 1;
   readyState = 0;

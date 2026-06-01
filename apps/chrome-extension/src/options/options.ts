@@ -3,7 +3,8 @@ import { activateCollectorDevice } from "../background/tradebridge-client.js";
 import { getChrome } from "../shared/chrome-api.js";
 import type { ExtensionConfig } from "../shared/sync-types.js";
 
-const store = new ExtensionStateStore(getChrome().storage.local);
+const chromeApi = getChrome();
+const store = new ExtensionStateStore(chromeApi.storage.local);
 const form = document.querySelector<HTMLFormElement>("#options-form");
 const status = document.querySelector<HTMLParagraphElement>("#options-status");
 const DEFAULT_SELLER_ACCOUNT_EXTERNAL_ID = "default-seller";
@@ -38,6 +39,7 @@ form?.addEventListener("submit", async (event) => {
     };
     await store.saveConfig(config);
     currentConfig = config;
+    void chromeApi.runtime.sendMessage({ type: "realtime-reconnect" });
     status?.replaceChildren("已激活");
   } catch (error) {
     const message = error instanceof Error ? error.message : "collector_activation_failed";

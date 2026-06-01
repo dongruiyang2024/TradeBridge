@@ -1,6 +1,6 @@
 import { getChrome } from "../shared/chrome-api.js";
 import type { SyncNowResponse } from "../shared/extension-messages.js";
-import type { ExtensionStatus, SyncDiagnostics } from "../shared/sync-types.js";
+import type { ExtensionRealtimeStatus, ExtensionStatus, SyncDiagnostics } from "../shared/sync-types.js";
 
 const chromeApi = getChrome();
 const status = document.querySelector<HTMLParagraphElement>("#status");
@@ -23,16 +23,26 @@ document.querySelector<HTMLButtonElement>("#open-options")?.addEventListener("cl
 
 async function renderStatus(): Promise<void> {
   const current = (await chromeApi.runtime.sendMessage({ type: "read-status" })) as ExtensionStatus;
+  const realtime = realtimeSummary(current.realtime);
   if (current.lastError) {
-    status?.replaceChildren(`最近错误：${current.lastError.code}`);
+    status?.replaceChildren(`${realtime}\n最近错误：${current.lastError.code}`);
     return;
   }
   if (current.lastSyncedAt) {
     const diagnostics = diagnosticSummary(current.lastDiagnostics);
-    status?.replaceChildren(`最近同步：${current.lastSyncedAt}${diagnostics ? `\n${diagnostics}` : ""}`);
+    status?.replaceChildren(`${realtime}\n最近同步：${current.lastSyncedAt}${diagnostics ? `\n${diagnostics}` : ""}`);
     return;
   }
-  status?.replaceChildren("未同步");
+  status?.replaceChildren(`${realtime}\n未同步`);
+}
+
+function realtimeSummary(realtime?: ExtensionRealtimeStatus): string {
+  if (!realtime) return "实时连接：未启动";
+  if (realtime.state === "connected") return "实时连接：已连接";
+  if (realtime.state === "connecting") return "实时连接：连接中";
+  if (realtime.state === "error") return `实时连接：异常（${realtime.lastError || "collector_ws_failed"}）`;
+  if (realtime.state === "closed") return "实时连接：已断开";
+  return "实时连接：未启动";
 }
 
 function diagnosticSummary(diagnostics?: SyncDiagnostics): string {

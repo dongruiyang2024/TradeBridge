@@ -8,6 +8,7 @@ const manifestPath = path.resolve("public/manifest.json");
 test("manifest uses minimal permissions for internal OneTalk collector", () => {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
     manifest_version: number;
+    minimum_chrome_version?: string;
     permissions?: string[];
     host_permissions?: string[];
     background?: { service_worker?: string; type?: string };
@@ -16,9 +17,11 @@ test("manifest uses minimal permissions for internal OneTalk collector", () => {
   };
 
   assert.equal(manifest.manifest_version, 3);
+  assert.equal(manifest.minimum_chrome_version, "116");
   assert.deepEqual(manifest.permissions?.sort(), ["alarms", "cookies", "scripting", "storage"]);
   assert.ok(manifest.host_permissions?.includes("https://onetalk.alibaba.com/*"));
   assert.ok(manifest.host_permissions?.includes("http://127.0.0.1:5032/*"));
+  assert.ok(manifest.host_permissions?.includes("ws://127.0.0.1:5032/*"));
   assert.equal(manifest.host_permissions?.includes("<all_urls>"), false);
   assert.equal(manifest.permissions?.includes("webRequest"), false);
   assert.equal(manifest.background?.service_worker, "background/index.js");
