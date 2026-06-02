@@ -31,6 +31,8 @@ test("uploadSyncBatch posts collector batch with bearer token", async () => {
     serverUrl: "http://127.0.0.1:5032",
     collectorToken: "collector-token",
     batch: {
+      channel: "alibaba-im",
+      channelAccount: { channel: "alibaba-im", externalAccountId: "seller-demo", surface: "onetalk-web" },
       sellerAccount: { externalAccountId: "seller-demo" },
       device: { deviceId: "chrome-extension-demo" }
     }
@@ -52,6 +54,8 @@ test("uploadSyncBatch maps 401 to tradebridge_unauthorized", async () => {
         serverUrl: "http://127.0.0.1:5032",
         collectorToken: "bad-token",
         batch: {
+          channel: "alibaba-im",
+          channelAccount: { channel: "alibaba-im", externalAccountId: "seller-demo", surface: "onetalk-web" },
           sellerAccount: { externalAccountId: "seller-demo" },
           device: { deviceId: "chrome-extension-demo" }
         }

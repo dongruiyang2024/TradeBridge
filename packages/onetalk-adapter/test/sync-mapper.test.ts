@@ -42,7 +42,15 @@ test("mapWebliteToSyncBatch maps conversations and messages into collector batch
   });
 
   assert.equal(Object.hasOwn(batch, ["org", "Id"].join("")), false);
+  assert.equal(batch.channel, "alibaba-im");
+  assert.deepEqual(batch.channelAccount, {
+    channel: "alibaba-im",
+    externalAccountId: "seller-demo",
+    displayName: "Seller Demo",
+    surface: "onetalk-web"
+  });
   assert.equal(batch.sourceMeta?.source, "chrome-extension");
+  assert.equal(batch.sourceMeta?.surface, "onetalk-web");
   assert.equal(batch.sourceMeta?.sourceBatchKey, "seller-demo:chrome-extension-demo:2026-05-26T08:10:00.000Z");
   assert.deepEqual(batch.customers, [
     {

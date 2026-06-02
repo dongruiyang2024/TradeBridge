@@ -11,6 +11,13 @@ export interface SyncDeviceInput {
   deviceName?: string;
 }
 
+export interface SyncChannelAccountInput {
+  channel: string;
+  externalAccountId: string;
+  displayName?: string;
+  surface?: string;
+}
+
 export interface SyncCustomerInput {
   externalCustomerId: string;
   loginId?: string;
@@ -37,6 +44,8 @@ export interface SyncMessageInput {
 }
 
 export interface SyncBatch {
+  channel?: string;
+  channelAccount?: SyncChannelAccountInput;
   sellerAccount: SyncSellerAccountInput;
   device: SyncDeviceInput;
   cursor?: Record<string, unknown>;

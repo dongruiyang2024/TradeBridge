@@ -1,7 +1,9 @@
-import { ALIWORKBENCH_UA } from "./config.js";
+import { type CookieJar, cookieHeader, csrfQuery } from "./cookies.js";
 import { buildPayload } from "./payload.js";
-import { CookieJar, cookieHeader, csrfQuery } from "./session.js";
 import { extractJsonAfter, pageBootstrap } from "./weblite-parser.js";
+
+const ONETALK_WEB_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36";
 
 export interface WebliteData {
   html: string;
@@ -50,7 +52,7 @@ export class OnetalkClient {
   async fetchWeblite(): Promise<WebliteData> {
     const response = await fetch("https://onetalk.alibaba.com/message/weblitePWA.htm", {
       headers: {
-        "User-Agent": ALIWORKBENCH_UA,
+        "User-Agent": ONETALK_WEB_USER_AGENT,
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         Cookie: cookieHeader(this.cookies)
@@ -74,7 +76,7 @@ export class OnetalkClient {
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {
-        "User-Agent": ALIWORKBENCH_UA,
+        "User-Agent": ONETALK_WEB_USER_AGENT,
         Accept: "application/json,text/plain,*/*",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
@@ -113,7 +115,7 @@ export class OnetalkClient {
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {
-        "User-Agent": ALIWORKBENCH_UA,
+        "User-Agent": ONETALK_WEB_USER_AGENT,
         Accept: "application/json,text/plain,*/*",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",

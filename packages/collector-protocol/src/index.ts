@@ -1,5 +1,113 @@
 export const COLLECTOR_WS_VERSION = 1;
 
+export const BUILT_IN_CHANNEL_IDS = [
+  "alibaba-im",
+  "whatsapp-web",
+  "facebook-messenger",
+  "web-chat",
+  "mock-web"
+] as const;
+
+export type BuiltInChannelId = (typeof BUILT_IN_CHANNEL_IDS)[number];
+export type ChannelId = BuiltInChannelId | (string & {});
+export type MessageDirection = "received" | "sent" | "unknown";
+
+export interface ChannelAccountRef {
+  channel: ChannelId;
+  externalAccountId: string;
+  displayName?: string;
+  surface?: string;
+}
+
+export interface ChannelSyncSellerAccountInput {
+  externalAccountId: string;
+  displayName?: string;
+  status?: string;
+}
+
+export interface ChannelSyncDeviceInput {
+  deviceId: string;
+  deviceName?: string;
+}
+
+export interface ChannelSyncContact {
+  externalContactId?: string;
+  externalCustomerId: string;
+  loginId?: string;
+  displayName?: string;
+  country?: string;
+  ownerUserId?: string;
+  stage?: string;
+}
+
+export interface ChannelSyncConversation {
+  externalConversationId: string;
+  externalContactId?: string;
+  externalCustomerId?: string;
+  lastMessageAt?: string;
+}
+
+export interface ChannelSyncMessage {
+  externalConversationId: string;
+  externalMessageId?: string;
+  direction: MessageDirection;
+  messageType?: string | number;
+  content?: string;
+  sentAt?: string;
+  rawSanitized?: Record<string, unknown>;
+}
+
+export interface ChannelSyncSourceMeta extends Record<string, unknown> {
+  source?: string;
+  surface?: string;
+  collectedAt?: string;
+  sourceBatchKey?: string;
+}
+
+export interface ChannelSyncBatch {
+  channel: ChannelId;
+  channelAccount: ChannelAccountRef;
+  sellerAccount: ChannelSyncSellerAccountInput;
+  device: ChannelSyncDeviceInput;
+  cursor?: Record<string, unknown>;
+  sourceMeta?: ChannelSyncSourceMeta;
+  contacts?: ChannelSyncContact[];
+  customers?: ChannelSyncContact[];
+  conversations?: ChannelSyncConversation[];
+  messages?: ChannelSyncMessage[];
+}
+
+export interface ChannelConnectionStatus {
+  channel: ChannelId;
+  connected: boolean;
+  surface?: string;
+  pageUrl?: string;
+  lastSyncedAt?: string;
+  lastErrorCode?: string;
+}
+
+export interface OutboundDeliveryTask {
+  id: string;
+  channel: ChannelId;
+  channelAccount?: ChannelAccountRef;
+  sellerAccountExternalId: string;
+  externalContactId?: string;
+  externalCustomerId?: string;
+  externalConversationId: string;
+  content: string;
+  createdAt?: string;
+}
+
+export interface OutboundDeliveryReport {
+  outboundMessageId: string;
+  channel: ChannelId;
+  status: "sent" | "failed";
+  externalMessageId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  deliveredAt: string;
+}
+
 export type CollectorWsMessage =
   | CollectorHelloMessage
   | CollectorReadyMessage
@@ -150,6 +258,24 @@ export function isOutboundDeliveryReportMessage(message: CollectorWsMessage): me
   return message.type === "outbound.delivery.report";
 }
 
+export function isBuiltInChannelId(value: unknown): value is BuiltInChannelId {
+  return typeof value === "string" && BUILT_IN_CHANNEL_IDS.includes(value as BuiltInChannelId);
+}
+
+export function isChannelSyncBatch(value: unknown): value is ChannelSyncBatch {
+  if (!isRecord(value)) return false;
+  if (!isBuiltInChannelId(value.channel)) return false;
+  if (!isChannelAccountRef(value.channelAccount, value.channel)) return false;
+  if (!isSyncSellerAccount(value.sellerAccount)) return false;
+  if (!isSyncDevice(value.device)) return false;
+  if (!isOptionalRecord(value.cursor)) return false;
+  if (!isOptionalRecord(value.sourceMeta)) return false;
+  if (!isOptionalArray(value.contacts, isChannelSyncContact)) return false;
+  if (!isOptionalArray(value.customers, isChannelSyncContact)) return false;
+  if (!isOptionalArray(value.conversations, isChannelSyncConversation)) return false;
+  return isOptionalArray(value.messages, isChannelSyncMessage);
+}
+
 function isCollectorWsMessage(value: unknown): value is CollectorWsMessage {
   if (!isRecord(value)) return false;
   if (value.v !== COLLECTOR_WS_VERSION) return false;
@@ -244,6 +370,73 @@ function isCollectorOutboundMessage(value: unknown): value is CollectorOutboundM
     isOptionalString(value.claimedByDeviceId) &&
     isOptionalString(value.claimExpiresAt)
   );
+}
+
+function isChannelAccountRef(value: unknown, channel: unknown): value is ChannelAccountRef {
+  return (
+    isRecord(value) &&
+    value.channel === channel &&
+    typeof value.externalAccountId === "string" &&
+    isOptionalString(value.displayName) &&
+    isOptionalString(value.surface)
+  );
+}
+
+function isSyncSellerAccount(value: unknown): value is ChannelSyncSellerAccountInput {
+  return (
+    isRecord(value) &&
+    typeof value.externalAccountId === "string" &&
+    isOptionalString(value.displayName) &&
+    isOptionalString(value.status)
+  );
+}
+
+function isSyncDevice(value: unknown): value is ChannelSyncDeviceInput {
+  return isRecord(value) && typeof value.deviceId === "string" && isOptionalString(value.deviceName);
+}
+
+function isChannelSyncContact(value: unknown): value is ChannelSyncContact {
+  return (
+    isRecord(value) &&
+    isOptionalString(value.externalContactId) &&
+    typeof value.externalCustomerId === "string" &&
+    isOptionalString(value.loginId) &&
+    isOptionalString(value.displayName) &&
+    isOptionalString(value.country) &&
+    isOptionalString(value.ownerUserId) &&
+    isOptionalString(value.stage)
+  );
+}
+
+function isChannelSyncConversation(value: unknown): value is ChannelSyncConversation {
+  return (
+    isRecord(value) &&
+    typeof value.externalConversationId === "string" &&
+    isOptionalString(value.externalContactId) &&
+    isOptionalString(value.externalCustomerId) &&
+    isOptionalString(value.lastMessageAt)
+  );
+}
+
+function isChannelSyncMessage(value: unknown): value is ChannelSyncMessage {
+  return (
+    isRecord(value) &&
+    typeof value.externalConversationId === "string" &&
+    isOptionalString(value.externalMessageId) &&
+    (value.direction === "received" || value.direction === "sent" || value.direction === "unknown") &&
+    (value.messageType === undefined || typeof value.messageType === "string" || typeof value.messageType === "number") &&
+    isOptionalString(value.content) &&
+    isOptionalString(value.sentAt) &&
+    isOptionalRecord(value.rawSanitized)
+  );
+}
+
+function isOptionalRecord(value: unknown): boolean {
+  return value === undefined || isRecord(value);
+}
+
+function isOptionalArray<T>(value: unknown, guard: (item: unknown) => item is T): boolean {
+  return value === undefined || (Array.isArray(value) && value.every(guard));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

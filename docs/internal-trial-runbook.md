@@ -1,13 +1,14 @@
 # 内部试运行手册
 
-本文用于在本机完整跑通 TradeBridge 内部试运行流程：PostgreSQL、内部服务端、Web 工作台、桌面采集端，以及端到端自动化验证。
+本文用于在本机完整跑通 TradeBridge 内部试运行流程：PostgreSQL、内部服务端、Web 工作台、Chrome 插件，以及端到端自动化验证。
 
 ## 1. 前置条件
 
-- macOS
-- Node.js 20+
-- npm
-- Docker Desktop
+- macOS、Linux 或 Windows。
+- Node.js 20+。
+- npm。
+- Chrome 浏览器。
+- 可选：Docker Desktop，用于本地 PostgreSQL。
 - 已安装项目依赖：
 
 ```bash
@@ -23,9 +24,6 @@ Node 启动入口会自动读取项目根目录下的 `.env.local` 和 `.env`，
 ```bash
 WANGWANG_SERVER_HOST=127.0.0.1
 WANGWANG_SERVER_PORT=5032
-WANGWANG_SERVER_URL=http://127.0.0.1:5032
-# 采集端激活后再写入：
-# WANGWANG_COLLECTOR_TOKEN=<激活接口返回的 token>
 ```
 
 如果使用本仓库提供的 PostgreSQL Docker Compose，建议使用：
@@ -110,11 +108,40 @@ curl -X POST http://127.0.0.1:5032/internal/v1/auth/login \
 - 初始化接口只允许在当前实例尚无管理员时创建首个管理员。
 - 后续管理员和普通内部用户由已登录管理员在工作台中创建。
 
-## 6. 激活采集设备
+## 6. 构建和安装 Chrome 插件
 
-项目不再支持静态采集 token。采集端必须通过管理员邮箱密码激活，由服务端创建或更新设备并返回 collector token。
+构建插件：
 
-调用采集端激活接口：
+```bash
+npm run build -w @wangwang/chrome-extension
+```
+
+构建产物在：
+
+```text
+apps/chrome-extension/dist
+```
+
+安装方式：
+
+1. 打开 `chrome://extensions`。
+2. 开启 Developer mode。
+3. 点击 Load unpacked。
+4. 选择 `apps/chrome-extension/dist`。
+
+## 7. 激活 Chrome 插件
+
+Chrome 插件必须通过管理员邮箱密码激活，由服务端创建或更新设备并返回 collector token。
+
+在插件设置页填写：
+
+- Server URL：`http://127.0.0.1:5032`
+- 邮箱：管理员邮箱
+- 密码：管理员密码
+
+激活成功后，插件会把 collector token 保存到 Chrome storage。响应里的 token 只返回一次，插件不会保存管理员密码。
+
+也可以用接口验证激活流程：
 
 ```bash
 curl -X POST http://127.0.0.1:5032/collector/v1/auth/login \
@@ -125,31 +152,26 @@ curl -X POST http://127.0.0.1:5032/collector/v1/auth/login \
   }'
 ```
 
-响应里的 `token` 只返回一次。服务端会为本次激活生成默认 seller 绑定和设备记录。桌面采集端需要将 token 写入 `.env.local`：
+## 8. 阿里国际站消息通道验证
 
-```bash
-WANGWANG_COLLECTOR_TOKEN=<激活接口返回的 token>
+当前首个真实渠道是阿里国际站消息通道：
+
+```text
+channel: alibaba-im
+surface: onetalk-web
+页面: https://onetalk.alibaba.com/
 ```
 
-## 7. 启动桌面采集端
+手工验证：
 
-```bash
-npm run electron -w @wangwang/collector-desktop
-```
+1. Chrome 打开 `https://onetalk.alibaba.com/`。
+2. 确认 OneTalk Web 页面已登录。
+3. 打开插件设置页并完成激活。
+4. 点击插件弹窗里的同步按钮。
+5. 打开 TradeBridge Web 工作台。
+6. 确认客户、会话和消息可见。
 
-采集端会读取：
-
-- `WANGWANG_SERVER_URL`
-- `WANGWANG_COLLECTOR_TOKEN`
-
-当前 Electron 采集端是 MVP：
-
-- 可以显示会话/设备/同步状态。
-- 支持手动同步按钮。
-- 设备 ID 自动生成，设备名称默认使用本机 hostname；同步入库时以 collector token 绑定的设备为准。
-- 真实数据依赖本机 AliSupplier/OneTalk 登录态。
-
-## 8. 客户视角验证
+## 9. 客户视角验证
 
 打开：
 
@@ -175,43 +197,45 @@ curl http://127.0.0.1:5032/internal/v1/customers \
 
 期望返回 `401`。
 
-## 9. 敏感信息验证
+## 10. 敏感信息验证
 
-采集端不应把 OneTalk cookie、CSRF token、浏览器 safe-storage 密钥或原始请求头上传到服务端。
+插件不应把第三方 Cookie、CSRF token、IM token 或原始请求头上传到服务端。
 
-试运行时至少检查：
+试运行时至少检查服务端返回的消息内容里不应出现以下字段或值：
 
-1. 服务端返回的消息内容里不应出现以下字段或值：
-   - `cookie2`
-   - `ctoken`
-   - `_tb_token_`
-   - `sgcookie`
-   - `x5sec`
-   - `Cookie`
-   - `Authorization`
-2. `.env.local` 不要提交到 Git。
-3. `WANGWANG_CHROMIUM_SAFE_STORAGE_PASSWORD` 只能用于本机调试，不要写入共享文档或截图。
+- `cookie2`
+- `ctoken`
+- `_tb_token_`
+- `sgcookie`
+- `x5sec`
+- `chatToken`
+- `Cookie`
+- `Authorization`
+- `Set-Cookie`
+
+`.env.local` 不要提交到 Git。
 
 自动化端到端测试也覆盖了“采集端 fixture 中的 cookie 不会出现在 Web 读取到的消息数据里”。
 
-## 10. 自动化端到端验证
+## 11. 自动化端到端验证
 
 ```bash
 npm run test:e2e
 ```
 
-该命令会构建相关 workspace，并运行 `test/e2e/internal-trial.test.ts`。
+该命令会构建相关 workspace，并运行 `test/e2e` 下的端到端测试。
 
 当前 E2E 覆盖：
 
 - 启动内部服务端实例。
-- 使用采集端核心和 fixture 数据上传同步批次。
+- 使用 fixture 数据上传同步批次。
 - Web API client 读取客户、会话、消息。
 - Web workflow 创建备注、标签、跟进任务。
 - 采集 token 不能读取内部 API。
 - OneTalk cookie fixture 不会出现在 Web 消息数据中。
+- 项目结构不再包含桌面采集端。
 
-## 11. 常见问题
+## 12. 常见问题
 
 ### 服务端启动时报数据库连接失败
 
@@ -234,6 +258,6 @@ DATABASE_URL=postgres://wait9yan:Weite123@127.0.0.1:5432/tradebridge
 
 不要把采集端 token 填到 Web 工作台。
 
-### 采集端没有真实数据
+### 插件没有真实数据
 
-确认本机 AliSupplier/OneTalk 已登录，并且采集端能探测到本机登录态。没有真实登录态时，可以先用 `npm run test:e2e` 验证内部链路。
+确认 Chrome 中的 `https://onetalk.alibaba.com/` 已登录，并且插件有对应页面权限。没有真实登录态时，可以先用 `npm run test:e2e` 验证内部链路。

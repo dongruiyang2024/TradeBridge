@@ -1,8 +1,8 @@
 export type {
-  BrowserSyncBatch as SyncBatch,
-  BrowserSyncDeviceInput as SyncDeviceInput,
-  BrowserSyncSellerAccountInput as SyncSellerAccountInput
-} from "@wangwang/onetalk-adapter/browser";
+  ChannelSyncBatch as SyncBatch,
+  ChannelSyncDeviceInput as SyncDeviceInput,
+  ChannelSyncSellerAccountInput as SyncSellerAccountInput
+} from "@wangwang/collector-protocol";
 
 export interface SyncBatchResult {
   acceptedCount: number;

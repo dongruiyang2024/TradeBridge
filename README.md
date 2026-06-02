@@ -1,48 +1,46 @@
 # TradeBridge
 
-TradeBridge 是一个面向阿里国际站卖家消息场景的内部销售工作台。
+TradeBridge 是一个以 Chrome 浏览器插件为核心的多渠道网页消息桥。它面向跨境销售、客服和运营团队，把第三方网页沟通平台里的客户、会话和消息同步到内部系统，再由内部销售团队在 Web 工作台中统一查看客户上下文、协作跟进、创建回复，并由 Chrome 插件把回复投递回原始网页渠道。
 
-它把卖家在 OneTalk/旺旺里的客户、会话和消息同步到自有系统中，让内部销售团队可以统一查看客户上下文、做备注、打标签、建跟进任务，并把回复先放入队列，再由采集端回到 OneTalk 页面中发送。
+当前第一条真实链路是阿里国际站消息通道：
 
-## 组成部分
+```text
+渠道：阿里国际站消息通道
+渠道 ID：alibaba-im
+业务别名：TM / TradeManager / 国际版旺旺 / 旺旺
+当前实现面：OneTalk Web
+当前页面：onetalk.alibaba.com
+```
 
-阿里页面负责真实登录态和真实发消息能力，采集端负责同步和投递，服务端负责安全边界和业务 API，数据库负责沉淀客户沟通数据，Web 工作台负责给销售使用。
+OneTalk 不应和 TM 拆成两个平级渠道。OneTalk 是阿里国际站消息通道当前优先接入的 Web 实现面。
 
-### Chrome 插件
+## 产品定位
 
-负责“贴着阿里页面取数据”。用户需要先登录 onetalk.alibaba.com，插件借用这个已登录页面的能力去拿会话、客户资料和聊天消息。它不保存阿里账号密码。
+TradeBridge 的核心价值是把分散的网页沟通入口变成统一的内部销售协作系统：
 
-### 服务端
+- Chrome 插件贴近第三方网页页面，借用用户已登录的页面上下文读取和发送消息。
+- 服务端负责 collector token、internal session、安全校验、同步入库、外发队列和审计。
+- 数据库沉淀客户、渠道账号、会话、消息、备注、标签、任务和外发状态。
+- Web 工作台给销售、主管和管理员使用。
 
-它是系统的关口。采集端上传数据前必须先激活拿到 collector token。服务端会校验 token，并且强制用 token 绑定的卖家和设备身份入库，避免伪造数据来源。
-
-### 数据库
-
-它存卖家、采集设备、客户、会话、消息、备注、标签、任务、外发消息等数据。消息会做去重，所以重复同步不会反复插入同一条消息。
-
-### Web 工作台
-
-这是销售看到的界面。登录后可以看客户列表、聊天记录、备注、标签、任务，也可以输入回复。回复不会由 Web 直接发给阿里，而是先进入系统队列，再由 Chrome 插件拿去 OneTalk 页面里发送。
+未来产品不做桌面监听，不做 Electron 采集端，不读取本机应用日志、缓存、Cookie 数据库或本机安全存储。
 
 ## 当前能力
 
 - 内部账号初始化、邮箱密码登录、用户管理和邀请注册。
-- Chrome 插件从已登录的 OneTalk 页面同步客户、会话和消息。
-- 桌面采集端从本机 AliWorkbench/AliSupplier 登录态采集数据。
-- 服务端接收同步批次，按采集设备绑定的卖家身份入库。
-- PostgreSQL 持久化客户、会话、消息、备注、标签、任务和外发消息。
+- Chrome 插件从已登录的 OneTalk Web 页面同步阿里国际站消息通道的客户、会话和消息。
+- 服务端接收同步批次，按 collector token 绑定的卖家和设备身份入库。
+- PostgreSQL 或内存 store 持久化客户、会话、消息、备注、标签、任务和外发消息。
 - Web 工作台查看客户、会话、消息，并进行内部协作。
-- Web 创建外发回复，Chrome 插件领取后通过 OneTalk 页面投递。
+- Web 创建外发回复，Chrome 插件领取后通过 OneTalk Web 页面投递。
 - 服务端提供客户总结和回复建议 API，默认使用本地确定性 AI fallback。
 
 ## 系统结构
 
 ```mermaid
 flowchart LR
-  OneTalk["阿里 OneTalk 页面"] --> ChromeExt["Chrome 插件"]
-  OneTalk --> Desktop["桌面采集端"]
+  Alibaba["阿里国际站消息通道<br/>alibaba-im / OneTalk Web"] --> ChromeExt["Chrome 插件"]
   ChromeExt --> Server["Fastify 服务端"]
-  Desktop --> Server
   Web["React Web 工作台"] --> Server
   Server --> DB["PostgreSQL / InMemory Store"]
   Server --> AI["AI Provider / Queue"]
@@ -50,27 +48,29 @@ flowchart LR
 
 核心链路：
 
-1. 管理员在服务端创建内部账号，并激活采集设备。
-2. Chrome 插件或桌面采集端拿到 collector token。
-3. 采集端读取 OneTalk/旺旺数据，映射为统一 `SyncBatch`。
-4. 服务端校验 collector token，强制使用 token 绑定的 seller/device scope。
+1. 管理员在服务端创建内部账号。
+2. 管理员在 Chrome 插件设置页激活 collector device。
+3. 插件读取已登录网页渠道的数据，映射为同步批次。
+4. 服务端校验 collector token，并覆盖上传体中的 seller/device scope。
 5. 数据库按外部消息 ID 或内容哈希去重入库。
 6. Web 工作台用 internal session token 读取内部数据。
-7. Web 创建的外发消息进入队列，由 Chrome 插件领取并发送回 OneTalk。
+7. Web 创建外发消息进入队列。
+8. Chrome 插件领取外发消息，并回到原始网页渠道发送。
+9. 插件把投递结果回写服务端。
 
 ## 代码目录
 
-| 路径                       | 说明                                                             |
-| -------------------------- | ---------------------------------------------------------------- |
-| `apps/server`              | Fastify 服务端，提供 collector API、internal API、认证、AI 入口  |
-| `apps/web`                 | React/Vite 内部销售工作台                                        |
-| `apps/chrome-extension`    | Chrome 插件，负责 OneTalk 页面桥接、LWP 拉取、同步上传、外发投递 |
-| `apps/collector-desktop`   | Electron 桌面采集端，负责本机登录态采集和手动同步                |
-| `packages/database`        | 领域类型、内存 store、Postgres store、迁移和 SQL client          |
-| `packages/onetalk-adapter` | OneTalk/LWP 协议适配、页面数据解析、同步数据映射                 |
-| `packages/env`             | `.env.local` / `.env` 加载                                       |
-| `docs`                     | 环境说明、试运行手册、设计文档                                   |
-| `test/e2e`                 | 端到端试运行测试                                                 |
+| 路径 | 说明 |
+| --- | --- |
+| `apps/chrome-extension` | Chrome 插件，负责网页渠道桥接、同步上传、外发投递 |
+| `apps/server` | Fastify 服务端，提供 collector API、internal API、认证、AI 入口 |
+| `apps/web` | React/Vite 内部销售工作台 |
+| `packages/collector-protocol` | 插件与服务端之间的实时协议 |
+| `packages/database` | 领域类型、内存 store、Postgres store、迁移和 SQL client |
+| `packages/onetalk-adapter` | 阿里国际站消息通道当前 OneTalk Web 实现面的协议适配 |
+| `packages/env` | `.env.local` / `.env` 加载 |
+| `docs` | 产品设计、环境说明、试运行手册、实施方案 |
+| `test/e2e` | 端到端试运行测试 |
 
 ## 快速开始
 
@@ -91,7 +91,6 @@ cp .env.example .env.local
 ```bash
 WANGWANG_SERVER_HOST=127.0.0.1
 WANGWANG_SERVER_PORT=5032
-WANGWANG_SERVER_URL=http://127.0.0.1:5032
 ```
 
 如果不配置 `DATABASE_URL`，服务端会使用内存存储，重启后数据会丢失。
@@ -146,9 +145,9 @@ curl -X POST http://127.0.0.1:5032/internal/v1/setup/admin \
 
 管理员创建后，用邮箱密码登录 Web 工作台。
 
-## 采集端激活
+## Chrome 插件激活
 
-采集端不能使用内部登录 token。Chrome 插件和桌面采集端都必须通过 collector 激活流程获取 collector token。
+Chrome 插件不能使用内部登录 token。插件必须通过 collector 激活流程获取 collector token。
 
 激活接口：
 
@@ -161,9 +160,9 @@ curl -X POST http://127.0.0.1:5032/collector/v1/auth/login \
   }'
 ```
 
-响应中的 `token` 只返回一次。
+响应中的 `token` 只返回一次。插件设置页会自动保存该 token，后续同步和外发只使用 collector token，不保存管理员密码。
 
-### Chrome 插件
+插件试运行：
 
 1. 构建插件：
 
@@ -174,49 +173,34 @@ curl -X POST http://127.0.0.1:5032/collector/v1/auth/login \
 2. 在 Chrome 扩展管理页加载 `apps/chrome-extension/dist`。
 3. 打开并登录 `https://onetalk.alibaba.com/`。
 4. 在插件设置页填写 Server URL、管理员邮箱和密码，完成激活。
-5. 后续同步只使用 collector token，插件不会保存管理员密码。
-
-### 桌面采集端
-
-将激活返回的 token 写入 `.env.local`：
-
-```bash
-WANGWANG_SERVER_URL=http://127.0.0.1:5032
-WANGWANG_COLLECTOR_TOKEN=<激活接口返回的 token>
-```
-
-启动桌面采集端：
-
-```bash
-npm run electron -w @wangwang/collector-desktop
-```
-
-桌面采集端依赖本机 AliWorkbench/AliSupplier 登录态。
+5. 点击插件弹窗里的同步按钮。
+6. 回到 Web 工作台查看客户、会话和消息。
 
 ## 常用命令
 
-| 命令                                         | 说明                             |
-| -------------------------------------------- | -------------------------------- |
-| `npm run dev`                                | 构建基础包并同时启动服务端和 Web |
-| `npm run dev:server`                         | 启动服务端                       |
-| `npm run dev:web`                            | 启动 Web 工作台                  |
-| `npm run build`                              | 构建全部 workspace               |
-| `npm run typecheck`                          | 对全部 workspace 做类型检查      |
-| `npm run test:e2e`                           | 运行端到端试运行测试             |
-| `npm run test -w @wangwang/server`           | 运行服务端测试                   |
-| `npm run test -w @wangwang/web`              | 运行 Web 测试                    |
-| `npm run test -w @wangwang/chrome-extension` | 运行 Chrome 插件测试             |
-| `npm run test -w @wangwang/database`         | 运行数据库包测试                 |
-| `npm run test -w @wangwang/onetalk-adapter`  | 运行 OneTalk 适配层测试          |
+| 命令 | 说明 |
+| --- | --- |
+| `npm run dev` | 构建基础包并同时启动服务端和 Web |
+| `npm run dev:server` | 启动服务端 |
+| `npm run dev:web` | 启动 Web 工作台 |
+| `npm run build` | 构建全部 workspace |
+| `npm run typecheck` | 对全部 workspace 做类型检查 |
+| `npm run test:e2e` | 运行端到端试运行测试 |
+| `npm run test -w @wangwang/server` | 运行服务端测试 |
+| `npm run test -w @wangwang/web` | 运行 Web 测试 |
+| `npm run test -w @wangwang/chrome-extension` | 运行 Chrome 插件测试 |
+| `npm run test -w @wangwang/database` | 运行数据库包测试 |
+| `npm run test -w @wangwang/onetalk-adapter` | 运行 OneTalk Web 实现面适配层测试 |
 
 ## 核心 API
 
 ### Collector API
 
-- `POST /collector/v1/auth/login`：使用管理员账号激活采集设备。
+- `POST /collector/v1/auth/login`：使用管理员账号激活 Chrome 插件采集设备。
 - `POST /collector/v1/sync-batches`：上传客户、会话和消息同步批次。
-- `GET /collector/v1/outbound-messages`：采集端领取待发送消息。
-- `POST /collector/v1/outbound-messages/:messageId/delivery`：采集端回写投递结果。
+- `GET /collector/v1/outbound-messages`：插件领取待发送消息。
+- `POST /collector/v1/outbound-messages/:messageId/delivery`：插件回写投递结果。
+- `GET /collector/v1/ws`：插件实时连接。
 
 ### Internal API
 
@@ -233,15 +217,17 @@ npm run electron -w @wangwang/collector-desktop
 ## 安全边界
 
 - 内部用户使用 internal session token。
-- 采集端使用 collector token。
+- Chrome 插件使用 collector token。
 - 两类 token 不能混用。
 - 服务端只保存 collector token hash。
-- 采集端上传前会过滤 cookie、authorization、ctoken、`_tb_token_`、cookie2、sgcookie、chatToken、accessToken、refreshToken 等敏感字段。
+- 插件上传前会过滤 cookie、authorization、ctoken、`_tb_token_`、cookie2、sgcookie、chatToken、accessToken、refreshToken 等敏感字段。
 - 服务端会用 collector token 绑定的卖家和设备覆盖上传体中的 seller/device，避免伪造归属。
-- `.env.local`、真实数据库地址、Redis 地址、collector token 和本机 safe-storage 密钥不要提交。
+- `.env.local`、真实数据库地址、Redis 地址和 collector token 不要提交。
 
 ## 重要文档
 
+- [TradeBridge 产品设计文档](docs/TradeBridge产品设计文档.md)
+- [Chrome 插件多渠道消息桥重构实施方案](docs/superpowers/plans/2026-06-02-Chrome插件多渠道消息桥重构实施方案.md)
 - [环境变量配置](docs/ENVIRONMENT.md)
 - [内部试运行手册](docs/internal-trial-runbook.md)
 - [Chrome 插件试运行手册](docs/chrome-extension-trial-runbook.md)
@@ -251,16 +237,7 @@ npm run electron -w @wangwang/collector-desktop
 
 - Chrome 插件当前更依赖服务端幂等去重，尚未真正使用本地 `nextCursor` 做严格增量同步。
 - Chrome 插件默认每个会话只拉取 1 页消息，高活跃会话可能需要扩展分页策略。
-- OneTalk 页面 SDK 和 LWP 协议依赖外部页面运行时，后续需要持续做真实账号 smoke 验证。
+- 阿里国际站消息通道当前通过 OneTalk Web 实现面接入，页面 SDK 和 LWP 协议依赖外部页面运行时，后续需要持续做真实账号 smoke 验证。
+- 多渠道架构正在重构中，当前首个真实渠道仍是 `alibaba-im` 的 OneTalk Web 实现面。
 - AI provider 当前默认是确定性 fallback，不是正式大模型集成。
 - Web 工作台已覆盖主要 CRM 操作，但 AI API 尚未完整接入 UI。
-
-## 推荐阅读顺序
-
-第一次接触项目时建议按这个顺序看：
-
-1. 本 README。
-2. `docs/ENVIRONMENT.md`。
-3. `docs/internal-trial-runbook.md`。
-4. `docs/chrome-extension-trial-runbook.md`。
-5. `docs/superpowers/specs/2026-06-01-tradebridge-current-system-design.md`。

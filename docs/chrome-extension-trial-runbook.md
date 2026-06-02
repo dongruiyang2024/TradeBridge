@@ -7,6 +7,19 @@
 - TradeBridge server 运行在 `http://127.0.0.1:5032`。
 - 已创建 TradeBridge 管理员账号。
 
+## 渠道说明
+
+当前试运行渠道是阿里国际站消息通道：
+
+```text
+channel: alibaba-im
+surface: onetalk-web
+业务别名：TM / TradeManager / 国际版旺旺 / 旺旺
+页面：https://onetalk.alibaba.com/
+```
+
+OneTalk 是阿里国际站消息通道当前接入的 Web 实现面，不是和 TM 并列的独立渠道。
+
 ## 构建插件
 
 ```bash
@@ -36,12 +49,12 @@ apps/chrome-extension/dist
 
 点击“激活采集端”后，插件会自动生成并复用设备 ID，设备名称默认使用 `Chrome Extension`，然后调用 `/collector/v1/auth/login` 并保存服务端返回的 collector token。后续同步只使用该 collector token，不保存管理员密码。
 
-不要在设置页填写 OneTalk Cookie、`ctoken`、`_tb_token_`、`sgcookie`、`x5sec` 或 `chatToken`。
+不要在设置页填写 OneTalk Cookie、`ctoken`、`_tb_token_`、`sgcookie`、`x5sec`、`chatToken` 或任何第三方平台 token。
 
 ## 手工验证
 
 1. Chrome 打开 `https://onetalk.alibaba.com/`。
-2. 确认 OneTalk 页面已登录。
+2. 确认 OneTalk Web 页面已登录。
 3. 打开插件设置页并完成采集端激活。
 4. 点击插件弹窗里的同步按钮。
 5. 打开 TradeBridge Web 工作台。

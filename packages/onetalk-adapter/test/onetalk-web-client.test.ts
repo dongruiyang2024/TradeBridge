@@ -1,38 +1,14 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { after, test } from "node:test";
-import { detectSession, fetchConversations, fetchMessages } from "../src/index.js";
+import { OnetalkClient } from "../src/index.js";
 
-const tempRoots: string[] = [];
 const originalFetch = globalThis.fetch;
 
 after(() => {
   globalThis.fetch = originalFetch;
-  for (const root of tempRoots) {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
 });
 
-test("detectSession reports available local session fields while keeping cookies for adapter callers", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "onetalk-adapter-facade-test-"));
-  tempRoots.push(root);
-  const logPath = path.join(root, "cef.log");
-  fs.writeFileSync(logPath, "xman_us_t=ctoken%3Dfrom-log; _tb_token_=tb-log; cookie2=cookie-value", "utf8");
-
-  const session = detectSession({ logPaths: [logPath], platform: "linux" });
-
-  assert.deepEqual(session.cookieNames, ["_tb_token_", "cookie2", "xman_us_t"]);
-  assert.equal(session.hasCtoken, true);
-  assert.equal(session.hasTbToken, true);
-  assert.equal(session.hasCookie2, true);
-  assert.equal(session.hasSgcookie, false);
-  assert.equal(session.cookies.cookie2, "cookie-value");
-  assert.equal(session.logPaths.length, 1);
-});
-
-test("fetchConversations fetches weblite data with provided cookies", async () => {
+test("OnetalkClient fetches weblite data with provided web cookies", async () => {
   const requests: Request[] = [];
   globalThis.fetch = async (input, init) => {
     requests.push(new Request(input, init));
@@ -50,15 +26,17 @@ test("fetchConversations fetches weblite data with provided cookies", async () =
     );
   };
 
-  const result = await fetchConversations({ cookies: { cookie2: "cookie-value" } });
+  const client = new OnetalkClient({ cookie2: "cookie-value" });
+  const result = await client.fetchWeblite();
 
   assert.equal(requests.length, 1);
   assert.equal(requests[0].headers.get("cookie"), "cookie2=cookie-value");
+  assert.match(requests[0].headers.get("user-agent") || "", /Chrome/);
   assert.deepEqual(result.bootstrap, { aliId: "self-ali" });
   assert.deepEqual(result.conversations, [{ cid: "c1", contactAccountId: "account", contactAliId: "ali" }]);
 });
 
-test("fetchMessages posts a message request with provided cookies and conversation context", async () => {
+test("OnetalkClient posts a message request with provided web cookies and conversation context", async () => {
   const requests: Request[] = [];
   globalThis.fetch = async (input, init) => {
     requests.push(new Request(input, init));
@@ -70,8 +48,8 @@ test("fetchMessages posts a message request with provided cookies and conversati
     });
   };
 
-  const result = await fetchMessages({
-    cookies: { xman_us_t: "ctoken%3Dfrom-cookie", _tb_token_: "tb-token" },
+  const client = new OnetalkClient({ xman_us_t: "ctoken%3Dfrom-cookie", _tb_token_: "tb-token" });
+  const result = await client.getChatMessages({
     conversation: {
       contactAccountId: "contact-account",
       encryptContactAccountId: "encrypted-contact-account",

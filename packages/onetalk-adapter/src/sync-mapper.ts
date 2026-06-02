@@ -5,55 +5,23 @@ import {
   loginIdFromProfile,
   lwpCustomerIdentity
 } from "./customer-profile.js";
+import type {
+  ChannelSyncBatch,
+  ChannelSyncContact,
+  ChannelSyncConversation,
+  ChannelSyncDeviceInput,
+  ChannelSyncMessage,
+  ChannelSyncSellerAccountInput
+} from "@wangwang/collector-protocol";
 import type { WebliteData } from "./onetalk-client.js";
 
-export type MessageDirection = "received" | "sent" | "unknown";
-
-export interface BrowserSyncSellerAccountInput {
-  externalAccountId: string;
-  displayName?: string;
-  status?: string;
-}
-
-export interface BrowserSyncDeviceInput {
-  deviceId: string;
-  deviceName?: string;
-}
-
-export interface BrowserSyncCustomerInput {
-  externalCustomerId: string;
-  loginId?: string;
-  displayName?: string;
-  country?: string;
-  ownerUserId?: string;
-  stage?: string;
-}
-
-export interface BrowserSyncConversationInput {
-  externalConversationId: string;
-  externalCustomerId?: string;
-  lastMessageAt?: string;
-}
-
-export interface BrowserSyncMessageInput {
-  externalConversationId: string;
-  externalMessageId?: string;
-  direction: MessageDirection;
-  messageType?: string | number;
-  content?: string;
-  sentAt?: string;
-  rawSanitized?: Record<string, unknown>;
-}
-
-export interface BrowserSyncBatch {
-  sellerAccount: BrowserSyncSellerAccountInput;
-  device: BrowserSyncDeviceInput;
-  cursor?: Record<string, unknown>;
-  sourceMeta?: Record<string, unknown>;
-  customers?: BrowserSyncCustomerInput[];
-  conversations?: BrowserSyncConversationInput[];
-  messages?: BrowserSyncMessageInput[];
-}
+export type MessageDirection = ChannelSyncMessage["direction"];
+export type BrowserSyncSellerAccountInput = ChannelSyncSellerAccountInput;
+export type BrowserSyncDeviceInput = ChannelSyncDeviceInput;
+export type BrowserSyncCustomerInput = ChannelSyncContact;
+export type BrowserSyncConversationInput = ChannelSyncConversation;
+export type BrowserSyncMessageInput = ChannelSyncMessage;
+export type BrowserSyncBatch = ChannelSyncBatch;
 
 export interface MapWebliteToSyncBatchOptions {
   sellerAccount: BrowserSyncSellerAccountInput;
@@ -176,11 +144,19 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
   }
 
   return compact({
+    channel: "alibaba-im",
+    channelAccount: compact({
+      channel: "alibaba-im",
+      externalAccountId: options.sellerAccount.externalAccountId,
+      displayName: options.sellerAccount.displayName,
+      surface: "onetalk-web"
+    }),
     sellerAccount: options.sellerAccount,
     device: options.device,
     cursor: options.previousCursor ? { previousCursor: options.previousCursor } : undefined,
     sourceMeta: {
       source: options.source,
+      surface: "onetalk-web",
       collectedAt: options.collectedAt,
       sourceBatchKey: `${options.sellerAccount.externalAccountId}:${options.device.deviceId}:${options.collectedAt}`
     },

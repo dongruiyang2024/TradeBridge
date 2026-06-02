@@ -5,9 +5,7 @@
 1. `.env.local`
 2. `.env`
 
-已有的 shell 环境变量优先级最高，dotenv 文件不会覆盖它们。也就是说，如果你在终端里已经设置了 `WANGWANG_SERVER_PORT=6000`，`.env.local` 里的同名变量不会把它改掉。
-
-新机器首次配置时，可以从模板复制：
+已有的 shell 环境变量优先级最高，dotenv 文件不会覆盖它们。新机器首次配置时，可以从模板复制：
 
 ```bash
 cp .env.example .env.local
@@ -15,11 +13,11 @@ cp .env.example .env.local
 
 ## 本地试运行默认值
 
-已提交的 `.env.example` 记录了项目支持的环境变量。当前工作区里的 `.env.local` 已加入 `.gitignore`，用于本机开发：
+当前产品定位是 Chrome 插件网页消息桥。`.env.local` 主要服务于本地服务端、Web 工作台、数据库和 AI 队列：
 
 - 内部服务端：`http://127.0.0.1:5032`
 - Web 工作台：`http://127.0.0.1:5173`
-- 采集端：通过 `/collector/v1/auth/login` 激活后保存服务端返回的 collector token
+- Chrome 插件：通过设置页激活 collector device，并把 collector token 保存在 Chrome storage 中
 
 ## 内部工作台登录
 
@@ -46,32 +44,17 @@ npm run dev:web
 - API：默认留空，Web 会通过 Vite proxy 访问同源 `/internal`
 - 需要切换后端地址时，点击登录页的“连接设置”，填写服务端地址，例如 `http://127.0.0.1:5032`
 
-终端 3，启动桌面采集端：
+## Chrome 插件激活
 
-```bash
-npm run electron -w @wangwang/collector-desktop
-```
+项目不支持静态采集 token。Chrome 插件必须通过 `/collector/v1/auth/login` 激活并保存返回的 collector token。
 
-## 采集端激活
+Chrome 插件会在设置页提交：
 
-项目不再支持静态采集 token。Chrome 插件和桌面采集端必须通过 `/collector/v1/auth/login` 激活并保存返回的 collector token。
+- Server URL，例如 `http://127.0.0.1:5032`
+- 管理员邮箱
+- 管理员密码
 
-Chrome 插件会在设置页提交 Server URL、管理员邮箱和管理员密码；设备 ID 自动生成并复用，设备名称默认使用 `Chrome Extension`。激活成功后插件自动保存 collector token，后续同步只使用 token，不保存管理员密码。
-
-桌面采集端当前通过环境变量读取服务端地址和激活后的 token；设备 ID 自动生成，设备名称默认使用本机 hostname：
-
-```bash
-WANGWANG_SERVER_URL=http://127.0.0.1:5032
-WANGWANG_COLLECTOR_TOKEN=<激活接口返回的 token>
-```
-
-如果你要在当前终端里直接执行 `curl` 或其他脚本，并希望它们也拿到 `.env.local` 里的变量，可以手动加载：
-
-```bash
-set -a
-source .env.local
-set +a
-```
+设备 ID 自动生成并复用，设备名称默认使用 `Chrome Extension`。激活成功后插件自动保存 collector token，后续同步和投递只使用 token，不保存管理员密码。
 
 ## 持久化服务
 
@@ -87,11 +70,18 @@ AI 任务默认走本地同步 fallback。如需使用 Redis/BullMQ 队列，配
 REDIS_URL=redis://127.0.0.1:6379/0
 ```
 
+也支持历史兼容变量：
+
+```bash
+WANGWANG_REDIS_URL=redis://127.0.0.1:6379/0
+```
+
 ## 敏感变量
 
 不要提交真实值：
 
-- `WANGWANG_COLLECTOR_TOKEN`
 - `DATABASE_URL`
 - `REDIS_URL`
-- `WANGWANG_CHROMIUM_SAFE_STORAGE_PASSWORD`
+- `WANGWANG_REDIS_URL`
+
+collector token 由 Chrome 插件设置页激活后保存在 Chrome storage 中，不应写入 `.env.local` 或共享文档。
