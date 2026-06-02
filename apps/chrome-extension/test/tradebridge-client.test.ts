@@ -4,7 +4,8 @@ import {
   activateCollectorDevice,
   listOutboundMessages,
   markOutboundMessageDelivered,
-  uploadSyncBatch
+  uploadSyncBatch,
+  validateTradeBridgeAccount
 } from "../src/background/tradebridge-client.js";
 
 const originalFetch = globalThis.fetch;
@@ -225,6 +226,53 @@ test("activateCollectorDevice maps auth failures", async () => {
         deviceExternalId: "chrome-extension-demo"
       }),
     /forbidden/
+  );
+});
+
+test("validateTradeBridgeAccount reads the account behind a collector token", async () => {
+  const requests: Request[] = [];
+  globalThis.fetch = async (input, init) => {
+    requests.push(new Request(input, init));
+    return Response.json({
+      ok: true,
+      account: {
+        id: "user_1",
+        email: "admin@example.com",
+        displayName: "Admin User",
+        roles: ["admin"]
+      },
+      device: {
+        id: "collector-device-1",
+        externalDeviceId: "chrome-extension-demo",
+        sellerAccountExternalId: "seller-demo",
+        deviceName: "Chrome Extension",
+        status: "active"
+      }
+    });
+  };
+
+  const result = await validateTradeBridgeAccount({
+    serverUrl: "http://127.0.0.1:5032",
+    collectorToken: "collector-token"
+  });
+
+  assert.equal(result.account.email, "admin@example.com");
+  assert.deepEqual(result.account.roles, ["admin"]);
+  assert.equal(requests[0].url, "http://127.0.0.1:5032/collector/v1/me");
+  assert.equal(requests[0].method, "GET");
+  assert.equal(requests[0].headers.get("authorization"), "Bearer collector-token");
+});
+
+test("validateTradeBridgeAccount maps 401 to tradebridge_unauthorized", async () => {
+  globalThis.fetch = async () => Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
+
+  await assert.rejects(
+    () =>
+      validateTradeBridgeAccount({
+        serverUrl: "http://127.0.0.1:5032",
+        collectorToken: "bad-token"
+      }),
+    /tradebridge_unauthorized/
   );
 });
 

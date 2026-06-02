@@ -8,7 +8,8 @@ test("internal sync migrations expose the initial schema in order", () => {
     [
       ["001_internal_sync_schema", "001_internal_sync_schema.sql"],
       ["002_outbound_message_queue", "002_outbound_message_queue.sql"],
-      ["003_outbound_message_claim_lease", "003_outbound_message_claim_lease.sql"]
+      ["003_outbound_message_claim_lease", "003_outbound_message_claim_lease.sql"],
+      ["004_collector_device_activation_account", "004_collector_device_activation_account.sql"]
     ]
   );
   assert.doesNotMatch(INTERNAL_SYNC_MIGRATIONS[0].sql, /CREATE TABLE IF NOT EXISTS org/i);
@@ -29,6 +30,15 @@ test("outbound claim lease migration adds claim tracking columns", () => {
   assert.match(normalized, /alter table outbound_message add column if not exists claimed_by_device_id text/);
   assert.match(normalized, /alter table outbound_message add column if not exists claim_expires_at timestamptz/);
   assert.match(normalized, /create index if not exists idx_outbound_message_claimable/);
+});
+
+test("collector activation account migration records the account behind collector tokens", () => {
+  const normalized = INTERNAL_SYNC_MIGRATIONS[3].sql.replace(/\s+/g, " ").toLowerCase();
+
+  assert.match(normalized, /alter table collector_device/);
+  assert.match(normalized, /add column if not exists activated_by_user_email text/);
+  assert.match(normalized, /add column if not exists activated_by_user_roles text\[\] not null default '\{\}'::text\[\]/);
+  assert.match(normalized, /create index if not exists idx_collector_device_activated_by_user_email/);
 });
 
 test("initial schema contains the core platform tables", () => {

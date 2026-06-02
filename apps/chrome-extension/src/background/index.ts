@@ -9,11 +9,16 @@ import { runOutboundDelivery, sendOutboundMessagesViaOneTalk } from "./outbound-
 import { createRealtimeOrchestrator } from "./realtime-orchestrator.js";
 import { ExtensionStateStore, validateConfig } from "./storage.js";
 import { runSyncOnce } from "./sync-orchestrator.js";
-import { listOutboundMessages, markOutboundMessageDelivered, uploadSyncBatch } from "./tradebridge-client.js";
+import {
+  listOutboundMessages,
+  markOutboundMessageDelivered,
+  uploadSyncBatch,
+  validateTradeBridgeAccount
+} from "./tradebridge-client.js";
 import { TradeBridgeWsClient, type TradeBridgeWsState } from "./tradebridge-ws-client.js";
 import { getChrome } from "../shared/chrome-api.js";
 import type { ExtensionMessage } from "../shared/extension-messages.js";
-import type { ExtensionRealtimeStatus } from "../shared/sync-types.js";
+import type { ExtensionConfig, ExtensionRealtimeStatus, ExtensionStatus } from "../shared/sync-types.js";
 
 const chromeApi = getChrome();
 const stateStore = new ExtensionStateStore(chromeApi.storage.local);
@@ -62,6 +67,10 @@ chromeApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (typed.type === "read-status") {
     void stateStore.getStatus().then(sendResponse);
+    return true;
+  }
+  if (typed.type === "read-dashboard") {
+    void readDashboard().then(sendResponse);
     return true;
   }
   if (typed.type === "realtime-reconnect") {
@@ -118,6 +127,55 @@ function runDefaultOutboundDelivery() {
     listOutboundMessages,
     markOutboundMessageDelivered
   });
+}
+
+async function readDashboard() {
+  const [config, status] = await Promise.all([stateStore.getConfig(), stateStore.getStatus()]);
+  const validatedStatus = config ? await validateStoredTradeBridgeAccount(config, status) : status;
+  return {
+    tradeBridgeAccountEmail: validatedStatus.accountValidation?.email || config?.tradeBridgeAccountEmail,
+    status: validatedStatus
+  };
+}
+
+async function validateStoredTradeBridgeAccount(
+  config: ExtensionConfig,
+  previousStatus: ExtensionStatus
+): Promise<ExtensionStatus> {
+  try {
+    const result = await validateTradeBridgeAccount({
+      serverUrl: config.serverUrl,
+      collectorToken: config.collectorToken,
+      timeoutMs: 3000
+    });
+    const accountEmail = result.account.email;
+    const isMismatched =
+      !!config.tradeBridgeAccountEmail &&
+      config.tradeBridgeAccountEmail.trim().toLowerCase() !== accountEmail.trim().toLowerCase();
+    const nextStatus: ExtensionStatus = {
+      ...previousStatus,
+      accountValidation: {
+        state: isMismatched ? "invalid" : "valid",
+        email: accountEmail,
+        checkedAt: new Date().toISOString(),
+        error: isMismatched ? "tradebridge_account_mismatch" : undefined
+      }
+    };
+    await stateStore.saveStatus(nextStatus);
+    return nextStatus;
+  } catch (error) {
+    const nextStatus: ExtensionStatus = {
+      ...previousStatus,
+      accountValidation: {
+        state: "invalid",
+        email: config.tradeBridgeAccountEmail,
+        checkedAt: new Date().toISOString(),
+        error: errorMessage(error)
+      }
+    };
+    await stateStore.saveStatus(nextStatus);
+    return nextStatus;
+  }
 }
 
 function ensureRealtimeConnection(): Promise<{ ok: boolean; error?: string }> {

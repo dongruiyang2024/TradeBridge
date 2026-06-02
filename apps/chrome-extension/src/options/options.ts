@@ -1,13 +1,13 @@
 import { ExtensionStateStore } from "../background/storage.js";
 import { activateCollectorDevice } from "../background/tradebridge-client.js";
 import { getChrome } from "../shared/chrome-api.js";
+import { createActivatedExtensionConfig } from "./activation-config.js";
 import type { ExtensionConfig } from "../shared/sync-types.js";
 
 const chromeApi = getChrome();
 const store = new ExtensionStateStore(chromeApi.storage.local);
 const form = document.querySelector<HTMLFormElement>("#options-form");
 const status = document.querySelector<HTMLParagraphElement>("#options-status");
-const DEFAULT_SELLER_ACCOUNT_EXTERNAL_ID = "default-seller";
 const DEFAULT_DEVICE_NAME = "Chrome Extension";
 let currentConfig: ExtensionConfig | null = null;
 
@@ -19,24 +19,26 @@ form?.addEventListener("submit", async (event) => {
 
   try {
     const serverUrl = required(formData, "serverUrl");
+    const email = required(formData, "email");
     const deviceExternalId = currentConfig?.deviceId || createDeviceExternalId();
     const deviceName = currentConfig?.deviceName || DEFAULT_DEVICE_NAME;
 
     status?.replaceChildren("激活中...");
     const activation = await activateCollectorDevice({
       serverUrl,
-      email: required(formData, "email"),
+      email,
       password: required(formData, "password"),
       deviceExternalId,
       deviceName
     });
-    const config: ExtensionConfig = {
+    const config = createActivatedExtensionConfig({
       serverUrl,
-      sellerAccountExternalId: activation.device.sellerAccountExternalId || DEFAULT_SELLER_ACCOUNT_EXTERNAL_ID,
-      deviceId: activation.device.externalDeviceId,
-      deviceName: activation.device.deviceName || deviceName,
-      collectorToken: activation.token
-    };
+      email,
+      existingDeviceId: currentConfig?.deviceId,
+      existingDeviceName: currentConfig?.deviceName,
+      generatedDeviceId: deviceExternalId,
+      activation
+    });
     await store.saveConfig(config);
     currentConfig = config;
     void chromeApi.runtime.sendMessage({ type: "realtime-reconnect" });

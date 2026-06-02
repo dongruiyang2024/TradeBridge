@@ -192,6 +192,51 @@ test("POST /collector/v1/auth/login activates a collector device for admin users
   assert.equal(auditLogs.some((log) => log.action === "collector_device.activated"), true);
 });
 
+test("GET /collector/v1/me resolves the TradeBridge account bound to a collector token", async () => {
+  const { app } = await createAuthApp();
+  const loginResponse = await app.inject({
+    method: "POST",
+    url: "/collector/v1/auth/login",
+    payload: {
+      email: "admin@example.com",
+      password: "secret",
+      sellerAccountExternalId: "seller-1",
+      deviceExternalId: "chrome-extension-1",
+      deviceName: "Chrome Extension"
+    }
+  });
+  const token = loginResponse.json().token;
+
+  const meResponse = await app.inject({
+    method: "GET",
+    url: "/collector/v1/me",
+    headers: { authorization: `Bearer ${token}` }
+  });
+
+  assert.equal(meResponse.statusCode, 200);
+  assert.deepEqual(meResponse.json().account, {
+    id: "user_1",
+    email: "admin@example.com",
+    displayName: "Admin User",
+    roles: ["admin"]
+  });
+  assert.equal(meResponse.json().device.externalDeviceId, "chrome-extension-1");
+  assert.equal("token" in meResponse.json().device, false);
+  assert.equal("tokenHash" in meResponse.json().device, false);
+});
+
+test("GET /collector/v1/me rejects missing or invalid collector tokens", async () => {
+  const { app } = await createAuthApp();
+  const response = await app.inject({
+    method: "GET",
+    url: "/collector/v1/me",
+    headers: { authorization: "Bearer missing-token" }
+  });
+
+  assert.equal(response.statusCode, 401);
+  assert.deepEqual(response.json(), { ok: false, error: "unauthorized" });
+});
+
 test("POST /collector/v1/auth/login can activate with generated seller and device defaults", async () => {
   const { app } = await createAuthApp();
   const response = await app.inject({

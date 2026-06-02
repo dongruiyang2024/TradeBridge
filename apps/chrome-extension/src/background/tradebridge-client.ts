@@ -1,4 +1,5 @@
 import type {
+  CollectorAccountValidationResult,
   CollectorActivationInput,
   CollectorActivationResult,
   OutboundMessage,
@@ -26,6 +27,12 @@ export interface MarkOutboundMessageDeliveredOptions {
   errorCode?: string;
   errorMessage?: string;
   deliveredAt?: string;
+}
+
+export interface ValidateTradeBridgeAccountOptions {
+  serverUrl: string;
+  collectorToken: string;
+  timeoutMs?: number;
 }
 
 export async function uploadSyncBatch(options: UploadSyncBatchOptions): Promise<SyncBatchResult> {
@@ -77,6 +84,40 @@ export async function activateCollectorDevice(input: CollectorActivationInput): 
 
   return {
     token: body.token,
+    device: body.device
+  };
+}
+
+export async function validateTradeBridgeAccount(
+  options: ValidateTradeBridgeAccountOptions
+): Promise<CollectorAccountValidationResult> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 5000);
+  let response: Response;
+  try {
+    response = await fetch(collectorMeUrl(options.serverUrl), {
+      headers: {
+        Authorization: `Bearer ${options.collectorToken}`
+      },
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("tradebridge_account_validation_timeout");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+  const body = await response.json().catch(() => null);
+
+  if (response.status === 401) throw new Error("tradebridge_unauthorized");
+  if (!response.ok || !isAccountValidationResponse(body)) {
+    throw new Error("tradebridge_account_validation_failed");
+  }
+
+  return {
+    account: body.account,
     device: body.device
   };
 }
@@ -134,6 +175,10 @@ function collectorAuthUrl(serverUrl: string): string {
   return new URL("/collector/v1/auth/login", serverUrl).toString();
 }
 
+function collectorMeUrl(serverUrl: string): string {
+  return new URL("/collector/v1/me", serverUrl).toString();
+}
+
 function outboundMessagesUrl(serverUrl: string): string {
   return new URL("/collector/v1/outbound-messages", serverUrl).toString();
 }
@@ -160,16 +205,30 @@ function isSyncBatchResponse(value: unknown): value is SyncBatchResult & { ok: t
 }
 
 function isActivationResponse(value: unknown): value is CollectorActivationResult & { ok: true } {
-  if (!isRecord(value) || value.ok !== true || typeof value.token !== "string" || !isRecord(value.device)) {
+  return isRecord(value) && value.ok === true && typeof value.token === "string" && isCollectorDevice(value.device);
+}
+
+function isAccountValidationResponse(value: unknown): value is CollectorAccountValidationResult & { ok: true } {
+  if (!isRecord(value) || value.ok !== true || !isRecord(value.account) || !isCollectorDevice(value.device)) {
     return false;
   }
   return (
-    typeof value.device.id === "string" &&
-    typeof value.device.externalDeviceId === "string" &&
-    typeof value.device.status === "string" &&
-    (value.device.sellerAccountExternalId === undefined ||
-      typeof value.device.sellerAccountExternalId === "string") &&
-    (value.device.deviceName === undefined || typeof value.device.deviceName === "string")
+    typeof value.account.id === "string" &&
+    typeof value.account.email === "string" &&
+    typeof value.account.displayName === "string" &&
+    Array.isArray(value.account.roles) &&
+    value.account.roles.every((role) => typeof role === "string")
+  );
+}
+
+function isCollectorDevice(value: unknown): value is CollectorActivationResult["device"] {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === "string" &&
+    typeof value.externalDeviceId === "string" &&
+    typeof value.status === "string" &&
+    (value.sellerAccountExternalId === undefined || typeof value.sellerAccountExternalId === "string") &&
+    (value.deviceName === undefined || typeof value.deviceName === "string")
   );
 }
 

@@ -31,6 +31,24 @@ export interface CollectorActivationResult {
   };
 }
 
+export interface TradeBridgeAccount {
+  id: string;
+  email: string;
+  displayName: string;
+  roles: string[];
+}
+
+export interface CollectorAccountValidationResult {
+  account: TradeBridgeAccount;
+  device: {
+    id: string;
+    externalDeviceId: string;
+    sellerAccountExternalId?: string;
+    deviceName?: string;
+    status: string;
+  };
+}
+
 export type OutboundMessageStatus = "queued" | "sent" | "failed";
 
 export interface OutboundMessage {
@@ -53,6 +71,7 @@ export interface OutboundMessage {
 export interface ExtensionConfig {
   serverUrl: string;
   collectorToken: string;
+  tradeBridgeAccountEmail?: string;
   sellerAccountExternalId: string;
   sellerAccountDisplayName?: string;
   deviceId: string;
@@ -63,12 +82,20 @@ export interface ExtensionConfig {
 export interface ExtensionStatus {
   lastSyncedAt?: string;
   nextCursor?: string | null;
+  accountValidation?: ExtensionAccountValidationStatus;
   realtime?: ExtensionRealtimeStatus;
   lastDiagnostics?: SyncDiagnostics;
   lastError?: {
     code: string;
     message: string;
   };
+}
+
+export interface ExtensionAccountValidationStatus {
+  state: "unknown" | "valid" | "invalid";
+  email?: string;
+  checkedAt?: string;
+  error?: string;
 }
 
 export interface ExtensionRealtimeStatus {

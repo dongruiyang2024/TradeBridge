@@ -179,7 +179,11 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const registered = await store.registerCollectorDevice({
       sellerAccountExternalId,
       externalDeviceId: deviceExternalId,
-      deviceName
+      deviceName,
+      activatedByUserId: credentials.id,
+      activatedByUserEmail: credentials.email,
+      activatedByUserDisplayName: credentials.displayName,
+      activatedByUserRoles: credentials.roles
     });
     await store.appendAuditLog({
       actorUserId: credentials.id,
@@ -197,6 +201,19 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       ok: true,
       token: registered.token,
       device: publicCollectorDevice(registered)
+    };
+  });
+
+  app.get("/collector/v1/me", async (request, reply) => {
+    const collectorDevice = await collectorDeviceFromAuthorization(request.headers.authorization || "", store);
+    if (!collectorDevice) {
+      return reply.code(401).send({ ok: false, error: "unauthorized" });
+    }
+
+    return {
+      ok: true,
+      account: publicCollectorAccount(collectorDevice),
+      device: publicCollectorDevice(collectorDevice)
     };
   });
 
@@ -1065,6 +1082,13 @@ interface PublicInternalUser {
   roles: InternalRole[];
 }
 
+interface PublicCollectorAccount {
+  id: string;
+  email: string;
+  displayName: string;
+  roles: InternalRole[];
+}
+
 interface InternalAuthContext {
   user: PublicInternalUser;
   roles: InternalRole[];
@@ -1151,6 +1175,19 @@ function publicCollectorDevice(device: CollectorDevice | RegisteredCollectorDevi
     lastHeartbeatAt: device.lastHeartbeatAt,
     createdAt: device.createdAt,
     updatedAt: device.updatedAt
+  };
+}
+
+function publicCollectorAccount(device: CollectorDevice): PublicCollectorAccount | null {
+  if (!device.activatedByUserId || !device.activatedByUserEmail || !device.activatedByUserDisplayName) {
+    return null;
+  }
+
+  return {
+    id: device.activatedByUserId,
+    email: device.activatedByUserEmail,
+    displayName: device.activatedByUserDisplayName,
+    roles: device.activatedByUserRoles || []
   };
 }
 

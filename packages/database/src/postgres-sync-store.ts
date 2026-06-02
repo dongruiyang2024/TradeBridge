@@ -234,6 +234,10 @@ interface CollectorDeviceRow {
   externalDeviceId: string | null;
   sellerAccountExternalId: string | null;
   deviceName: string | null;
+  activatedByUserId: string | null;
+  activatedByUserEmail: string | null;
+  activatedByUserDisplayName: string | null;
+  activatedByUserRoles: InternalRole[] | string | null;
   status: string;
   tokenHash?: string | null;
   lastHeartbeatAt: string | Date | null;
@@ -1595,14 +1599,34 @@ export class PostgresSyncStore {
         RETURNING id, external_account_id
       ),
       upsert_device AS (
-        INSERT INTO collector_device (seller_account_id, external_device_id, device_name, device_token_hash, status)
-        VALUES ((SELECT id FROM seller), $2, $3, $4, $5)
+        INSERT INTO collector_device (
+          seller_account_id,
+          external_device_id,
+          device_name,
+          device_token_hash,
+          status,
+          activated_by_user_id,
+          activated_by_user_email,
+          activated_by_user_display_name,
+          activated_by_user_roles
+        )
+        VALUES ((SELECT id FROM seller), $2, $3, $4, $5, $6, $7, $8, COALESCE($9::text[], '{}'::text[]))
         ON CONFLICT (external_device_id)
         DO UPDATE SET
           seller_account_id = EXCLUDED.seller_account_id,
           device_name = COALESCE(EXCLUDED.device_name, collector_device.device_name),
           device_token_hash = EXCLUDED.device_token_hash,
           status = EXCLUDED.status,
+          activated_by_user_id = COALESCE(EXCLUDED.activated_by_user_id, collector_device.activated_by_user_id),
+          activated_by_user_email = COALESCE(EXCLUDED.activated_by_user_email, collector_device.activated_by_user_email),
+          activated_by_user_display_name = COALESCE(
+            EXCLUDED.activated_by_user_display_name,
+            collector_device.activated_by_user_display_name
+          ),
+          activated_by_user_roles = CASE
+            WHEN EXCLUDED.activated_by_user_email IS NOT NULL THEN EXCLUDED.activated_by_user_roles
+            ELSE collector_device.activated_by_user_roles
+          END,
           updated_at = now()
         RETURNING
           id,
@@ -1610,6 +1634,10 @@ export class PostgresSyncStore {
           external_device_id,
           device_name,
           device_token_hash,
+          activated_by_user_id,
+          activated_by_user_email,
+          activated_by_user_display_name,
+          activated_by_user_roles,
           status,
           last_heartbeat_at,
           created_at,
@@ -1620,6 +1648,10 @@ export class PostgresSyncStore {
         d.external_device_id AS "externalDeviceId",
         COALESCE(s.external_account_id, $1) AS "sellerAccountExternalId",
         d.device_name AS "deviceName",
+        d.activated_by_user_id AS "activatedByUserId",
+        d.activated_by_user_email AS "activatedByUserEmail",
+        d.activated_by_user_display_name AS "activatedByUserDisplayName",
+        d.activated_by_user_roles AS "activatedByUserRoles",
         d.status AS "status",
         d.device_token_hash AS "tokenHash",
         d.last_heartbeat_at AS "lastHeartbeatAt",
@@ -1633,7 +1665,11 @@ export class PostgresSyncStore {
         input.externalDeviceId || null,
         input.deviceName || null,
         tokenHash,
-        input.status || "active"
+        input.status || "active",
+        input.activatedByUserId || null,
+        input.activatedByUserEmail || null,
+        input.activatedByUserDisplayName || null,
+        input.activatedByUserRoles || null
       ]
     );
     return {
@@ -1652,6 +1688,10 @@ export class PostgresSyncStore {
         d.external_device_id AS "externalDeviceId",
         s.external_account_id AS "sellerAccountExternalId",
         d.device_name AS "deviceName",
+        d.activated_by_user_id AS "activatedByUserId",
+        d.activated_by_user_email AS "activatedByUserEmail",
+        d.activated_by_user_display_name AS "activatedByUserDisplayName",
+        d.activated_by_user_roles AS "activatedByUserRoles",
         d.status AS "status",
         d.last_heartbeat_at AS "lastHeartbeatAt",
         d.created_at AS "createdAt",
@@ -1674,13 +1714,29 @@ export class PostgresSyncStore {
         SET status = 'revoked',
           updated_at = now()
         WHERE id = $1
-        RETURNING id, seller_account_id, external_device_id, device_name, status, last_heartbeat_at, created_at, updated_at
+        RETURNING
+          id,
+          seller_account_id,
+          external_device_id,
+          device_name,
+          activated_by_user_id,
+          activated_by_user_email,
+          activated_by_user_display_name,
+          activated_by_user_roles,
+          status,
+          last_heartbeat_at,
+          created_at,
+          updated_at
       )
       SELECT
         d.id::text AS "id",
         d.external_device_id AS "externalDeviceId",
         s.external_account_id AS "sellerAccountExternalId",
         d.device_name AS "deviceName",
+        d.activated_by_user_id AS "activatedByUserId",
+        d.activated_by_user_email AS "activatedByUserEmail",
+        d.activated_by_user_display_name AS "activatedByUserDisplayName",
+        d.activated_by_user_roles AS "activatedByUserRoles",
         d.status AS "status",
         d.last_heartbeat_at AS "lastHeartbeatAt",
         d.created_at AS "createdAt",
@@ -1703,13 +1759,29 @@ export class PostgresSyncStore {
           updated_at = now()
         WHERE device_token_hash = $1
           AND status = 'active'
-        RETURNING id, seller_account_id, external_device_id, device_name, status, last_heartbeat_at, created_at, updated_at
+        RETURNING
+          id,
+          seller_account_id,
+          external_device_id,
+          device_name,
+          activated_by_user_id,
+          activated_by_user_email,
+          activated_by_user_display_name,
+          activated_by_user_roles,
+          status,
+          last_heartbeat_at,
+          created_at,
+          updated_at
       )
       SELECT
         d.id::text AS "id",
         d.external_device_id AS "externalDeviceId",
         s.external_account_id AS "sellerAccountExternalId",
         d.device_name AS "deviceName",
+        d.activated_by_user_id AS "activatedByUserId",
+        d.activated_by_user_email AS "activatedByUserEmail",
+        d.activated_by_user_display_name AS "activatedByUserDisplayName",
+        d.activated_by_user_roles AS "activatedByUserRoles",
         d.status AS "status",
         d.last_heartbeat_at AS "lastHeartbeatAt",
         d.created_at AS "createdAt",
@@ -2103,6 +2175,7 @@ function mapOutboundMessage(row: OutboundMessageRow): StoredOutboundMessage {
 }
 
 function mapCollectorDevice(row: CollectorDeviceRow): CollectorDevice {
+  const activatedByUserRoles = normalizeRoles(row.activatedByUserRoles ?? []);
   return {
     id: row.id,
     externalDeviceId: row.externalDeviceId ?? undefined,
@@ -2111,7 +2184,13 @@ function mapCollectorDevice(row: CollectorDeviceRow): CollectorDevice {
     status: row.status,
     lastHeartbeatAt: isoString(row.lastHeartbeatAt),
     createdAt: isoString(row.createdAt) || "",
-    updatedAt: isoString(row.updatedAt) || ""
+    updatedAt: isoString(row.updatedAt) || "",
+    ...optionalProps({
+      activatedByUserId: row.activatedByUserId,
+      activatedByUserEmail: row.activatedByUserEmail,
+      activatedByUserDisplayName: row.activatedByUserDisplayName,
+      activatedByUserRoles: activatedByUserRoles.length ? activatedByUserRoles : undefined
+    })
   };
 }
 

@@ -526,6 +526,10 @@ export class InMemorySyncStore {
       externalDeviceId: input.externalDeviceId ?? existing?.externalDeviceId,
       sellerAccountExternalId: input.sellerAccountExternalId,
       deviceName: input.deviceName ?? existing?.deviceName,
+      activatedByUserId: input.activatedByUserId ?? existing?.activatedByUserId,
+      activatedByUserEmail: input.activatedByUserEmail ?? existing?.activatedByUserEmail,
+      activatedByUserDisplayName: input.activatedByUserDisplayName ?? existing?.activatedByUserDisplayName,
+      activatedByUserRoles: input.activatedByUserRoles ?? existing?.activatedByUserRoles,
       status: input.status || "active",
       createdAt: existing?.createdAt || now,
       updatedAt: now,
@@ -674,6 +678,10 @@ function toPublicCollectorDevice(device: CollectorDevice & { tokenHash: string }
     status: device.status,
     lastHeartbeatAt: device.lastHeartbeatAt,
     createdAt: device.createdAt,
-    updatedAt: device.updatedAt
+    updatedAt: device.updatedAt,
+    ...(device.activatedByUserId ? { activatedByUserId: device.activatedByUserId } : {}),
+    ...(device.activatedByUserEmail ? { activatedByUserEmail: device.activatedByUserEmail } : {}),
+    ...(device.activatedByUserDisplayName ? { activatedByUserDisplayName: device.activatedByUserDisplayName } : {}),
+    ...(device.activatedByUserRoles?.length ? { activatedByUserRoles: device.activatedByUserRoles } : {})
   };
 }

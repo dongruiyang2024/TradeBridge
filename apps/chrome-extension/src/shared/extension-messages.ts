@@ -1,4 +1,5 @@
 import type { OutboundMessage } from "./sync-types.js";
+import type { ExtensionStatus } from "./sync-types.js";
 
 export interface OneTalkCustomerProfileContact {
   buyerAccountId: string;
@@ -15,7 +16,8 @@ export type ExtensionMessage =
   | { type: "sync-now" }
   | { type: "realtime-reconnect" }
   | { type: "open-options" }
-  | { type: "read-status" };
+  | { type: "read-status" }
+  | { type: "read-dashboard" };
 
 export interface SyncNowResponse {
   ok: boolean;
@@ -23,4 +25,9 @@ export interface SyncNowResponse {
   rejectedCount?: number;
   nextCursor?: string | null;
   error?: string;
+}
+
+export interface ExtensionDashboardResponse {
+  tradeBridgeAccountEmail?: string;
+  status: ExtensionStatus;
 }

@@ -335,6 +335,10 @@ export interface CollectorDevice {
   externalDeviceId?: string;
   sellerAccountExternalId?: string;
   deviceName?: string;
+  activatedByUserId?: string;
+  activatedByUserEmail?: string;
+  activatedByUserDisplayName?: string;
+  activatedByUserRoles?: InternalRole[];
   status: string;
   lastHeartbeatAt?: string;
   createdAt: string;
@@ -350,6 +354,10 @@ export interface RegisterCollectorDeviceInput {
   sellerAccountExternalId?: string;
   externalDeviceId?: string;
   deviceName?: string;
+  activatedByUserId?: string;
+  activatedByUserEmail?: string;
+  activatedByUserDisplayName?: string;
+  activatedByUserRoles?: InternalRole[];
   token?: string;
   status?: string;
 }
