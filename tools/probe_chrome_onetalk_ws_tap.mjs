@@ -172,24 +172,43 @@ function buildPageRuntimeJavascript() {
   };
 
   // 1) Patch prototype.send — catches OUTBOUND on existing + future sockets.
+  // Also: the first time send() fires on a live IM socket, attach an inbound
+  // listener to THAT SAME instance. This captures inbound frames on a socket
+  // that already existed before injection — no reconnect required.
   const NativeWS = window.WebSocket;
   const originalSend = NativeWS && NativeWS.prototype && NativeWS.prototype.send;
+  const INBOUND_TAG = "__tradeBridgeWsTapInbound_" + probeId;
+  let liveSocketsTapped = 0;
+  const tapInboundOnce = (socket) => {
+    try {
+      if (!socket || socket[INBOUND_TAG]) return;
+      socket[INBOUND_TAG] = true;
+      liveSocketsTapped += 1;
+      socket.addEventListener("message", (event) => { try { handlePayload("in", event.data); } catch {} });
+    } catch {}
+  };
   if (originalSend) {
     NativeWS.prototype.send = function (data) {
-      try { if (isImSocket(this.url)) handlePayload("out", data); } catch {}
+      try {
+        if (isImSocket(this.url)) {
+          tapInboundOnce(this);
+          handlePayload("out", data);
+        }
+      } catch {}
       return originalSend.apply(this, arguments);
     };
   }
 
-  // 2) Wrap constructor — catches INBOUND on sockets created AFTER injection.
+  // 2) Wrap constructor — catches INBOUND on sockets created AFTER injection
+  //    (e.g. an IM reconnect, and in production at document_start from creation).
   let wrappedConstructor = false;
   if (typeof NativeWS === "function") {
     const Wrapped = function (url, protocols) {
       const ws = protocols === undefined ? new NativeWS(url) : new NativeWS(url, protocols);
       try {
         if (isImSocket(url)) {
-          sockets.push({ urlHost: hostOf(url), capturedInbound: true });
-          ws.addEventListener("message", (event) => { try { handlePayload("in", event.data); } catch {} });
+          sockets.push({ urlHost: hostOf(url) });
+          tapInboundOnce(ws);
         }
       } catch {}
       return ws;
@@ -219,9 +238,10 @@ function buildPageRuntimeJavascript() {
       probeId,
       result: {
         ok: true,
-        note: "osascript injects post-load; inbound only captured on sockets created after wrap (e.g. reconnect). Outbound captured on all via prototype.send.",
+        note: "Inbound now tapped on the live pre-existing IM socket via send-triggered listener attach (no reconnect needed). Constructor wrap additionally covers sockets created after injection.",
         wrappedConstructor,
         patchedSend: !!originalSend,
+        liveSocketsTapped,
         socketsCreatedAfterWrap: sockets.length,
         observedMs: observeMs,
         inbound,
@@ -231,6 +251,7 @@ function buildPageRuntimeJavascript() {
         headerKeysByRoute,
         signals: {
           tappedAnyImFrame: inbound.parsed + outbound.parsed > 0,
+          capturedInbound: inbound.parsed > 0,
           capturedRealtimePush: sample.realtimePush,
           capturedListUserMessagesResponse: sample.listUserMessagesResponse
         }
@@ -261,10 +282,12 @@ function annotate(output) {
   if (parsed.ok === false) return output;
   const s = parsed.signals || {};
   const verdict = s.capturedRealtimePush
-    ? "PASS: captured live /s/ push frames — passive realtime tap is viable."
-    : s.tappedAnyImFrame
-      ? "PARTIAL: tapped IM frames but no /s/ push during window. Re-run with a chat open + send/receive a message, or trigger an IM reconnect to test inbound capture."
-      : "INCONCLUSIVE: no IM frames seen. Socket likely created before injection (no reconnect). In production the content script wraps at document_start, so this is an injection-timing artifact, not a blocker — but re-run after reloading the OneTalk tab to confirm inbound capture.";
+    ? "PASS: captured live /s/ push frames on the page's own socket — passive realtime tap is viable."
+    : s.capturedInbound
+      ? "PASS (inbound confirmed): tapped inbound IM frames on the live socket, but no /s/ push during the window. Re-run with a chat open and have the customer send a message (or send one yourself) to also confirm /s/ push capture."
+      : s.tappedAnyImFrame
+        ? "PARTIAL: outbound IM frames tapped but no inbound captured. The socket sent (e.g. heartbeat) but received nothing in the window — re-run and keep a conversation active so frames flow inbound."
+        : "INCONCLUSIVE: no IM frames seen at all. Open OneTalk, log in, open a conversation, then re-run.";
   return JSON.stringify({ ...parsed, verdict }, null, 2);
 }
 
