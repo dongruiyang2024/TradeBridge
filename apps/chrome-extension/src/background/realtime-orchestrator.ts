@@ -7,8 +7,11 @@ import type { OutboundDeliveryReport } from "./outbound-orchestrator.js";
 import type { SyncNowResponse } from "../shared/extension-messages.js";
 import type { OutboundMessage } from "../shared/sync-types.js";
 
-const DEFAULT_CLAIM_LIMIT = 10;
-const DEFAULT_LEASE_MS = 120_000;
+// Claim a small batch at a time so deliveries trickle out under the pacer
+// rather than arriving as a large burst. Lease must comfortably exceed the
+// pacer's worst-case batch time so messages are not reclaimed mid-send.
+const DEFAULT_CLAIM_LIMIT = 4;
+const DEFAULT_LEASE_MS = 180_000;
 
 export interface RealtimeOrchestrator {
   handleMessage(message: CollectorWsMessage): Promise<void>;

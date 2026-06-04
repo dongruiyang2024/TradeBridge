@@ -154,16 +154,16 @@ async function sendTextMessage(message: OutboundMessage): Promise<unknown> {
     messageService?.send?.bind(messageService);
   if (!send) throw new Error("onetalk_send_unavailable");
 
+  // Send only the fields a native OneTalk message carries. Do NOT attach any
+  // custom ext marker — it would travel upstream and identify the message as
+  // tool-sent. Receipt reconciliation uses the background-side request id
+  // (message.id) paired with the returned external message id, not the payload.
   return send({
     conversationCode: message.externalConversationId,
     cid: message.externalConversationId,
     content: message.content,
     text: message.content,
-    messageType: "text",
-    ext: {
-      source: "tradebridge",
-      outboundMessageId: message.id
-    }
+    messageType: "text"
   });
 }
 

@@ -1,6 +1,7 @@
 import { OneTalkMessageBuffer } from "./onetalk-message-buffer.js";
 import { OneTalkPageWebliteSource } from "./onetalk-page-weblite-source.js";
 import { runOutboundDelivery, sendOutboundMessagesViaOneTalk } from "./outbound-orchestrator.js";
+import { OutboundPacer } from "./outbound-pacer.js";
 import { createRealtimeOrchestrator } from "./realtime-orchestrator.js";
 import { ExtensionStateStore, validateConfig } from "./storage.js";
 import { runSyncOnce } from "./sync-orchestrator.js";
@@ -18,6 +19,9 @@ import type { ExtensionConfig, ExtensionRealtimeStatus, ExtensionStatus } from "
 const chromeApi = getChrome();
 const stateStore = new ExtensionStateStore(chromeApi.storage.local);
 const messageBuffer = new OneTalkMessageBuffer(chromeApi.storage.local);
+// Single pacer shared by both delivery paths (alarm + realtime claim) so the
+// per-account rate window is continuous, not reset per invocation.
+const outboundPacer = new OutboundPacer();
 const REALTIME_WATCHDOG_ALARM = "tradebridge-realtime-watchdog";
 let realtimeClient: TradeBridgeWsClient | null = null;
 let realtimeConnecting: Promise<void> | null = null;
@@ -28,7 +32,8 @@ const realtimeOrchestrator = createRealtimeOrchestrator({
     if (!realtimeClient) throw new Error("collector_ws_not_connected");
     realtimeClient.send(message);
   },
-  sendOutboundMessagesViaOneTalk: ({ messages }) => sendOutboundMessagesViaOneTalk({ chromeApi, messages }),
+  sendOutboundMessagesViaOneTalk: ({ messages }) =>
+    sendOutboundMessagesViaOneTalk({ chromeApi, messages, pacer: outboundPacer }),
   runSyncNow: runDefaultSyncAndOutbound
 });
 
@@ -101,6 +106,7 @@ function runDefaultOutboundDelivery() {
   return runOutboundDelivery({
     stateStore,
     chromeApi,
+    pacer: outboundPacer,
     listOutboundMessages,
     markOutboundMessageDelivered
   });

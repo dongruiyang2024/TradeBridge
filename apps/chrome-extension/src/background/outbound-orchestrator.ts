@@ -1,4 +1,5 @@
 import { sendMessageToOneTalkTab } from "./onetalk-tab-messaging.js";
+import { OutboundPacer } from "./outbound-pacer.js";
 import { validateConfig } from "./storage.js";
 import type { ChromeApi } from "../shared/chrome-api.js";
 import type { ExtensionConfig, ExtensionStatus, OutboundMessage } from "../shared/sync-types.js";
@@ -12,6 +13,7 @@ export interface OutboundStateStore {
 export interface RunOutboundDeliveryOptions {
   stateStore: OutboundStateStore;
   chromeApi: ChromeApi;
+  pacer?: OutboundPacer;
   listOutboundMessages(options: { serverUrl: string; collectorToken: string }): Promise<OutboundMessage[]>;
   markOutboundMessageDelivered(options: {
     serverUrl: string;
@@ -60,7 +62,7 @@ export async function runOutboundDelivery(options: RunOutboundDeliveryOptions): 
     let sentCount = 0;
     let failedCount = 0;
 
-    const reports = await sendOutboundMessagesViaOneTalk({ chromeApi: options.chromeApi, messages });
+    const reports = await sendOutboundMessagesViaOneTalk({ chromeApi: options.chromeApi, messages, pacer: options.pacer });
     for (const report of reports) {
       await options.markOutboundMessageDelivered({
         serverUrl: config.serverUrl,
@@ -97,9 +99,19 @@ export async function runOutboundDelivery(options: RunOutboundDeliveryOptions): 
 export async function sendOutboundMessagesViaOneTalk(options: {
   chromeApi: ChromeApi;
   messages: OutboundMessage[];
+  pacer?: OutboundPacer;
 }): Promise<OutboundDeliveryReport[]> {
+  const pacer = options.pacer ?? new OutboundPacer();
+  pacer.beginBatch();
   const reports: OutboundDeliveryReport[] = [];
   for (const message of options.messages) {
+    // Pace sends so the cadence does not look automated. On defer (rate cap or
+    // batch budget), stop here — undelivered messages have no report, so they
+    // stay queued and are retried on the next delivery cycle.
+    const decision = pacer.next();
+    if (decision.kind === "defer") break;
+    await pacer.waitAndRecord(decision.waitMs);
+
     const result = await sendViaOneTalkTab(options.chromeApi, message);
     if (result.ok) {
       const report: OutboundDeliveryReport = {
