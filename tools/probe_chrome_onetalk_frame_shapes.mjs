@@ -125,19 +125,30 @@ function buildPageRuntimeJavascript() {
 
   // Per-route aggregation: count, body top keys, deep body key paths,
   // and whether the shapes our parser/ack rely on are present.
+  // Per-route aggregation: full top-level keys, header keys, body type, and
+  // deep frame key paths (names only) — so message data is visible wherever it
+  // hides, not just under body.userMessageModels.
   const routes = {};
   const record = (dir, frame) => {
     const route = (typeof frame.lwp === "string" ? frame.lwp : "(no-lwp)") + " [" + dir + "]";
-    const r = routes[route] || (routes[route] = { count: 0, codes: new Set(), bodyTopKeys: new Set(), bodyKeyPaths: new Set(), hasUserMessageModels: false, bodyIsArray: false });
+    const r = routes[route] || (routes[route] = {
+      count: 0, codes: new Set(), topKeys: new Set(), headerKeys: new Set(),
+      bodyTypes: new Set(), frameKeyPaths: new Set(),
+      hasUserMessageModels: false, hasMessageIdLike: false
+    });
     r.count += 1;
     if (typeof frame.code === "number") r.codes.add(frame.code);
+    Object.keys(frame).forEach((k) => r.topKeys.add(k));
+    if (isRecord(frame.headers)) Object.keys(frame.headers).forEach((k) => r.headerKeys.add(k));
     const body = frame.body;
-    if (Array.isArray(body)) { r.bodyIsArray = true; if (body.length) { const s = new Set(); keyPaths(body[0], "[]", 4, s); s.forEach((p) => r.bodyKeyPaths.add(p)); } }
-    else if (isRecord(body)) {
-      Object.keys(body).forEach((k) => r.bodyTopKeys.add(k));
-      const s = new Set(); keyPaths(body, "", 4, s); s.forEach((p) => r.bodyKeyPaths.add(p));
-      if ("userMessageModels" in body) r.hasUserMessageModels = true;
-    }
+    r.bodyTypes.add(Array.isArray(body) ? "array(" + body.length + ")" : body === null ? "null" : typeof body);
+    const s = new Set();
+    keyPaths(frame, "", 5, s);
+    s.forEach((p) => r.frameKeyPaths.add(p));
+    // Key-name presence only; never emits values.
+    const text = JSON.stringify(frame) || "";
+    if (text.indexOf("userMessageModels") >= 0) r.hasUserMessageModels = true;
+    if (/"(messageId|msgId|msgIdStr|messageID)"/.test(text)) r.hasMessageIdLike = true;
   };
 
   const onFrame = (dir, text) => {
@@ -168,10 +179,12 @@ function buildPageRuntimeJavascript() {
       out[route] = {
         count: r.count,
         codes: Array.from(r.codes),
-        bodyIsArray: r.bodyIsArray,
+        topKeys: Array.from(r.topKeys).sort(),
+        headerKeys: Array.from(r.headerKeys).sort().slice(0, 60),
+        bodyTypes: Array.from(r.bodyTypes),
         hasUserMessageModels: r.hasUserMessageModels,
-        bodyTopKeys: Array.from(r.bodyTopKeys).sort().slice(0, 60),
-        bodyKeyPaths: Array.from(r.bodyKeyPaths).sort().slice(0, 120)
+        hasMessageIdLike: r.hasMessageIdLike,
+        frameKeyPaths: Array.from(r.frameKeyPaths).sort().slice(0, 160)
       };
     }
     window.postMessage({
@@ -179,7 +192,7 @@ function buildPageRuntimeJavascript() {
       probeId,
       result: {
         ok: true,
-        note: "Key paths only, no values. Compare push-frame body shape to listUserMessages (userMessageModels). Open a chat + send/receive + scroll to load history.",
+        note: "Key names only, no values. To test realtime push, have ANOTHER account message this seller during the window. hasMessageIdLike flags any frame carrying a message id.",
         observedMs: observeMs,
         routes: out
       }
