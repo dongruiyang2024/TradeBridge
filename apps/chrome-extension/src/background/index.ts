@@ -1,10 +1,5 @@
-import {
-  contactProfileRequestsFromConversations,
-  requestOneTalkCustomerProfiles
-} from "./onetalk-customer-profile-client.js";
-import { requestOneTalkConversations } from "./onetalk-conversation-client.js";
-import { BrowserOnetalkLwpClient } from "./onetalk-lwp-client.js";
-import { requestOneTalkImToken } from "./onetalk-token-client.js";
+import { OneTalkMessageBuffer } from "./onetalk-message-buffer.js";
+import { OneTalkPageWebliteSource } from "./onetalk-page-weblite-source.js";
 import { runOutboundDelivery, sendOutboundMessagesViaOneTalk } from "./outbound-orchestrator.js";
 import { createRealtimeOrchestrator } from "./realtime-orchestrator.js";
 import { ExtensionStateStore, validateConfig } from "./storage.js";
@@ -22,6 +17,7 @@ import type { ExtensionConfig, ExtensionRealtimeStatus, ExtensionStatus } from "
 
 const chromeApi = getChrome();
 const stateStore = new ExtensionStateStore(chromeApi.storage.local);
+const messageBuffer = new OneTalkMessageBuffer(chromeApi.storage.local);
 const REALTIME_WATCHDOG_ALARM = "tradebridge-realtime-watchdog";
 let realtimeClient: TradeBridgeWsClient | null = null;
 let realtimeConnecting: Promise<void> | null = null;
@@ -61,6 +57,10 @@ chromeApi.alarms.onAlarm.addListener((alarm) => {
 
 chromeApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const typed = message as ExtensionMessage;
+  if (typed.type === "onetalk-messages-observed") {
+    void messageBuffer.add(typed.externalConversationId, typed.messages).then(() => sendResponse({ ok: true }));
+    return true;
+  }
   if (typed.type === "sync-now") {
     void runDefaultSyncAndOutbound().then(sendResponse);
     return true;
@@ -83,33 +83,10 @@ chromeApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 void ensureRealtimeConnection();
 
 async function runDefaultSync() {
-  const config = await stateStore.getConfig();
   return runSyncOnce({
     stateStore,
-    onetalkClient: new BrowserOnetalkLwpClient({
-      appKey: "12574478",
-      deviceId: config?.deviceId || "chrome-extension",
-      userAgent: navigator.userAgent,
-      tokenProvider: async () =>
-        requestOneTalkImToken({
-          chromeApi,
-          appKey: "12574478",
-          deviceId: config?.deviceId || "chrome-extension"
-        }),
-      conversationProvider: async () => {
-        const page = await requestOneTalkConversations({
-          chromeApi,
-          cursor: Date.now(),
-          count: 100
-        });
-        return page.conversations;
-      },
-      customerProfileProvider: async (conversations) =>
-        requestOneTalkCustomerProfiles({
-          chromeApi,
-          contacts: contactProfileRequestsFromConversations(conversations)
-        })
-    }),
+    onetalkClient: new OneTalkPageWebliteSource({ chromeApi }),
+    messageSource: messageBuffer,
     uploadSyncBatch
   });
 }

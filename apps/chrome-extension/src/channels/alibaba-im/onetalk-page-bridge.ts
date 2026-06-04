@@ -1,11 +1,12 @@
-import type { ChromeApi } from "../shared/chrome-api.js";
-import type { ExtensionMessage, OneTalkCustomerProfileContact } from "../shared/extension-messages.js";
-import type { OutboundMessage } from "../shared/sync-types.js";
+import type { ChromeApi } from "../../shared/chrome-api.js";
+import type { ExtensionMessage, OneTalkCustomerProfileContact } from "../../shared/extension-messages.js";
+import type { OutboundMessage } from "../../shared/sync-types.js";
 
 interface ContentBridgeGlobal {
   __tradeBridgeOneTalkContentBridgeInstalled?: boolean;
 }
 
+const PAGE_SCRIPT_FILE = "channels/alibaba-im/onetalk-page-script.js";
 const chromeApi = (globalThis as unknown as { chrome: ChromeApi }).chrome;
 const bridgeGlobal = globalThis as unknown as ContentBridgeGlobal;
 const loginRequired = /login\.alibaba\.com|newlogin/i.test(location.href);
@@ -17,6 +18,7 @@ if (!bridgeGlobal.__tradeBridgeOneTalkContentBridgeInstalled) {
 
 function installBridge(): void {
   injectPageScript();
+  observeTappedMessages();
 
   void chromeApi.runtime.sendMessage({
     type: loginRequired ? "onetalk-login-required" : "onetalk-page-ready",
@@ -27,10 +29,6 @@ function installBridge(): void {
     const typed = message as ExtensionMessage;
     if (typed.type === "send-onetalk-message") {
       void sendOutboundMessageToPage(typed.message).then(sendResponse);
-      return true;
-    }
-    if (typed.type === "get-onetalk-im-token") {
-      void requestImTokenFromPage(typed.appKey, typed.deviceId).then(sendResponse);
       return true;
     }
     if (typed.type === "get-onetalk-customer-profiles") {
@@ -46,6 +44,24 @@ function installBridge(): void {
 
 }
 
+// Forward passively-tapped OneTalk messages from the page script (MAIN world)
+// to the background worker. The page script only emits already-sanitized
+// message bodies grouped by conversation id.
+function observeTappedMessages(): void {
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || !isRecord(event.data)) return;
+    if (event.data.source !== "tradebridge-onetalk-page") return;
+    if (event.data.type !== "onetalk-messages-observed") return;
+    const externalConversationId =
+      typeof event.data.externalConversationId === "string" ? event.data.externalConversationId : "";
+    const messages = Array.isArray(event.data.messages) ? event.data.messages.filter(isRecord) : [];
+    if (!externalConversationId || !messages.length) return;
+    void chromeApi.runtime
+      .sendMessage({ type: "onetalk-messages-observed", externalConversationId, messages })
+      .catch(() => undefined);
+  });
+}
+
 function injectPageScript(): void {
   const target = document.documentElement || document.head;
   if (!target) {
@@ -54,7 +70,7 @@ function injectPageScript(): void {
   }
 
   const script = document.createElement("script");
-  script.src = chromeApi.runtime.getURL("content/onetalk-page-script.js");
+  script.src = chromeApi.runtime.getURL(PAGE_SCRIPT_FILE);
   script.async = false;
   script.onload = () => script.remove();
   target.append(script);
@@ -89,46 +105,6 @@ async function sendOutboundMessageToPage(message: OutboundMessage) {
         type: "send-onetalk-message",
         requestId,
         message
-      },
-      window.location.origin
-    );
-  });
-}
-
-async function requestImTokenFromPage(appKey: string, deviceId: string) {
-  const requestId = `tradebridge-token-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  return new Promise((resolve) => {
-    const timeout = window.setTimeout(() => {
-      window.removeEventListener("message", handleMessage);
-      resolve({ ok: false, error: "onetalk_token_timeout" });
-    }, 15_000);
-
-    function handleMessage(event: MessageEvent): void {
-      if (event.source !== window || !isRecord(event.data)) return;
-      if (event.data.source !== "tradebridge-onetalk-page") return;
-      if (event.data.type !== "get-onetalk-im-token-result" || event.data.requestId !== requestId) return;
-
-      window.clearTimeout(timeout);
-      window.removeEventListener("message", handleMessage);
-      resolve({
-        ok: event.data.ok === true,
-        accessToken: typeof event.data.accessToken === "string" ? event.data.accessToken : undefined,
-        refreshToken: typeof event.data.refreshToken === "string" ? event.data.refreshToken : undefined,
-        expiresInMs: typeof event.data.expiresInMs === "number" ? event.data.expiresInMs : undefined,
-        appKey: typeof event.data.appKey === "string" ? event.data.appKey : undefined,
-        deviceId: typeof event.data.deviceId === "string" ? event.data.deviceId : undefined,
-        error: typeof event.data.error === "string" ? event.data.error : undefined
-      });
-    }
-
-    window.addEventListener("message", handleMessage);
-    window.postMessage(
-      {
-        source: "tradebridge-extension",
-        type: "get-onetalk-im-token",
-        requestId,
-        appKey,
-        deviceId
       },
       window.location.origin
     );

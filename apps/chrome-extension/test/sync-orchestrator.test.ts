@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { runSyncOnce } from "../src/background/sync-orchestrator.js";
+import { runSyncOnce, type SyncMessageSource } from "../src/background/sync-orchestrator.js";
 import type { ExtensionConfig, ExtensionStatus, SyncBatch } from "../src/shared/sync-types.js";
 
 class MemoryStateStore {
@@ -27,7 +27,11 @@ class MemoryStateStore {
   }
 }
 
-test("runSyncOnce fetches OneTalk data, sanitizes it, uploads batch, and saves cursor", async () => {
+function staticMessageSource(byConversationId: Record<string, Record<string, unknown>[]>): SyncMessageSource {
+  return { read: async () => byConversationId };
+}
+
+test("runSyncOnce maps buffered messages with page-SDK conversations, sanitizes, uploads, and saves cursor", async () => {
   const store = new MemoryStateStore();
   const uploaded: SyncBatch[] = [];
 
@@ -45,34 +49,21 @@ test("runSyncOnce fetches OneTalk data, sanitizes it, uploads batch, and saves c
             }
           }
         ]
-      }),
-      getChatMessages: async () => ({
-        status: 200,
-        contentType: "application/lwp+json",
-        code: 200,
-        raw: {},
-        messages: [
-          {
-            message: {
-              messageId: "m1",
-              cid: "conv-1",
-              sender: { uid: "buyer-ali" },
-              content: { text: { content: "hello" } },
-              createAt: 1779706200000
-            }
-          }
-        ],
-        diagnostics: {
-          status: 200,
-          contentType: "application/lwp+json",
-          code: 200,
-          listLength: 1,
-          listPath: "body.userMessageModels",
-          topLevelKeys: ["body", "code", "headers"],
-          dataKeys: ["hasMore", "nextCursor", "userMessageModels"]
-        }
       })
     },
+    messageSource: staticMessageSource({
+      "conv-1": [
+        {
+          message: {
+            messageId: "m1",
+            cid: "conv-1",
+            sender: { uid: "buyer-ali" },
+            content: { text: { content: "hello" } },
+            createAt: 1779706200000
+          }
+        }
+      ]
+    }),
     uploadSyncBatch: async (options) => {
       uploaded.push(options.batch);
       return {
@@ -92,16 +83,14 @@ test("runSyncOnce fetches OneTalk data, sanitizes it, uploads batch, and saves c
   assert.equal(store.status.nextCursor, "2026-05-25T10:50:00.000Z");
   assert.equal(store.status.lastError, undefined);
   assert.equal(store.status.lastDiagnostics?.conversations, 1);
-  assert.deepEqual(store.status.lastDiagnostics?.messageRequests.map((item) => [item.conversationId, item.status, item.listLength]), [
-    ["conv-1", 200, 1]
-  ]);
-  assert.deepEqual(store.status.lastDiagnostics?.lwpRoutes?.map((item) => item.route), [
-    "/r/Conversation/listNewestPagination",
-    "/r/MessageManager/listUserMessages"
-  ]);
+  assert.deepEqual(
+    store.status.lastDiagnostics?.messageRequests.map((item) => [item.conversationId, item.status, item.listLength]),
+    [["conv-1", 200, 1]]
+  );
+  assert.deepEqual(store.status.lastDiagnostics?.lwpRoutes?.map((item) => item.route), ["page-socket-tap"]);
 });
 
-test("runSyncOnce uploads fetched messages even when local status has an old cursor", async () => {
+test("runSyncOnce uploads buffered messages even when local status has an old cursor", async () => {
   const store = new MemoryStateStore();
   store.status = { nextCursor: "2026-05-28T08:00:00.000Z" };
   const uploaded: SyncBatch[] = [];
@@ -120,34 +109,21 @@ test("runSyncOnce uploads fetched messages even when local status has an old cur
             }
           }
         ]
-      }),
-      getChatMessages: async () => ({
-        status: 200,
-        contentType: "application/lwp+json",
-        code: 200,
-        raw: {},
-        messages: [
-          {
-            message: {
-              messageId: "m-old-local-cursor",
-              cid: "conv-1",
-              sender: { uid: "buyer-ali" },
-              content: { text: { content: "existing recent message" } },
-              createAt: 1779706200000
-            }
-          }
-        ],
-        diagnostics: {
-          status: 200,
-          contentType: "application/lwp+json",
-          code: 200,
-          listLength: 1,
-          listPath: "body.userMessageModels",
-          topLevelKeys: ["body", "code", "headers"],
-          dataKeys: ["hasMore", "nextCursor", "userMessageModels"]
-        }
       })
     },
+    messageSource: staticMessageSource({
+      "conv-1": [
+        {
+          message: {
+            messageId: "m-old-local-cursor",
+            cid: "conv-1",
+            sender: { uid: "buyer-ali" },
+            content: { text: { content: "existing recent message" } },
+            createAt: 1779706200000
+          }
+        }
+      ]
+    }),
     uploadSyncBatch: async (options) => {
       uploaded.push(options.batch);
       return {
@@ -174,9 +150,11 @@ test("runSyncOnce stores collector_activation_required errors", async () => {
     onetalkClient: {
       fetchWeblite: async () => {
         throw new Error("should not fetch");
-      },
-      getChatMessages: async () => {
-        throw new Error("should not fetch");
+      }
+    },
+    messageSource: {
+      read: async () => {
+        throw new Error("should not read");
       }
     },
     uploadSyncBatch: async () => {
@@ -189,7 +167,7 @@ test("runSyncOnce stores collector_activation_required errors", async () => {
   assert.equal(store.status.lastError?.code, "collector_activation_required");
 });
 
-test("runSyncOnce records per-conversation message failures and continues upload", async () => {
+test("runSyncOnce records per-conversation diagnostics for buffered conversations", async () => {
   const store = new MemoryStateStore();
   const uploaded: SyncBatch[] = [];
 
@@ -203,7 +181,7 @@ test("runSyncOnce records per-conversation message failures and continues upload
         conversations: [
           {
             singleChatUserConversation: {
-              singleChatConversation: { cid: "conv-timeout", pairFirst: "self-ali", pairSecond: "buyer-1" }
+              singleChatConversation: { cid: "conv-empty", pairFirst: "self-ali", pairSecond: "buyer-1" }
             }
           },
           {
@@ -212,29 +190,21 @@ test("runSyncOnce records per-conversation message failures and continues upload
             }
           }
         ]
-      }),
-      getChatMessages: async ({ conversation }) => {
-        const cid = (conversation.singleChatUserConversation as { singleChatConversation: { cid: string } })
-          .singleChatConversation.cid;
-        if (cid === "conv-timeout") throw new Error("lwp_request_timeout:/r/MessageManager/listUserMessages");
-        return {
-          status: 200,
-          contentType: "application/lwp+json",
-          code: 200,
-          raw: {},
-          messages: [],
-          diagnostics: {
-            status: 200,
-            contentType: "application/lwp+json",
-            code: 200,
-            listLength: 0,
-            listPath: "body.userMessageModels",
-            topLevelKeys: ["body", "code", "headers"],
-            dataKeys: ["userMessageModels"]
-          }
-        };
-      }
+      })
     },
+    messageSource: staticMessageSource({
+      "conv-ok": [
+        {
+          message: {
+            messageId: "m-ok",
+            cid: "conv-ok",
+            sender: { uid: "buyer-2" },
+            content: { text: { content: "hi" } },
+            createAt: 1779706200000
+          }
+        }
+      ]
+    }),
     uploadSyncBatch: async (options) => {
       uploaded.push(options.batch);
       return { acceptedCount: 0, rejectedCount: 0, nextCursor: null, warnings: [] };
@@ -243,8 +213,8 @@ test("runSyncOnce records per-conversation message failures and continues upload
 
   assert.equal(result.ok, true);
   assert.equal(uploaded.length, 1);
-  assert.deepEqual(store.status.lastDiagnostics?.messageRequests.map((item) => [item.conversationId, item.status, item.code]), [
-    ["conv-timeout", 0, "lwp_request_timeout:/r/MessageManager/listUserMessages"],
-    ["conv-ok", 200, 200]
-  ]);
+  assert.deepEqual(
+    store.status.lastDiagnostics?.messageRequests.map((item) => [item.conversationId, item.status, item.listLength]),
+    [["conv-ok", 200, 1]]
+  );
 });

@@ -1,8 +1,8 @@
 import { requestCustomerProfilesFromPageRuntime } from "./onetalk-customer-profile.js";
 import { requestConversationsFromPageRuntime } from "./onetalk-conversation.js";
-import { requestImTokenFromPageRuntime } from "./onetalk-im-token.js";
-import type { OneTalkCustomerProfileContact } from "../shared/extension-messages.js";
-import type { OutboundMessage } from "../shared/sync-types.js";
+import { installOneTalkMessageTap } from "./onetalk-message-tap.js";
+import type { OneTalkCustomerProfileContact } from "../../shared/extension-messages.js";
+import type { OutboundMessage } from "../../shared/sync-types.js";
 
 interface PageBridgeWindow extends Window {
   IcbuIM?: {
@@ -25,15 +25,12 @@ const pageWindow = window as PageBridgeWindow;
 
 if (!pageWindow.__tradeBridgeOneTalkPageBridgeInstalled) {
   pageWindow.__tradeBridgeOneTalkPageBridgeInstalled = true;
+  installOneTalkMessageTap(window);
   window.addEventListener("message", (event) => {
     if (event.source !== window || !isRecord(event.data)) return;
     if (event.data.source !== "tradebridge-extension") return;
     if (event.data.type === "send-onetalk-message") {
       void handleSendRequest(event.data);
-      return;
-    }
-    if (event.data.type === "get-onetalk-im-token") {
-      void handleTokenRequest(event.data);
       return;
     }
     if (event.data.type === "get-onetalk-customer-profiles") {
@@ -59,40 +56,6 @@ async function handleSendRequest(data: Record<string, unknown>): Promise<void> {
     publishResult(requestId, true, externalMessageIdFromResult(result));
   } catch (error) {
     publishResult(requestId, false, undefined, error instanceof Error ? error.message : "onetalk_send_failed");
-  }
-}
-
-async function handleTokenRequest(data: Record<string, unknown>): Promise<void> {
-  const requestId = typeof data.requestId === "string" ? data.requestId : "";
-  const appKey = typeof data.appKey === "string" ? data.appKey : "12574478";
-  const deviceId = typeof data.deviceId === "string" ? data.deviceId : "";
-  if (!requestId || !deviceId) {
-    publishTokenResult(requestId, false, undefined, undefined, undefined, undefined, undefined, "invalid_token_request");
-    return;
-  }
-
-  try {
-    const token = await requestImTokenFromPageRuntime(window, appKey, deviceId);
-    publishTokenResult(
-      requestId,
-      true,
-      token.accessToken,
-      token.refreshToken,
-      token.expiresInMs,
-      token.appKey,
-      token.deviceId
-    );
-  } catch (error) {
-    publishTokenResult(
-      requestId,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      error instanceof Error ? error.message : "onetalk_token_fetch_failed"
-    );
   }
 }
 
@@ -139,33 +102,6 @@ async function handleConversationsRequest(data: Record<string, unknown>): Promis
       error instanceof Error ? error.message : "onetalk_conversation_fetch_failed"
     );
   }
-}
-
-function publishTokenResult(
-  requestId: string,
-  ok: boolean,
-  accessToken?: string,
-  refreshToken?: string,
-  expiresInMs?: number,
-  appKey?: string,
-  deviceId?: string,
-  error?: string
-): void {
-  window.postMessage(
-    {
-      source: "tradebridge-onetalk-page",
-      type: "get-onetalk-im-token-result",
-      requestId,
-      ok,
-      accessToken,
-      refreshToken,
-      expiresInMs,
-      appKey,
-      deviceId,
-      error
-    },
-    window.location.origin
-  );
 }
 
 function publishCustomerProfilesResult(

@@ -1,4 +1,4 @@
-import type { OneTalkCustomerProfileContact } from "../shared/extension-messages.js";
+import type { OneTalkCustomerProfileContact } from "../../shared/extension-messages.js";
 
 interface CustomerProfilePageWindow extends Window {
   IcbuIM?: {

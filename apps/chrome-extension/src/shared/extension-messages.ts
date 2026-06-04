@@ -9,8 +9,8 @@ export interface OneTalkCustomerProfileContact {
 export type ExtensionMessage =
   | { type: "onetalk-page-ready"; url: string }
   | { type: "onetalk-login-required"; url: string }
+  | { type: "onetalk-messages-observed"; externalConversationId: string; messages: Record<string, unknown>[] }
   | { type: "send-onetalk-message"; message: OutboundMessage }
-  | { type: "get-onetalk-im-token"; appKey: string; deviceId: string }
   | { type: "get-onetalk-customer-profiles"; contacts: OneTalkCustomerProfileContact[] }
   | { type: "get-onetalk-conversations"; cursor: number; count: number }
   | { type: "sync-now" }

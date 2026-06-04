@@ -1,4 +1,4 @@
-import { mapWebliteToSyncBatch, type ChatMessageResponse, type WebliteData } from "@wangwang/onetalk-adapter/browser";
+import { mapWebliteToSyncBatch, type WebliteData } from "@wangwang/onetalk-adapter/browser";
 import { assertNoSensitiveFields, sanitizeForUpload } from "./sanitizer.js";
 import { validateConfig } from "./storage.js";
 import type {
@@ -18,21 +18,18 @@ export interface SyncStateStore {
 
 export interface SyncOnetalkClient {
   fetchWeblite(): Promise<WebliteData>;
-  getChatMessages(options: {
-    conversation: Record<string, unknown>;
-    bootstrap: Record<string, string>;
-    before: number | null;
-    pageSize: number;
-  }): Promise<ChatMessageResponse>;
+}
+
+export interface SyncMessageSource {
+  read(): Promise<Record<string, Record<string, unknown>[]>>;
 }
 
 export interface RunSyncOnceOptions {
   stateStore: SyncStateStore;
   onetalkClient: SyncOnetalkClient;
+  messageSource: SyncMessageSource;
   uploadSyncBatch(options: { serverUrl: string; collectorToken: string; batch: SyncBatch }): Promise<SyncBatchResult>;
   now?: () => Date;
-  pageSize?: number;
-  maxPagesPerConversation?: number;
 }
 
 export interface RunSyncResult {
@@ -45,8 +42,6 @@ export interface RunSyncResult {
 
 export async function runSyncOnce(options: RunSyncOnceOptions): Promise<RunSyncResult> {
   const now = options.now || (() => new Date());
-  const pageSize = options.pageSize || 50;
-  const maxPages = options.maxPagesPerConversation || 1;
   const previousStatus = await options.stateStore.getStatus();
 
   try {
@@ -54,12 +49,7 @@ export async function runSyncOnce(options: RunSyncOnceOptions): Promise<RunSyncR
     validateConfig(config);
 
     const weblite = await options.onetalkClient.fetchWeblite();
-    const messageFetch = await fetchMessagesByConversation({
-      client: options.onetalkClient,
-      weblite,
-      pageSize,
-      maxPages
-    });
+    const messagesByConversationId = await options.messageSource.read();
     const mapped = mapWebliteToSyncBatch({
       sellerAccount: {
         externalAccountId: config.sellerAccountExternalId,
@@ -73,7 +63,7 @@ export async function runSyncOnce(options: RunSyncOnceOptions): Promise<RunSyncR
       source: "chrome-extension",
       previousCursor: null,
       weblite,
-      messagesByConversationId: messageFetch.messagesByConversationId
+      messagesByConversationId
     });
 
     const sanitized = sanitizeForUpload(mapped);
@@ -87,7 +77,7 @@ export async function runSyncOnce(options: RunSyncOnceOptions): Promise<RunSyncR
     await options.stateStore.saveStatus({
       lastSyncedAt: now().toISOString(),
       nextCursor: uploadResult.nextCursor,
-      lastDiagnostics: messageFetch.diagnostics,
+      lastDiagnostics: diagnosticsFromMessages(weblite, messagesByConversationId),
       lastError: undefined
     });
 
@@ -110,143 +100,36 @@ export async function runSyncOnce(options: RunSyncOnceOptions): Promise<RunSyncR
   }
 }
 
-async function fetchMessagesByConversation(options: {
-  client: SyncOnetalkClient;
-  weblite: WebliteData;
-  pageSize: number;
-  maxPages: number;
-}): Promise<{ messagesByConversationId: Record<string, Record<string, unknown>[]>; diagnostics: SyncDiagnostics }> {
-  const output: Record<string, Record<string, unknown>[]> = {};
-  const diagnostics: MessageRequestDiagnostic[] = [];
-  let conversations = 0;
-
-  for (const conversation of options.weblite.conversations.filter(isRecord)) {
-    const conversationId = firstString(conversation, [
-      "cid",
-      "conversationCode",
-      "conversationId",
-      "id",
-      "singleChatUserConversation.singleChatConversation.cid"
-    ]);
-    if (!conversationId) continue;
-    conversations += 1;
-    const messages: Record<string, unknown>[] = [];
-    let before: number | null = null;
-
-    for (let page = 0; page < options.maxPages; page += 1) {
-      let result: ChatMessageResponse;
-      try {
-        result = await options.client.getChatMessages({
-          conversation,
-          bootstrap: options.weblite.bootstrap,
-          before,
-          pageSize: options.pageSize
-        });
-      } catch (error) {
-        diagnostics.push(failedMessageRequestDiagnostic(conversationId, error));
-        break;
+function diagnosticsFromMessages(
+  weblite: WebliteData,
+  messagesByConversationId: Record<string, Record<string, unknown>[]>
+): SyncDiagnostics {
+  const messageRequests: MessageRequestDiagnostic[] = Object.entries(messagesByConversationId).map(
+    ([conversationId, messages]) => ({
+      conversationId,
+      status: 200,
+      code: 200,
+      contentType: "application/lwp+json",
+      listLength: messages.length,
+      listPath: "page-socket-tap",
+      topLevelKeys: [],
+      dataKeys: []
+    })
+  );
+  return {
+    conversations: weblite.conversations.filter(isRecord).length,
+    messageRequests,
+    lwpRoutes: [
+      {
+        route: "page-socket-tap",
+        status: 200,
+        listLength: messageRequests.reduce((total, item) => total + item.listLength, 0)
       }
-      const records = result.messages.filter(isRecord);
-      diagnostics.push(messageRequestDiagnostic(conversationId, result, records.length));
-      messages.push(...records);
-      if (records.length < options.pageSize) break;
-      const oldest = oldestTimestamp(records);
-      if (oldest == null) break;
-      before = oldest - 1;
-    }
-
-    output[conversationId] = messages;
-  }
-
-  return {
-    messagesByConversationId: output,
-    diagnostics: {
-      conversations,
-      messageRequests: diagnostics,
-      lwpRoutes: [
-        { route: "/r/Conversation/listNewestPagination", status: 200, listLength: conversations },
-        ...diagnostics.map((item) => ({
-          route: "/r/MessageManager/listUserMessages",
-          status: item.status,
-          listLength: item.listLength
-        }))
-      ]
-    }
+    ]
   };
-}
-
-function failedMessageRequestDiagnostic(conversationId: string, error: unknown): MessageRequestDiagnostic {
-  const code = error instanceof Error ? error.message : "onetalk_message_request_failed";
-  return {
-    conversationId,
-    status: 0,
-    contentType: "application/lwp+json",
-    code,
-    listLength: 0,
-    listPath: "body.userMessageModels",
-    topLevelKeys: [],
-    dataKeys: []
-  };
-}
-
-function messageRequestDiagnostic(
-  conversationId: string,
-  response: ChatMessageResponse,
-  listLength: number
-): MessageRequestDiagnostic {
-  return {
-    conversationId,
-    status: response.status,
-    code: response.code,
-    contentType: response.contentType,
-    listLength,
-    listPath: response.diagnostics?.listPath,
-    topLevelKeys: response.diagnostics?.topLevelKeys || objectKeys(response.raw),
-    dataKeys: response.diagnostics?.dataKeys || objectKeys(isRecord(response.raw) ? response.raw.data : undefined)
-  };
-}
-
-function objectKeys(value: unknown): string[] {
-  return isRecord(value) ? Object.keys(value).sort() : [];
-}
-
-function oldestTimestamp(records: Record<string, unknown>[]): number | null {
-  const times = records
-    .map((record) => numericTime(firstValue(record, ["sendTime", "sentAt", "time", "gmtCreate", "createdAt", "message.createAt"])))
-    .filter((value): value is number => value != null);
-  return times.length ? Math.min(...times) : null;
-}
-
-function numericTime(value: unknown): number | null {
-  const raw = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value) ? Number(value) : null;
-  if (raw == null || !Number.isFinite(raw)) return null;
-  return raw < 10_000_000_000 ? raw * 1000 : raw;
-}
-
-function firstString(source: Record<string, unknown>, keys: string[]): string | undefined {
-  const value = firstValue(source, keys);
-  if (typeof value === "string" && value.trim()) return value.trim();
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
-  return undefined;
-}
-
-function firstValue(source: Record<string, unknown>, keys: string[]): unknown {
-  for (const key of keys) {
-    const value = key.includes(".") ? valueAtPath(source, key.split(".")) : source[key];
-    if (value != null && value !== "") return value;
-  }
-  return undefined;
-}
-
-function valueAtPath(source: unknown, path: string[]): unknown {
-  let current = source;
-  for (const key of path) {
-    if (!isRecord(current)) return undefined;
-    current = current[key];
-  }
-  return current;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
+

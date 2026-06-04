@@ -18,20 +18,25 @@ test("manifest uses minimal permissions for internal OneTalk collector", () => {
 
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.minimum_chrome_version, "116");
-  assert.deepEqual(manifest.permissions?.sort(), ["alarms", "cookies", "scripting", "storage"]);
+  assert.deepEqual(manifest.permissions?.sort(), ["alarms", "scripting", "storage"]);
   assert.ok(manifest.host_permissions?.includes("https://onetalk.alibaba.com/*"));
   assert.ok(manifest.host_permissions?.includes("http://127.0.0.1:5032/*"));
   assert.ok(manifest.host_permissions?.includes("ws://127.0.0.1:5032/*"));
   assert.equal(manifest.host_permissions?.includes("<all_urls>"), false);
+  assert.equal(manifest.host_permissions?.includes("https://*.alibaba.com/*"), false);
+  assert.equal(manifest.permissions?.includes("cookies"), false);
   assert.equal(manifest.permissions?.includes("webRequest"), false);
   assert.equal(manifest.background?.service_worker, "background/index.js");
   assert.equal(manifest.background?.type, "module");
   assert.equal(manifest.content_scripts?.[0]?.run_at, "document_start");
-  assert.equal(manifest.web_accessible_resources?.[0]?.resources?.includes("content/onetalk-page-script.js"), true);
+  assert.equal(
+    manifest.web_accessible_resources?.[0]?.resources?.includes("channels/alibaba-im/onetalk-page-script.js"),
+    true
+  );
 });
 
 test("OneTalk content bridge stays classic-script compatible", () => {
-  const bridgeSource = fs.readFileSync(path.resolve("src/content/onetalk-page-bridge.ts"), "utf8");
+  const bridgeSource = fs.readFileSync(path.resolve("src/channels/alibaba-im/onetalk-page-bridge.ts"), "utf8");
   const runtimeImports = bridgeSource
     .split("\n")
     .filter((line) => line.startsWith("import ") && !line.startsWith("import type "));
@@ -41,7 +46,7 @@ test("OneTalk content bridge stays classic-script compatible", () => {
 });
 
 test("OneTalk content bridge does not collect business data from the page DOM", () => {
-  const bridgeSource = fs.readFileSync(path.resolve("src/content/onetalk-page-bridge.ts"), "utf8");
+  const bridgeSource = fs.readFileSync(path.resolve("src/channels/alibaba-im/onetalk-page-bridge.ts"), "utf8");
 
   assert.equal(bridgeSource.includes("querySelectorAll"), false);
   assert.equal(bridgeSource.includes("innerText"), false);

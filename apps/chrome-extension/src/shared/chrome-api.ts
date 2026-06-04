@@ -35,17 +35,6 @@ export interface ChromeAlarmsApi {
   };
 }
 
-export interface ChromeCookie {
-  name: string;
-  value: string;
-  domain?: string;
-  path?: string;
-}
-
-export interface ChromeCookiesApi {
-  getAll(details: { domain?: string; url?: string; name?: string }): Promise<ChromeCookie[]>;
-}
-
 export interface ChromeTab {
   id?: number;
   url?: string;
@@ -67,7 +56,6 @@ export interface ChromeApi {
     local: ChromeStorageArea;
   };
   alarms: ChromeAlarmsApi;
-  cookies?: ChromeCookiesApi;
   tabs?: ChromeTabsApi;
   scripting?: ChromeScriptingApi;
 }
