@@ -20,6 +20,9 @@ export interface SyncChannelAccountInput {
 
 export interface SyncCustomerInput {
   externalCustomerId: string;
+  channel?: string;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
   loginId?: string;
   displayName?: string;
   country?: string;
@@ -29,6 +32,9 @@ export interface SyncCustomerInput {
 
 export interface SyncConversationInput {
   externalConversationId: string;
+  channel?: string;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
   externalCustomerId?: string;
   lastMessageAt?: string;
 }
@@ -36,6 +42,9 @@ export interface SyncConversationInput {
 export interface SyncMessageInput {
   externalConversationId: string;
   externalMessageId?: string;
+  channel?: string;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
   direction: MessageDirection;
   messageType?: string | number;
   content?: string;
@@ -232,6 +241,9 @@ export interface MarkOutboundMessageDeliveredInput {
 
 export interface StoredOutboundMessage extends ConversationCustomerScope {
   id: string;
+  channel?: string;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
   content: string;
   status: OutboundMessageStatus;
   createdByUserId?: string;

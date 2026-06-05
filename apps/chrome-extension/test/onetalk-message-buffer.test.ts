@@ -63,16 +63,48 @@ test("OneTalkMessageBuffer caps number of conversations, evicting the oldest", a
   assert.deepEqual(Object.keys(read).sort(), ["conv-2", "conv-3"]);
 });
 
-test("OneTalkMessageBuffer drain returns and clears the buffer", async () => {
+test("OneTalkMessageBuffer acknowledge removes only the uploaded messages", async () => {
+  const storage = new MemoryStorage();
+  const buffer = new OneTalkMessageBuffer(storage);
+
+  await buffer.add("conv-1", [{ message: { messageId: "m1" } }, { message: { messageId: "m2" } }]);
+  const snapshot = await buffer.read();
+  assert.equal(snapshot["conv-1"].length, 2);
+
+  // A new message arrives after the read snapshot, then we ack the snapshot.
+  await buffer.add("conv-1", [{ message: { messageId: "m3" } }]);
+  await buffer.acknowledge(snapshot);
+
+  const remaining = await buffer.read();
+  const ids = remaining["conv-1"].map((m) => (m.message as { messageId: string }).messageId);
+  assert.deepEqual(ids, ["m3"], "only the post-snapshot message survives the ack");
+});
+
+test("OneTalkMessageBuffer acknowledge drops a conversation once fully uploaded", async () => {
   const storage = new MemoryStorage();
   const buffer = new OneTalkMessageBuffer(storage);
 
   await buffer.add("conv-1", [{ message: { messageId: "m1" } }]);
-  const drained = await buffer.drain();
-  assert.equal(drained["conv-1"].length, 1);
+  const snapshot = await buffer.read();
+  await buffer.acknowledge(snapshot);
 
-  const afterDrain = await buffer.read();
-  assert.deepEqual(afterDrain, {});
+  const remaining = await buffer.read();
+  assert.deepEqual(remaining, {});
+});
+
+test("OneTalkMessageBuffer concurrent add on a cold start keeps both messages", async () => {
+  const storage = new MemoryStorage();
+  const buffer = new OneTalkMessageBuffer(storage);
+
+  // Both add() calls race before the first storage.get resolves (cache null).
+  await Promise.all([
+    buffer.add("conv-1", [{ message: { messageId: "a" } }]),
+    buffer.add("conv-1", [{ message: { messageId: "b" } }])
+  ]);
+
+  const read = await buffer.read();
+  const ids = (read["conv-1"] || []).map((m) => (m.message as { messageId: string }).messageId).sort();
+  assert.deepEqual(ids, ["a", "b"], "neither concurrent add is lost");
 });
 
 test("OneTalkMessageBuffer persists across instances via storage", async () => {

@@ -22,6 +22,7 @@ export interface SyncOnetalkClient {
 
 export interface SyncMessageSource {
   read(): Promise<Record<string, Record<string, unknown>[]>>;
+  acknowledge(uploaded: Record<string, Record<string, unknown>[]>): Promise<void>;
 }
 
 export interface RunSyncOnceOptions {
@@ -73,6 +74,10 @@ export async function runSyncOnce(options: RunSyncOnceOptions): Promise<RunSyncR
       collectorToken: config.collectorToken,
       batch: sanitized
     });
+
+    // Upload succeeded — remove exactly the uploaded messages from the buffer.
+    // Messages that arrived after read() and any future ones stay buffered.
+    await options.messageSource.acknowledge(messagesByConversationId);
 
     await options.stateStore.saveStatus({
       lastSyncedAt: now().toISOString(),

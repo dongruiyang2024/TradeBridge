@@ -1,3 +1,4 @@
+import { AutoSyncScheduler } from "./auto-sync-scheduler.js";
 import { OneTalkMessageBuffer } from "./onetalk-message-buffer.js";
 import { OneTalkPageWebliteSource } from "./onetalk-page-weblite-source.js";
 import { runOutboundDelivery, sendOutboundMessagesViaOneTalk } from "./outbound-orchestrator.js";
@@ -37,6 +38,14 @@ const realtimeOrchestrator = createRealtimeOrchestrator({
   runSyncNow: runDefaultSyncAndOutbound
 });
 
+// Coalesces inbound-triggered syncs: when the page tap observes new messages we
+// schedule() instead of uploading on every burst. The periodic alarm stays as a
+// backstop, but this is what makes captured messages reach the server within a
+// couple of seconds without a manual sync.
+const autoSyncScheduler = new AutoSyncScheduler({
+  runSync: runDefaultSyncAndOutbound
+});
+
 chromeApi.runtime.onInstalled.addListener(() => {
   chromeApi.alarms.create("tradebridge-sync", { periodInMinutes: 30 });
   chromeApi.alarms.create("tradebridge-outbound", { periodInMinutes: 1 });
@@ -66,6 +75,11 @@ chromeApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     void messageBuffer
       .add(typed.externalConversationId, typed.messages)
       .then(() => recordObservedMessages(typed.messages.length))
+      .then(() => {
+        // New messages buffered — push them to the server shortly. Debounced so
+        // a burst of messages produces one upload, not one per message.
+        if (typed.messages.length > 0) autoSyncScheduler.schedule();
+      })
       .then(() => sendResponse({ ok: true }));
     return true;
   }

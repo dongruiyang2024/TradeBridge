@@ -28,7 +28,7 @@ class MemoryStateStore {
 }
 
 function staticMessageSource(byConversationId: Record<string, Record<string, unknown>[]>): SyncMessageSource {
-  return { read: async () => byConversationId };
+  return { read: async () => byConversationId, acknowledge: async () => undefined };
 }
 
 test("runSyncOnce maps buffered messages with page-SDK conversations, sanitizes, uploads, and saves cursor", async () => {
@@ -155,7 +155,8 @@ test("runSyncOnce stores collector_activation_required errors", async () => {
     messageSource: {
       read: async () => {
         throw new Error("should not read");
-      }
+      },
+      acknowledge: async () => undefined
     },
     uploadSyncBatch: async () => {
       throw new Error("should not upload");

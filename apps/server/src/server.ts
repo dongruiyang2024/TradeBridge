@@ -228,11 +228,18 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       return reply.code(400).send({ ok: false, error: "invalid_sync_batch" });
     }
 
-    const result = await store.acceptSyncBatch(collectorScopedBatch(batch, collectorDevice));
-    return {
-      ok: true,
-      ...result
-    };
+    try {
+      const result = await store.acceptSyncBatch(collectorScopedBatch(batch, collectorDevice));
+      return {
+        ok: true,
+        ...result
+      };
+    } catch (error) {
+      // Surface the store failure instead of a bare 500 so the collector and
+      // logs can tell what went wrong (e.g. a schema/constraint mismatch).
+      request.log.error({ err: error }, "sync_batch_persist_failed");
+      return reply.code(502).send({ ok: false, error: "sync_batch_persist_failed" });
+    }
   });
 
   app.get("/collector/v1/outbound-messages", async (request, reply) => {

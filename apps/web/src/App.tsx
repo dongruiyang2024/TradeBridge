@@ -15,7 +15,7 @@ import {
   UserPlus,
   UserRound
 } from "lucide-react";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createInternalApiClient } from "./api";
 import type {
   CreateInternalUserInput,
@@ -30,6 +30,7 @@ import {
   createOutboundMessageForSelectedConversation,
   createTaskForSelectedCustomer,
   loadCustomerList,
+  refreshDashboard,
   selectConversation,
   selectCustomer
 } from "./dashboard-state";
@@ -42,6 +43,12 @@ const STORAGE_KEYS = {
 };
 
 const ROLE_OPTIONS: InternalRole[] = ["admin", "supervisor", "sales"];
+
+// How often the dashboard quietly re-fetches the selected customer's
+// conversations and messages so newly captured content appears without a manual
+// refresh. The refresh is silent (selection and status line are preserved) and
+// pauses while another workflow is running to avoid clobbering in-flight edits.
+const DASHBOARD_POLL_INTERVAL_MS = 8_000;
 
 interface LoginSessionSnapshot {
   token: string;
@@ -101,6 +108,40 @@ export function App() {
       });
     return () => {
       cancelled = true;
+    };
+  }, [serverBaseUrl, token]);
+
+  // Keep live refs of state/loading/userManagementMode so the poll interval can
+  // read the latest values without re-subscribing (and resetting its timer) on
+  // every render.
+  const stateRef = useRef(state);
+  const loadingRef = useRef(loading);
+  const userManagementModeRef = useRef(userManagementMode);
+  stateRef.current = state;
+  loadingRef.current = loading;
+  userManagementModeRef.current = userManagementMode;
+
+  // Silent background poll: re-fetch the selected customer's conversations and
+  // messages so newly captured content appears on its own. Skips ticks while a
+  // foreground workflow is running or while the user is in user-management view,
+  // and never overwrites an in-flight manual action.
+  useEffect(() => {
+    if (!token.trim()) return;
+    const client = createInternalApiClient({ baseUrl: serverBaseUrl, token });
+    let cancelled = false;
+
+    const id = window.setInterval(() => {
+      if (cancelled || loadingRef.current || userManagementModeRef.current) return;
+      void refreshDashboard(stateRef.current, client)
+        .then((nextState) => {
+          if (!cancelled && !loadingRef.current) setState(nextState);
+        })
+        .catch(() => undefined);
+    }, DASHBOARD_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
     };
   }, [serverBaseUrl, token]);
 

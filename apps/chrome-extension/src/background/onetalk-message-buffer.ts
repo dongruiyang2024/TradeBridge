@@ -22,6 +22,7 @@ export interface OneTalkMessageBufferOptions {
 
 export class OneTalkMessageBuffer {
   private cache: BufferShape | null = null;
+  private loadPromise: Promise<BufferShape> | null = null;
   private writeChain: Promise<void> = Promise.resolve();
   private readonly maxPerConversation: number;
   private readonly maxConversations: number;
@@ -47,19 +48,39 @@ export class OneTalkMessageBuffer {
     await this.flush();
   }
 
-  // Returns the buffered messages without clearing them. Sync maps these into a
-  // batch; messages are only removed by drain() after a confirmed upload.
+  // Returns the buffered messages without clearing them. Sync uploads this
+  // snapshot, then calls acknowledge() with it on success.
   async read(): Promise<Record<string, Record<string, unknown>[]>> {
     const buffer = await this.load();
     return cloneByConversationId(buffer.byConversationId);
   }
 
-  async drain(): Promise<Record<string, Record<string, unknown>[]>> {
+  // Remove exactly the messages that were successfully uploaded (matched by
+  // message id), leaving any messages that arrived after the read snapshot and
+  // anything that could not be id-matched. Called only after a confirmed
+  // upload, so a failed upload keeps everything buffered for retry.
+  async acknowledge(uploaded: Record<string, Record<string, unknown>[]>): Promise<void> {
     const buffer = await this.load();
-    const snapshot = cloneByConversationId(buffer.byConversationId);
-    buffer.byConversationId = {};
-    await this.flush();
-    return snapshot;
+    let changed = false;
+    for (const [conversationId, uploadedMessages] of Object.entries(uploaded)) {
+      const current = buffer.byConversationId[conversationId];
+      if (!current || !uploadedMessages.length) continue;
+      const uploadedIds = new Set<string>();
+      for (const message of uploadedMessages) {
+        const id = messageId(message);
+        if (id) uploadedIds.add(id);
+      }
+      if (!uploadedIds.size) continue;
+      const remaining = current.filter((message) => {
+        const id = messageId(message);
+        return !id || !uploadedIds.has(id);
+      });
+      if (remaining.length === current.length) continue;
+      changed = true;
+      if (remaining.length) buffer.byConversationId[conversationId] = remaining;
+      else delete buffer.byConversationId[conversationId];
+    }
+    if (changed) await this.flush();
   }
 
   private evictConversations(buffer: BufferShape): void {
@@ -72,11 +93,21 @@ export class OneTalkMessageBuffer {
     }
   }
 
-  private async load(): Promise<BufferShape> {
-    if (this.cache) return this.cache;
-    const data = await this.storage.get(BUFFER_KEY);
-    this.cache = normalizeBuffer(data[BUFFER_KEY]);
-    return this.cache;
+  // Concurrent callers share a single in-flight storage.get so a cold start
+  // (cache null) cannot trigger two parallel loads that overwrite each other.
+  private load(): Promise<BufferShape> {
+    if (this.cache) return Promise.resolve(this.cache);
+    if (this.loadPromise) return this.loadPromise;
+    this.loadPromise = this.storage
+      .get(BUFFER_KEY)
+      .then((data) => {
+        if (!this.cache) this.cache = normalizeBuffer(data[BUFFER_KEY]);
+        return this.cache;
+      })
+      .finally(() => {
+        this.loadPromise = null;
+      });
+    return this.loadPromise;
   }
 
   private flush(): Promise<void> {

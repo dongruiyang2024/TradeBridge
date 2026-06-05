@@ -59,6 +59,9 @@ interface IdRow {
 
 interface CustomerRow {
   sellerAccountExternalId: string;
+  channel: string | null;
+  channelAccountExternalId: string | null;
+  channelSurface: string | null;
   externalCustomerId: string;
   loginId: string | null;
   displayName: string | null;
@@ -69,6 +72,9 @@ interface CustomerRow {
 
 interface ConversationRow {
   sellerAccountExternalId: string;
+  channel: string | null;
+  channelAccountExternalId: string | null;
+  channelSurface: string | null;
   externalConversationId: string;
   externalCustomerId: string | null;
   lastMessageAt: string | Date | null;
@@ -76,6 +82,9 @@ interface ConversationRow {
 
 interface MessageRow {
   sellerAccountExternalId: string;
+  channel: string | null;
+  channelAccountExternalId: string | null;
+  channelSurface: string | null;
   externalConversationId: string;
   externalMessageId: string | null;
   direction: MessageDirection;
@@ -267,22 +276,27 @@ export class PostgresSyncStore {
 
     const sellerAccountId = await this.upsertSellerAccount(batch);
     const deviceId = await this.upsertCollectorDevice(batch, sellerAccountId);
+    const channelScope = syncChannelScope(batch);
+    const channelAccountId = await this.upsertChannelAccount(batch, sellerAccountId, channelScope);
     const customerIds = new Map<string, string>();
     const conversationIds = new Map<string, string>();
 
     for (const customer of batch.customers || []) {
-      customerIds.set(customer.externalCustomerId, await this.upsertCustomer(batch, sellerAccountId, customer.externalCustomerId));
+      customerIds.set(
+        customer.externalCustomerId,
+        await this.upsertCustomer(batch, sellerAccountId, channelAccountId, channelScope, customer.externalCustomerId)
+      );
     }
 
     for (const conversation of batch.conversations || []) {
       const customerId = conversation.externalCustomerId ? customerIds.get(conversation.externalCustomerId) || null : null;
       conversationIds.set(
         conversation.externalConversationId,
-        await this.upsertConversation(batch, sellerAccountId, conversation.externalConversationId, customerId)
+        await this.upsertConversation(batch, sellerAccountId, channelAccountId, channelScope, conversation.externalConversationId, customerId)
       );
     }
 
-    await this.insertSyncBatch(batch, sellerAccountId, deviceId);
+    await this.insertSyncBatch(batch, sellerAccountId, deviceId, channelAccountId, channelScope);
 
     for (const message of batch.messages || []) {
       const conversationId = conversationIds.get(message.externalConversationId);
@@ -290,7 +304,7 @@ export class PostgresSyncStore {
         rejectedCount += 1;
         continue;
       }
-      const rowCount = await this.insertMessage(batch, sellerAccountId, conversationId, message);
+      const rowCount = await this.insertMessage(batch, sellerAccountId, channelAccountId, channelScope, conversationId, message);
       if (rowCount > 0) {
         acceptedCount += 1;
         nextCursor = maxIso(nextCursor, message.sentAt || null);
@@ -305,7 +319,7 @@ export class PostgresSyncStore {
       nextCursor,
       warnings: []
     };
-    await this.updateSyncBatchResult(batch, sellerAccountId, result);
+    await this.updateSyncBatchResult(batch, sellerAccountId, channelAccountId, channelScope, result);
     return result;
   }
 
@@ -319,6 +333,9 @@ export class PostgresSyncStore {
       /* list_customers */
       SELECT
         s.external_account_id AS "sellerAccountExternalId",
+        c.channel AS "channel",
+        ca.external_account_id AS "channelAccountExternalId",
+        ca.surface AS "channelSurface",
         c.external_customer_id AS "externalCustomerId",
         c.login_id AS "loginId",
         c.display_name AS "displayName",
@@ -327,6 +344,7 @@ export class PostgresSyncStore {
         c.stage AS "stage"
       FROM customer c
       INNER JOIN seller_account s ON s.id = c.seller_account_id
+      LEFT JOIN channel_account ca ON ca.id = c.channel_account_id
       ORDER BY c.updated_at DESC, c.external_customer_id ASC
       `,
       []
@@ -336,6 +354,9 @@ export class PostgresSyncStore {
       sellerAccountExternalId: row.sellerAccountExternalId,
       externalCustomerId: row.externalCustomerId,
       ...optionalProps({
+        channel: row.channel,
+        channelAccountExternalId: row.channelAccountExternalId,
+        channelSurface: row.channelSurface,
         loginId: row.loginId,
         displayName: row.displayName,
         country: row.country,
@@ -351,12 +372,16 @@ export class PostgresSyncStore {
       /* list_conversations */
       SELECT
         s.external_account_id AS "sellerAccountExternalId",
+        conv.channel AS "channel",
+        ca.external_account_id AS "channelAccountExternalId",
+        ca.surface AS "channelSurface",
         conv.external_conversation_id AS "externalConversationId",
         c.external_customer_id AS "externalCustomerId",
         conv.last_message_at AS "lastMessageAt"
       FROM conversation conv
       INNER JOIN seller_account s ON s.id = conv.seller_account_id
       LEFT JOIN customer c ON c.id = conv.customer_id
+      LEFT JOIN channel_account ca ON ca.id = conv.channel_account_id
       ORDER BY conv.last_message_at DESC NULLS LAST, conv.external_conversation_id ASC
       `,
       []
@@ -366,6 +391,9 @@ export class PostgresSyncStore {
       sellerAccountExternalId: row.sellerAccountExternalId,
       externalConversationId: row.externalConversationId,
       ...optionalProps({
+        channel: row.channel,
+        channelAccountExternalId: row.channelAccountExternalId,
+        channelSurface: row.channelSurface,
         externalCustomerId: row.externalCustomerId,
         lastMessageAt: isoString(row.lastMessageAt)
       })
@@ -378,6 +406,9 @@ export class PostgresSyncStore {
       /* list_messages */
       SELECT
         s.external_account_id AS "sellerAccountExternalId",
+        m.channel AS "channel",
+        ca.external_account_id AS "channelAccountExternalId",
+        ca.surface AS "channelSurface",
         conv.external_conversation_id AS "externalConversationId",
         m.external_message_id AS "externalMessageId",
         m.direction AS "direction",
@@ -393,6 +424,7 @@ export class PostgresSyncStore {
       FROM message m
       INNER JOIN seller_account s ON s.id = m.seller_account_id
       INNER JOIN conversation conv ON conv.id = m.conversation_id
+      LEFT JOIN channel_account ca ON ca.id = m.channel_account_id
       WHERE ($1::text IS NULL OR conv.external_conversation_id = $1)
       ORDER BY m.sent_at ASC NULLS LAST, m.id ASC
       `,
@@ -406,6 +438,9 @@ export class PostgresSyncStore {
       contentHash: row.contentHash,
       uniqueKey: row.uniqueKey,
       ...optionalProps({
+        channel: row.channel,
+        channelAccountExternalId: row.channelAccountExternalId,
+        channelSurface: row.channelSurface,
         externalMessageId: row.externalMessageId,
         messageType: row.messageType,
         content: row.content,
@@ -1843,14 +1878,68 @@ export class PostgresSyncStore {
     return requiredId(result.rows[0], "collector_device");
   }
 
-  private async upsertCustomer(batch: SyncBatch, sellerAccountId: string, externalCustomerId: string): Promise<string> {
+  private async upsertChannelAccount(
+    batch: SyncBatch,
+    sellerAccountId: string,
+    scope: SyncChannelScope
+  ): Promise<string> {
+    const result = await this.client.query<IdRow>(
+      `
+      /* upsert_channel_account */
+      INSERT INTO channel_account (
+        seller_account_id,
+        channel,
+        external_account_id,
+        display_name,
+        surface,
+        last_seen_at,
+        status
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, 'active')
+      ON CONFLICT (seller_account_id, channel, external_account_id)
+      DO UPDATE SET
+        display_name = COALESCE(EXCLUDED.display_name, channel_account.display_name),
+        surface = COALESCE(EXCLUDED.surface, channel_account.surface),
+        last_seen_at = COALESCE(EXCLUDED.last_seen_at, channel_account.last_seen_at),
+        status = EXCLUDED.status,
+        updated_at = now()
+      RETURNING id
+      `,
+      [
+        sellerAccountId,
+        scope.channel,
+        scope.channelAccountExternalId,
+        batch.channelAccount?.displayName || null,
+        scope.surface || null,
+        sourceTime(batch)
+      ]
+    );
+    return requiredId(result.rows[0], "channel_account");
+  }
+
+  private async upsertCustomer(
+    batch: SyncBatch,
+    sellerAccountId: string,
+    channelAccountId: string,
+    scope: SyncChannelScope,
+    externalCustomerId: string
+  ): Promise<string> {
     const customer = (batch.customers || []).find((item) => item.externalCustomerId === externalCustomerId);
     const result = await this.client.query<IdRow>(
       `
       /* upsert_customer */
-      INSERT INTO customer (seller_account_id, external_customer_id, login_id, display_name, country, stage)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      ON CONFLICT (seller_account_id, external_customer_id)
+      INSERT INTO customer (
+        seller_account_id,
+        channel_account_id,
+        channel,
+        external_customer_id,
+        login_id,
+        display_name,
+        country,
+        stage
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      ON CONFLICT (seller_account_id, channel, external_customer_id)
       DO UPDATE SET
         login_id = COALESCE(EXCLUDED.login_id, customer.login_id),
         display_name = COALESCE(EXCLUDED.display_name, customer.display_name),
@@ -1861,6 +1950,8 @@ export class PostgresSyncStore {
       `,
       [
         sellerAccountId,
+        channelAccountId,
+        scope.channel,
         externalCustomerId,
         customer?.loginId || null,
         customer?.displayName || null,
@@ -1874,6 +1965,8 @@ export class PostgresSyncStore {
   private async upsertConversation(
     batch: SyncBatch,
     sellerAccountId: string,
+    channelAccountId: string,
+    scope: SyncChannelScope,
     externalConversationId: string,
     customerId: string | null
   ): Promise<string> {
@@ -1881,9 +1974,16 @@ export class PostgresSyncStore {
     const result = await this.client.query<IdRow>(
       `
       /* upsert_conversation */
-      INSERT INTO conversation (seller_account_id, customer_id, external_conversation_id, last_message_at)
-      VALUES ($1, $2, $3, $4)
-      ON CONFLICT (seller_account_id, external_conversation_id)
+      INSERT INTO conversation (
+        seller_account_id,
+        channel_account_id,
+        channel,
+        customer_id,
+        external_conversation_id,
+        last_message_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (seller_account_id, channel, external_conversation_id)
       DO UPDATE SET
         customer_id = COALESCE(EXCLUDED.customer_id, conversation.customer_id),
         last_message_at = COALESCE(EXCLUDED.last_message_at, conversation.last_message_at),
@@ -1892,6 +1992,8 @@ export class PostgresSyncStore {
       `,
       [
         sellerAccountId,
+        channelAccountId,
+        scope.channel,
         customerId,
         externalConversationId,
         conversation?.lastMessageAt || null
@@ -1900,23 +2002,33 @@ export class PostgresSyncStore {
     return requiredId(result.rows[0], "conversation");
   }
 
-  private async insertSyncBatch(batch: SyncBatch, sellerAccountId: string, deviceId: string): Promise<void> {
+  private async insertSyncBatch(
+    batch: SyncBatch,
+    sellerAccountId: string,
+    deviceId: string,
+    channelAccountId: string,
+    scope: SyncChannelScope
+  ): Promise<void> {
     await this.client.query(
       `
       /* insert_sync_batch */
       INSERT INTO sync_batch (
         seller_account_id,
         collector_device_id,
+        channel_account_id,
+        channel,
         source_batch_key,
         cursor,
         source_meta
       )
-      VALUES ($1, $2, $3, $4, $5)
-      ON CONFLICT (seller_account_id, source_batch_key) DO NOTHING
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      ON CONFLICT (seller_account_id, channel, source_batch_key) DO NOTHING
       `,
       [
         sellerAccountId,
         deviceId,
+        channelAccountId,
+        scope.channel,
         sourceBatchKey(batch),
         batch.cursor || null,
         batch.sourceMeta || null
@@ -1927,6 +2039,8 @@ export class PostgresSyncStore {
   private async updateSyncBatchResult(
     batch: SyncBatch,
     sellerAccountId: string,
+    channelAccountId: string,
+    scope: SyncChannelScope,
     result: SyncBatchResult
   ): Promise<void> {
     await this.client.query(
@@ -1938,13 +2052,17 @@ export class PostgresSyncStore {
         rejected_count = $2,
         warnings = $3
       WHERE seller_account_id = $4
-        AND source_batch_key = $5
+        AND channel_account_id = $5
+        AND channel = $6
+        AND source_batch_key = $7
       `,
       [
         result.acceptedCount,
         result.rejectedCount,
         result.warnings,
         sellerAccountId,
+        channelAccountId,
+        scope.channel,
         sourceBatchKey(batch)
       ]
     );
@@ -1953,6 +2071,8 @@ export class PostgresSyncStore {
   private async insertMessage(
     batch: SyncBatch,
     sellerAccountId: string,
+    channelAccountId: string,
+    scope: SyncChannelScope,
     conversationId: string,
     message: SyncMessageInput
   ): Promise<number> {
@@ -1962,6 +2082,8 @@ export class PostgresSyncStore {
       /* insert_message */
       INSERT INTO message (
         seller_account_id,
+        channel_account_id,
+        channel,
         conversation_id,
         external_message_id,
         direction,
@@ -1971,12 +2093,14 @@ export class PostgresSyncStore {
         content_hash,
         raw_sanitized
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       ON CONFLICT DO NOTHING
       RETURNING id
       `,
       [
         sellerAccountId,
+        channelAccountId,
+        scope.channel,
         conversationId,
         message.externalMessageId || null,
         message.direction,
@@ -2010,12 +2134,28 @@ function sourceTime(batch: SyncBatch): string | null {
   return typeof collectedAt === "string" ? collectedAt : null;
 }
 
+interface SyncChannelScope {
+  channel: string;
+  channelAccountExternalId: string;
+  surface?: string;
+}
+
+function syncChannelScope(batch: SyncBatch): SyncChannelScope {
+  const channel = batch.channelAccount?.channel || batch.channel || "alibaba-im";
+  return {
+    channel,
+    channelAccountExternalId: batch.channelAccount?.externalAccountId || batch.sellerAccount.externalAccountId,
+    surface: batch.channelAccount?.surface || (typeof batch.sourceMeta?.surface === "string" ? batch.sourceMeta.surface : undefined)
+  };
+}
+
 function sourceBatchKey(batch: SyncBatch): string {
   const explicit = batch.sourceMeta?.sourceBatchKey;
   if (typeof explicit === "string" && explicit) return explicit;
   return hashContent(
     JSON.stringify({
       seller: batch.sellerAccount.externalAccountId,
+      channel: syncChannelScope(batch),
       device: batch.device.deviceId,
       cursor: batch.cursor || null,
       messageCount: batch.messages?.length || 0

@@ -10,6 +10,7 @@ import {
   createOutboundMessageForSelectedConversation,
   createTaskForSelectedCustomer,
   loadCustomerList,
+  refreshDashboard,
   selectConversation,
   selectCustomer
 } from "../src/dashboard-state.ts";
@@ -303,6 +304,59 @@ test("customer workflow hides delivered outbound messages after they are synced 
 
   assert.equal(state.messages.length, 1);
   assert.equal(state.outboundMessages.length, 0);
+});
+
+test("refreshDashboard preserves selection and local edits while picking up new messages", async () => {
+  let messageCount = 1;
+  const client: InternalApiClient = {
+    ...createFakeClient(),
+    async listMessages(externalConversationId) {
+      // Simulate a newly captured message arriving between polls.
+      const messages = [
+        {
+          sellerAccountExternalId: "seller-1",
+          externalConversationId,
+          direction: "received" as const,
+          content: "first message",
+          sentAt: "2026-06-01T00:00:00.000Z",
+          contentHash: "hash-1",
+          uniqueKey: "message-1"
+        }
+      ];
+      if (messageCount > 1) {
+        messages.push({
+          sellerAccountExternalId: "seller-1",
+          externalConversationId,
+          direction: "received" as const,
+          content: "freshly captured",
+          sentAt: "2026-06-01T00:01:00.000Z",
+          contentHash: "hash-2",
+          uniqueKey: "message-2"
+        });
+      }
+      return messages;
+    }
+  };
+
+  let state = await loadCustomerList(createInitialDashboardState(), client);
+  state = await selectCustomer(state, client, "customer-2");
+  state = await createNoteForSelectedCustomer(state, client, "Local note");
+  state = await addTagToSelectedCustomer(state, client, "vip");
+
+  assert.equal(state.selectedCustomerId, "customer-2");
+  assert.equal(state.messages.length, 1);
+
+  // A new message lands, then the silent poll fires.
+  messageCount = 2;
+  const refreshed = await refreshDashboard(state, client);
+
+  assert.equal(refreshed.selectedCustomerId, "customer-2", "selection is preserved");
+  assert.equal(refreshed.selectedConversationId, state.selectedConversationId, "conversation is preserved");
+  assert.equal(refreshed.messages.length, 2, "newly captured message appears");
+  assert.equal(refreshed.messages.at(-1)?.content, "freshly captured");
+  assert.equal(refreshed.notes.at(-1)?.body, "Local note", "local notes are not lost");
+  assert.equal(refreshed.tags.at(-1)?.tag, "vip", "local tags are not lost");
+  assert.equal(refreshed.status, state.status, "status line is untouched by the silent poll");
 });
 
 function sampleDashboardState(): DashboardState {

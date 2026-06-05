@@ -79,6 +79,7 @@ export class InMemorySyncStore {
     const warnings: string[] = [];
     let acceptedCount = 0;
     let rejectedCount = 0;
+    const channelScope = syncChannelScope(batch);
 
     const sellerKey = sellerAccountKey(batch.sellerAccount.externalAccountId);
     this.sellerAccounts.set(sellerKey, {
@@ -87,17 +88,19 @@ export class InMemorySyncStore {
     });
 
     for (const customer of batch.customers || []) {
-      this.customers.set(customerKey(batch.sellerAccount.externalAccountId, customer.externalCustomerId), {
+      this.customers.set(customerKey(batch.sellerAccount.externalAccountId, channelScope, customer.externalCustomerId), {
         sellerAccountExternalId: batch.sellerAccount.externalAccountId,
+        ...channelStoredProps(batch),
         ...customer
       });
     }
 
     for (const conversation of batch.conversations || []) {
       this.conversations.set(
-        conversationKey(batch.sellerAccount.externalAccountId, conversation.externalConversationId),
+        conversationKey(batch.sellerAccount.externalAccountId, channelScope, conversation.externalConversationId),
         {
           sellerAccountExternalId: batch.sellerAccount.externalAccountId,
+          ...channelStoredProps(batch),
           ...conversation
         }
       );
@@ -105,7 +108,7 @@ export class InMemorySyncStore {
 
     let nextCursor: string | null = null;
     for (const message of batch.messages || []) {
-      const convKey = conversationKey(batch.sellerAccount.externalAccountId, message.externalConversationId);
+      const convKey = conversationKey(batch.sellerAccount.externalAccountId, channelScope, message.externalConversationId);
       if (!this.conversations.has(convKey)) {
         rejectedCount += 1;
         warnings.push(
@@ -123,6 +126,7 @@ export class InMemorySyncStore {
 
       this.messages.set(uniqueKey, {
         sellerAccountExternalId: batch.sellerAccount.externalAccountId,
+        ...channelStoredProps(batch),
         ...message,
         contentHash,
         uniqueKey
@@ -209,7 +213,7 @@ export class InMemorySyncStore {
 
   async assignCustomer(input: AssignCustomerInput): Promise<StoredCustomerAssignment> {
     const now = new Date().toISOString();
-    const key = customerKey(input.sellerAccountExternalId, input.externalCustomerId);
+    const key = customerCollaborationKey(input.sellerAccountExternalId, input.externalCustomerId);
     const existing = this.customerAssignments.get(key);
     const assignment: StoredCustomerAssignment = {
       ...input,
@@ -222,7 +226,7 @@ export class InMemorySyncStore {
   }
 
   async getCustomerAssignment(scope: CustomerScope): Promise<StoredCustomerAssignment | null> {
-    return this.customerAssignments.get(customerKey(scope.sellerAccountExternalId, scope.externalCustomerId)) || null;
+    return this.customerAssignments.get(customerCollaborationKey(scope.sellerAccountExternalId, scope.externalCustomerId)) || null;
   }
 
   async updateFollowUpTask(input: UpdateFollowUpTaskInput): Promise<StoredFollowUpTask> {
@@ -290,8 +294,11 @@ export class InMemorySyncStore {
   }
 
   async createOutboundMessage(input: CreateOutboundMessageInput): Promise<StoredOutboundMessage> {
-    const conversation = this.conversations.get(
-      conversationKey(input.sellerAccountExternalId, input.externalConversationId)
+    const conversation = Array.from(this.conversations.values()).find(
+      (item) =>
+        item.sellerAccountExternalId === input.sellerAccountExternalId &&
+        item.externalConversationId === input.externalConversationId &&
+        item.externalCustomerId === input.externalCustomerId
     );
     if (!conversation || conversation.externalCustomerId !== input.externalCustomerId) {
       throw new Error("outbound_conversation_not_found");
@@ -300,6 +307,7 @@ export class InMemorySyncStore {
     const now = new Date().toISOString();
     const message: StoredOutboundMessage = {
       ...input,
+      ...optionalChannelFields(conversation),
       id: this.nextOutboundMessageId(),
       status: "queued",
       createdAt: now,
@@ -607,16 +615,73 @@ function sellerAccountKey(sellerAccountExternalId: string): string {
   return sellerAccountExternalId;
 }
 
-function customerKey(sellerAccountExternalId: string, externalCustomerId: string): string {
+interface SyncChannelScope {
+  channel: string;
+  channelAccountExternalId: string;
+  surface?: string;
+}
+
+function syncChannelScope(batch: SyncBatch): SyncChannelScope {
+  const channel = batch.channelAccount?.channel || batch.channel || "alibaba-im";
+  return {
+    channel,
+    channelAccountExternalId: batch.channelAccount?.externalAccountId || batch.sellerAccount.externalAccountId,
+    surface: batch.channelAccount?.surface || (typeof batch.sourceMeta?.surface === "string" ? batch.sourceMeta.surface : undefined)
+  };
+}
+
+function hasExplicitChannel(batch: SyncBatch): boolean {
+  return Boolean(batch.channel || batch.channelAccount);
+}
+
+function channelStoredProps(batch: SyncBatch): {
+  channel?: string;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
+} {
+  if (!hasExplicitChannel(batch)) return {};
+  const scope = syncChannelScope(batch);
+  return {
+    channel: scope.channel,
+    channelAccountExternalId: scope.channelAccountExternalId,
+    ...(scope.surface ? { channelSurface: scope.surface } : {})
+  };
+}
+
+function optionalChannelFields(source: {
+  channel?: string;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
+}): {
+  channel?: string;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
+} {
+  return {
+    ...(source.channel ? { channel: source.channel } : {}),
+    ...(source.channelAccountExternalId ? { channelAccountExternalId: source.channelAccountExternalId } : {}),
+    ...(source.channelSurface ? { channelSurface: source.channelSurface } : {})
+  };
+}
+
+function channelScopeKey(scope: SyncChannelScope): string {
+  return [scope.channel, scope.channelAccountExternalId].join(":");
+}
+
+function customerKey(sellerAccountExternalId: string, scope: SyncChannelScope, externalCustomerId: string): string {
+  return [sellerAccountExternalId, channelScopeKey(scope), externalCustomerId].join(":");
+}
+
+function customerCollaborationKey(sellerAccountExternalId: string, externalCustomerId: string): string {
   return [sellerAccountExternalId, externalCustomerId].join(":");
 }
 
-function conversationKey(sellerAccountExternalId: string, externalConversationId: string): string {
-  return [sellerAccountExternalId, externalConversationId].join(":");
+function conversationKey(sellerAccountExternalId: string, scope: SyncChannelScope, externalConversationId: string): string {
+  return [sellerAccountExternalId, channelScopeKey(scope), externalConversationId].join(":");
 }
 
 function messageUniqueKey(batch: SyncBatch, message: SyncMessageInput, contentHash: string): string {
-  const prefix = conversationKey(batch.sellerAccount.externalAccountId, message.externalConversationId);
+  const prefix = conversationKey(batch.sellerAccount.externalAccountId, syncChannelScope(batch), message.externalConversationId);
   if (message.externalMessageId) {
     return [prefix, message.externalMessageId].join(":");
   }

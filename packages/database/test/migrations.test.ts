@@ -9,7 +9,8 @@ test("internal sync migrations expose the initial schema in order", () => {
       ["001_internal_sync_schema", "001_internal_sync_schema.sql"],
       ["002_outbound_message_queue", "002_outbound_message_queue.sql"],
       ["003_outbound_message_claim_lease", "003_outbound_message_claim_lease.sql"],
-      ["004_collector_device_activation_account", "004_collector_device_activation_account.sql"]
+      ["004_collector_device_activation_account", "004_collector_device_activation_account.sql"],
+      ["005_channel_dimension", "005_channel_dimension.sql"]
     ]
   );
   assert.doesNotMatch(INTERNAL_SYNC_MIGRATIONS[0].sql, /CREATE TABLE IF NOT EXISTS org/i);
@@ -39,6 +40,24 @@ test("collector activation account migration records the account behind collecto
   assert.match(normalized, /add column if not exists activated_by_user_email text/);
   assert.match(normalized, /add column if not exists activated_by_user_roles text\[\] not null default '\{\}'::text\[\]/);
   assert.match(normalized, /create index if not exists idx_collector_device_activated_by_user_email/);
+});
+
+test("channel dimension migration adds channel accounts and channel-aware uniqueness", () => {
+  const normalized = INTERNAL_SYNC_MIGRATIONS[4].sql.replace(/\s+/g, " ").toLowerCase();
+
+  assert.match(normalized, /create table if not exists channel_account\b/);
+  assert.match(normalized, /unique \(seller_account_id, channel, external_account_id\)/);
+  assert.match(normalized, /alter table sync_batch add column if not exists channel text/);
+  assert.match(normalized, /alter table sync_batch add column if not exists channel_account_id uuid/);
+  assert.match(normalized, /alter table customer add column if not exists channel text/);
+  assert.match(normalized, /alter table conversation add column if not exists channel text/);
+  assert.match(normalized, /alter table message add column if not exists channel text/);
+  assert.match(normalized, /alter table outbound_message add column if not exists channel text/);
+  assert.match(normalized, /unique \(seller_account_id, channel, external_customer_id\)/);
+  assert.match(normalized, /unique \(seller_account_id, channel, external_conversation_id\)/);
+  // channel_account_id is nullable (ON DELETE SET NULL), so it must NOT appear
+  // in dedup unique keys — NULLs would defeat uniqueness and allow duplicates.
+  assert.doesNotMatch(normalized, /unique \(seller_account_id, channel, channel_account_id/);
 });
 
 test("initial schema contains the core platform tables", () => {

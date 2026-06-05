@@ -84,7 +84,13 @@ test("internal trial flow uploads Chrome extension data and exercises the Web cu
 
     assert.equal(dashboard.customers.length, 1);
     assert.equal(dashboard.selectedCustomerId, "buyer-trial");
+    assert.equal(dashboard.customers[0].channel, "alibaba-im");
+    assert.equal(dashboard.customers[0].channelAccountExternalId, SELLER_ACCOUNT_ID);
+    assert.equal(dashboard.customers[0].channelSurface, "onetalk-web");
+    assert.equal(dashboard.conversations[0].channel, "alibaba-im");
+    assert.equal(dashboard.conversations[0].channelSurface, "onetalk-web");
     assert.equal(dashboard.messages.length, 2);
+    assert.deepEqual([...new Set(dashboard.messages.map((message) => message.channel))], ["alibaba-im"]);
     assert.deepEqual(
       dashboard.messages.map((message) => [message.externalMessageId, message.direction, message.content]),
       [

@@ -41,12 +41,12 @@ function createFakeWindow(emitter: FakeEmitter) {
   return { fakeWindow, posted };
 }
 
-test("tap extracts a Shape A (messageModel) payload into a normalized record", () => {
+test("tap extracts a received message (BaaSMessageNew) with direction", () => {
   const emitter = new FakeEmitter();
   const { fakeWindow, posted } = createFakeWindow(emitter);
   installOneTalkMessageTap(fakeWindow as unknown as Window);
 
-  const ret = emitter.emit("onMessageReceived", {
+  const ret = emitter.emit("BaaSMessageNew", {
     messageModel: {
       cid: "conv-1",
       messageId: "m1",
@@ -66,20 +66,21 @@ test("tap extracts a Shape A (messageModel) payload into a normalized record", (
   assert.equal(message.content, "hello");
   assert.equal(message.sendTime, 1779706200000);
   assert.equal(message.sender, "buyer-ali");
+  assert.equal(message.direction, "received");
 });
 
-test("tap extracts a Shape B (top-level + contact) payload", () => {
+test("tap extracts a sent message (BaaSMessageSendCallback) with direction and contact", () => {
   const emitter = new FakeEmitter();
   const { fakeWindow, posted } = createFakeWindow(emitter);
   installOneTalkMessageTap(fakeWindow as unknown as Window);
 
-  emitter.emit("someMessageEvent", {
+  emitter.emit("BaaSMessageSendCallback", {
     conversationCode: "conv-2",
     messageId: "m2",
     content: { contentType: "text", text: { content: "hi there" } },
     msgType: "text",
     sendTime: 1779706300000,
-    sender: { targetId: "buyer-2" },
+    sender: { targetId: "seller-self" },
     contact: { name: "Buyer Two", loginId: "buyer-login", accountIdEncrypt: "acc-enc" }
   });
 
@@ -90,20 +91,21 @@ test("tap extracts a Shape B (top-level + contact) payload", () => {
   const message = record.message as Record<string, unknown>;
   assert.equal(message.messageId, "m2");
   assert.equal(message.content, "hi there");
-  assert.equal(message.sender, "buyer-2");
+  assert.equal(message.sender, "seller-self");
+  assert.equal(message.direction, "sent");
   const contact = record.contact as Record<string, unknown>;
   assert.equal(contact.name, "Buyer Two");
 });
 
-test("tap ignores non-message events (typing / read receipt shaped)", () => {
+test("tap ignores non-message events (typing / read receipt / changed)", () => {
   const emitter = new FakeEmitter();
   const { fakeWindow, posted } = createFakeWindow(emitter);
   installOneTalkMessageTap(fakeWindow as unknown as Window);
 
-  // No messageModel, no messageId+content — should be ignored.
-  emitter.emit("typingStatus", { conversationCode: "conv-3", typing: true });
-  emitter.emit("readReceipt", { conversationCode: "conv-3", readStatus: { all: true } });
-  emitter.emit("convSync", { messageModel: { cid: "conv-3" } }); // no id/content
+  // Real noise event names observed in production — all must be ignored.
+  emitter.emit("paas.conversation.typingChange", { conversationCode: "conv-3", typing: true });
+  emitter.emit("BaaSMessageReadToSenderList", { conversationCode: "conv-3", messageId: "r1", content: "x" });
+  emitter.emit("paas.message.changed", { messageModel: { cid: "conv-3", messageId: "c1" } });
 
   assert.equal(observedOf(posted).length, 0);
 });
@@ -127,7 +129,7 @@ test("tap wraps the emitter only once (idempotent install)", () => {
   installOneTalkMessageTap(fakeWindow as unknown as Window);
   installOneTalkMessageTap(fakeWindow as unknown as Window);
 
-  emitter.emit("onMessageReceived", {
+  emitter.emit("BaaSMessageNew", {
     messageModel: { cid: "conv-1", messageId: "m1", content: { text: { content: "once" } } }
   });
 
@@ -173,7 +175,7 @@ test("tap polls until the emitter appears (delayed SDK init)", () => {
   sdkHolder.instance = { emitter: lateEmitter };
   scheduled[0]();
 
-  lateEmitter.emit("onMessageReceived", {
+  lateEmitter.emit("BaaSMessageNew", {
     messageModel: { cid: "conv-9", messageId: "m9", content: { text: { content: "late" } } }
   });
   const observed = observedOf(posted);

@@ -84,10 +84,20 @@ function wrapEmitter(targetWindow: Window, emitter: EmitterLike): void {
   emitter[EMITTER_WRAP_TAG] = true;
 }
 
+// Confirmed by the direction probe:
+//   BaaSMessageNew          → an inbound (customer) message       → received
+//   BaaSMessageSendCallback → our own outbound send echo          → sent
+// All other events (read receipts, typing, message.changed, ...) are noise.
+const RECEIVED_EVENT = "BaaSMessageNew";
+const SENT_EVENT = "BaaSMessageSendCallback";
+
 function observeEmit(targetWindow: Window, eventName: unknown, payload: unknown): void {
   recordEventName(targetWindow, eventName);
   if (!isRecord(payload)) return;
-  const message = extractMessage(payload);
+  const name = typeof eventName === "string" ? eventName : "";
+  const direction = name === RECEIVED_EVENT ? "received" : name === SENT_EVENT ? "sent" : null;
+  if (!direction) return; // only real inbound/outbound message events
+  const message = extractMessage(payload, direction);
   if (!message) return;
   const externalConversationId = message.cid;
   if (!externalConversationId) return;
@@ -135,12 +145,14 @@ interface ExtractedMessage {
 
 // Normalize an event-bus payload into a record shaped for the sync mapper,
 // which reads `record.message` first and falls back to `record` itself. We
-// emit { message: {...} } so the mapper's lwpMessage(raw) path applies.
+// emit { message: {...} } so the mapper's lwpMessage(raw) path applies, and we
+// stamp the probe-confirmed `direction` so the mapper uses it directly instead
+// of guessing.
 //
 // Two confirmed shapes:
 //   A) payload.messageModel.{cid,messageId/uuid,content.text.content,createAt,sender.uid}
 //   B) payload.{conversationCode,messageId/uuid,content,sender,sendTime,contact}
-function extractMessage(payload: Record<string, unknown>): ExtractedMessage | null {
+function extractMessage(payload: Record<string, unknown>, direction: "sent" | "received"): ExtractedMessage | null {
   const model = isRecord(payload.messageModel) ? payload.messageModel : null;
 
   // Shape A: messageModel present.
@@ -156,6 +168,7 @@ function extractMessage(payload: Record<string, unknown>): ExtractedMessage | nu
             messageId,
             cid,
             content,
+            direction,
             contentType: contentTypeOf(model.content),
             sendTime: numericValue(model.createAt) ?? numericValue(model.sendTime),
             sender: senderId(model.sender),
@@ -179,6 +192,7 @@ function extractMessage(payload: Record<string, unknown>): ExtractedMessage | nu
           messageId,
           cid,
           content,
+          direction,
           contentType: contentTypeOf(payload.content),
           messageType: firstString(payload, ["messageType", "msgType"]),
           sendTime: numericValue(payload.sendTime) ?? numericValue(payload.createAt),

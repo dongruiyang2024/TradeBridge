@@ -69,11 +69,21 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
     const externalConversationId =
       firstString(conversation, ["cid", "conversationCode", "conversationId", "id"]) ||
       firstString(lwpConversation, ["cid"]);
+    // loginId is the most stable cross-session identity for a buyer; prefer it
+    // as the dedup anchor so the same person never splits into multiple
+    // customers when unstable ids (encrypted ids, cid-pair guesses) differ.
+    const buyerLoginId = firstString(conversation, [
+      "contact.loginId",
+      "latestMessage.message.contact.loginId",
+      "loginId",
+      "contactLoginId"
+    ]);
     const externalCustomerId =
+      buyerLoginId ||
       lwpIdentity.pairCustomerId ||
-      customerIdFromConversationId(externalConversationId, options.weblite.bootstrap) ||
       lwpIdentity.accountId ||
       firstString(conversation, STABLE_CUSTOMER_ID_PATHS) ||
+      customerIdFromConversationId(externalConversationId, options.weblite.bootstrap) ||
       lwpIdentity.accountIdEncrypt ||
       lwpIdentity.aliIdEncrypt ||
       firstString(conversation, ENCRYPTED_CUSTOMER_ID_FALLBACK_PATHS);
@@ -294,7 +304,10 @@ function lwpCustomerId(lwpConversation: Record<string, unknown>, bootstrap: Reco
   const self = bootstrap.aliId;
   if (self && pairFirst === self) return pairSecond;
   if (self && pairSecond === self) return pairFirst;
-  return pairSecond || pairFirst;
+  // Without the seller's own aliId we cannot tell which side of the pair is the
+  // buyer; guessing flips per conversation and splits one buyer into several
+  // customers. Defer to stable ids (loginId/accountId) instead.
+  return undefined;
 }
 
 function customerIdFromConversationId(
@@ -307,7 +320,9 @@ function customerIdFromConversationId(
   const self = bootstrap.aliId;
   if (self && left === self) return right;
   if (self && right === self) return left;
-  return left;
+  // Without the seller's own id, "left" is not reliably the buyer (the seller
+  // can be on either side depending on the conversation), so do not guess.
+  return undefined;
 }
 
 function conversationIdPair(externalConversationId: string | undefined): [string, string] | null {

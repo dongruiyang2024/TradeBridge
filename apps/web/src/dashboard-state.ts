@@ -37,6 +37,51 @@ export async function loadCustomerList(state: DashboardState, client: InternalAp
   return nextCustomerId ? selectCustomer(nextState, client, nextCustomerId) : clearSelection(nextState);
 }
 
+// Silent background refresh used by the dashboard poll. Unlike loadCustomerList
+// it preserves the user's current customer/conversation selection and does not
+// rewrite the status line, so newly captured messages appear without the view
+// jumping or flickering. Only the inbound-changing surfaces (customers,
+// conversations, messages, outbound) are re-fetched; locally-edited surfaces
+// (notes, tags, tasks, assignment) are carried over untouched.
+export async function refreshDashboard(state: DashboardState, client: InternalApiClient): Promise<DashboardState> {
+  const customers = sortCustomers(await client.listCustomers());
+  const selectedCustomerId = selectedCustomerExists(customers, state.selectedCustomerId)
+    ? state.selectedCustomerId
+    : customers[0]?.externalCustomerId;
+
+  const selectedCustomer = customers.find((customer) => customer.externalCustomerId === selectedCustomerId);
+  if (!selectedCustomer) {
+    return { ...clearSelection({ ...state, customers }), error: undefined };
+  }
+
+  const scope = customerScope(selectedCustomer);
+  const allConversations = await client.listConversations();
+  const conversations = sortConversations(
+    allConversations.filter((conversation) => isSameCustomerConversation(conversation, selectedCustomer))
+  );
+  const selectedConversationId = conversations.some(
+    (conversation) => conversation.externalConversationId === state.selectedConversationId
+  )
+    ? state.selectedConversationId
+    : conversations[0]?.externalConversationId;
+
+  const [messages, outboundMessages] = await Promise.all([
+    selectedConversationId ? client.listMessages(selectedConversationId) : Promise.resolve([]),
+    selectedConversationId ? client.listOutboundMessages(scope, selectedConversationId) : Promise.resolve([])
+  ]);
+
+  return {
+    ...state,
+    customers,
+    selectedCustomerId,
+    conversations,
+    selectedConversationId,
+    messages: sortMessages(messages),
+    outboundMessages: visibleOutboundMessages(messages, outboundMessages),
+    error: undefined
+  };
+}
+
 export async function selectCustomer(
   state: DashboardState,
   client: InternalApiClient,
@@ -62,7 +107,7 @@ export async function selectCustomer(
   const scope = customerScope(selectedCustomer);
   const allConversations = await client.listConversations();
   const conversations = sortConversations(
-    allConversations.filter((conversation) => conversation.externalCustomerId === externalCustomerId)
+    allConversations.filter((conversation) => isSameCustomerConversation(conversation, selectedCustomer))
   );
   const selectedConversationId = conversations[0]?.externalConversationId;
   const [messages, outboundMessages, assignment, notes, tags, tasks] = await Promise.all([
@@ -193,6 +238,18 @@ function customerScope(customer: StoredCustomer): CustomerScope {
     sellerAccountExternalId: customer.sellerAccountExternalId,
     externalCustomerId: customer.externalCustomerId
   };
+}
+
+// A conversation belongs to the selected customer only when it matches the full
+// identity, not just externalCustomerId — otherwise two customers that share a
+// numeric id across different sellers/channels would merge their conversations.
+function isSameCustomerConversation(conversation: StoredConversation, customer: StoredCustomer): boolean {
+  return (
+    conversation.externalCustomerId === customer.externalCustomerId &&
+    conversation.sellerAccountExternalId === customer.sellerAccountExternalId &&
+    (conversation.channel ?? undefined) === (customer.channel ?? undefined) &&
+    (conversation.channelAccountExternalId ?? undefined) === (customer.channelAccountExternalId ?? undefined)
+  );
 }
 
 function selectedCustomerExists(customers: StoredCustomer[], selectedCustomerId?: string): boolean {
