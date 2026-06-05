@@ -9,120 +9,174 @@ interface PostedMessage {
   messages: Record<string, unknown>[];
 }
 
-// Minimal fake socket that records send() calls and lets the test push inbound
-// frames through the listener the tap attaches.
-class FakeSocket {
-  static CONNECTING = 0;
-  static OPEN = 1;
-  static CLOSING = 2;
-  static CLOSED = 3;
-  sent: unknown[] = [];
-  private listeners: Array<(event: { data: unknown }) => void> = [];
-  constructor(public url: string) {}
-  addEventListener(type: string, listener: (event: { data: unknown }) => void) {
-    if (type === "message") this.listeners.push(listener);
-  }
-  send(data: unknown) {
-    this.sent.push(data);
-  }
-  emit(data: unknown) {
-    for (const listener of this.listeners) listener({ data });
+// Fake SDK event emitter + window. installOneTalkMessageTap wraps emitter.emit;
+// tests drive emit() with payloads and assert what gets postMessage'd. The tap
+// also posts "onetalk-capture-diagnostics" for newly seen event names; tests
+// look only at "onetalk-messages-observed" posts via observedOf().
+class FakeEmitter {
+  emit(_eventName: string, _payload: unknown): string {
+    return "original-return";
   }
 }
 
-function createFakeWindow() {
+function observedOf(posted: PostedMessage[]): PostedMessage[] {
+  return posted.filter((message) => message.type === "onetalk-messages-observed");
+}
+
+function createFakeWindow(emitter: FakeEmitter) {
   const posted: PostedMessage[] = [];
+  const timers: Array<() => void> = [];
   const fakeWindow = {
     location: { origin: "https://onetalk.alibaba.com" },
-    WebSocket: FakeSocket as unknown as typeof WebSocket,
+    IcbuIM: { IMBaaSSDK: { IcbuEventServiceImpl: { instance: { emitter } } } },
     postMessage(message: PostedMessage) {
       posted.push(message);
-    }
+    },
+    setInterval(fn: () => void) {
+      timers.push(fn);
+      return timers.length;
+    },
+    clearInterval() {}
   };
   return { fakeWindow, posted };
 }
 
-function messagesFrame(cid: string, messageIds: string[]): string {
-  return JSON.stringify({
-    lwp: "/r/MessageManager/listUserMessages",
-    code: 200,
-    headers: { mid: "x" },
-    body: {
-      hasMore: false,
-      nextCursor: 0,
-      userMessageModels: messageIds.map((id) => ({
-        message: { messageId: id, cid, content: "body", createAt: 1779706200000 }
-      }))
+test("tap extracts a Shape A (messageModel) payload into a normalized record", () => {
+  const emitter = new FakeEmitter();
+  const { fakeWindow, posted } = createFakeWindow(emitter);
+  installOneTalkMessageTap(fakeWindow as unknown as Window);
+
+  const ret = emitter.emit("onMessageReceived", {
+    messageModel: {
+      cid: "conv-1",
+      messageId: "m1",
+      content: { contentType: "text", text: { content: "hello" } },
+      createAt: 1779706200000,
+      sender: { uid: "buyer-ali" }
     }
   });
-}
 
-test("message tap extracts message bodies from inbound LWP frames grouped by conversation", () => {
-  const { fakeWindow, posted } = createFakeWindow();
-  installOneTalkMessageTap(fakeWindow as unknown as Window);
-
-  const socket = new (fakeWindow.WebSocket as unknown as typeof FakeSocket)("wss://wss-icbu.dingtalk.com/");
-  // The constructor wrap attaches the inbound listener on creation.
-  socket.emit(messagesFrame("conv-1", ["m1", "m2"]));
-
-  assert.equal(posted.length, 1);
-  assert.equal(posted[0].type, "onetalk-messages-observed");
-  assert.equal(posted[0].externalConversationId, "conv-1");
-  assert.equal(posted[0].messages.length, 2);
-  assert.equal(posted[0].source, "tradebridge-onetalk-page");
+  assert.equal(ret, "original-return", "emit must pass through");
+  const observed = observedOf(posted);
+  assert.equal(observed.length, 1);
+  assert.equal(observed[0].type, "onetalk-messages-observed");
+  assert.equal(observed[0].externalConversationId, "conv-1");
+  const message = observed[0].messages[0].message as Record<string, unknown>;
+  assert.equal(message.messageId, "m1");
+  assert.equal(message.content, "hello");
+  assert.equal(message.sendTime, 1779706200000);
+  assert.equal(message.sender, "buyer-ali");
 });
 
-test("message tap ignores non-message frames and never sends", () => {
-  const { fakeWindow, posted } = createFakeWindow();
+test("tap extracts a Shape B (top-level + contact) payload", () => {
+  const emitter = new FakeEmitter();
+  const { fakeWindow, posted } = createFakeWindow(emitter);
   installOneTalkMessageTap(fakeWindow as unknown as Window);
 
-  const socket = new (fakeWindow.WebSocket as unknown as typeof FakeSocket)("wss://wss-icbu.dingtalk.com/");
-  socket.emit(JSON.stringify({ lwp: "/r/SyncStatus/getState", code: 200, headers: {}, body: { topic: "sync" } }));
-  socket.emit(JSON.stringify({ lwp: "/!", headers: { mid: "1" } }));
-
-  assert.equal(posted.length, 0);
-  assert.equal(socket.sent.length, 0);
-});
-
-test("message tap tolerates malformed frames without throwing", () => {
-  const { fakeWindow, posted } = createFakeWindow();
-  installOneTalkMessageTap(fakeWindow as unknown as Window);
-
-  const socket = new (fakeWindow.WebSocket as unknown as typeof FakeSocket)("wss://wss-icbu.dingtalk.com/");
-  assert.doesNotThrow(() => {
-    socket.emit("not json");
-    socket.emit("{ broken");
-    socket.emit(12345);
+  emitter.emit("someMessageEvent", {
+    conversationCode: "conv-2",
+    messageId: "m2",
+    content: { contentType: "text", text: { content: "hi there" } },
+    msgType: "text",
+    sendTime: 1779706300000,
+    sender: { targetId: "buyer-2" },
+    contact: { name: "Buyer Two", loginId: "buyer-login", accountIdEncrypt: "acc-enc" }
   });
-  assert.equal(posted.length, 0);
+
+  const observed = observedOf(posted);
+  assert.equal(observed.length, 1);
+  assert.equal(observed[0].externalConversationId, "conv-2");
+  const record = observed[0].messages[0];
+  const message = record.message as Record<string, unknown>;
+  assert.equal(message.messageId, "m2");
+  assert.equal(message.content, "hi there");
+  assert.equal(message.sender, "buyer-2");
+  const contact = record.contact as Record<string, unknown>;
+  assert.equal(contact.name, "Buyer Two");
 });
 
-test("message tap only attaches to IM sockets, not unrelated ones", () => {
-  const { fakeWindow, posted } = createFakeWindow();
+test("tap ignores non-message events (typing / read receipt shaped)", () => {
+  const emitter = new FakeEmitter();
+  const { fakeWindow, posted } = createFakeWindow(emitter);
   installOneTalkMessageTap(fakeWindow as unknown as Window);
 
-  const unrelated = new (fakeWindow.WebSocket as unknown as typeof FakeSocket)("wss://analytics.example.com/");
-  unrelated.emit(messagesFrame("conv-1", ["m1"]));
+  // No messageModel, no messageId+content — should be ignored.
+  emitter.emit("typingStatus", { conversationCode: "conv-3", typing: true });
+  emitter.emit("readReceipt", { conversationCode: "conv-3", readStatus: { all: true } });
+  emitter.emit("convSync", { messageModel: { cid: "conv-3" } }); // no id/content
 
-  assert.equal(posted.length, 0);
+  assert.equal(observedOf(posted).length, 0);
 });
 
-test("message tap attaches inbound listener to a pre-existing socket on first send", () => {
-  const { fakeWindow, posted } = createFakeWindow();
-  const NativeWebSocket = fakeWindow.WebSocket as unknown as typeof FakeSocket;
-  // Socket created BEFORE the tap installs (constructor wrap can't see it).
-  const preExisting = new NativeWebSocket("wss://wss-icbu.dingtalk.com/");
-
+test("tap tolerates malformed payloads and still passes through emit", () => {
+  const emitter = new FakeEmitter();
+  const { fakeWindow, posted } = createFakeWindow(emitter);
   installOneTalkMessageTap(fakeWindow as unknown as Window);
 
-  // Before any send, inbound is not tapped.
-  preExisting.emit(messagesFrame("conv-1", ["m0"]));
-  assert.equal(posted.length, 0);
+  assert.doesNotThrow(() => {
+    emitter.emit("x", null as unknown as Record<string, unknown>);
+    emitter.emit("y", 12345 as unknown as Record<string, unknown>);
+    emitter.emit("z", "a string" as unknown as Record<string, unknown>);
+  });
+  assert.equal(observedOf(posted).length, 0);
+});
 
-  // First send triggers the prototype.send patch, which attaches inbound.
-  preExisting.send("heartbeat");
-  preExisting.emit(messagesFrame("conv-1", ["m1"]));
+test("tap wraps the emitter only once (idempotent install)", () => {
+  const emitter = new FakeEmitter();
+  const { fakeWindow, posted } = createFakeWindow(emitter);
+  installOneTalkMessageTap(fakeWindow as unknown as Window);
+  installOneTalkMessageTap(fakeWindow as unknown as Window);
 
-  assert.equal(posted.length, 1);
-  assert.equal(posted[0].externalConversationId, "conv-1");
+  emitter.emit("onMessageReceived", {
+    messageModel: { cid: "conv-1", messageId: "m1", content: { text: { content: "once" } } }
+  });
+
+  // If double-wrapped, this would post twice.
+  assert.equal(observedOf(posted).length, 1);
+});
+
+test("tap reports newly seen event names as capture diagnostics", () => {
+  const emitter = new FakeEmitter();
+  const { fakeWindow, posted } = createFakeWindow(emitter);
+  installOneTalkMessageTap(fakeWindow as unknown as Window);
+
+  emitter.emit("typingStatus", { conversationCode: "conv-3", typing: true });
+  emitter.emit("typingStatus", { conversationCode: "conv-3", typing: false }); // duplicate name
+
+  const diagnostics = posted.filter((m) => m.type === "onetalk-capture-diagnostics");
+  assert.ok(diagnostics.length >= 1, "should emit diagnostics for a new event name");
+  const seen = (diagnostics[diagnostics.length - 1] as unknown as { seenEventNames: string[] }).seenEventNames;
+  assert.deepEqual(seen, ["typingStatus"], "duplicate event names are not re-recorded");
+});
+
+test("tap polls until the emitter appears (delayed SDK init)", () => {
+  const posted: PostedMessage[] = [];
+  const scheduled: Array<() => void> = [];
+  const lateEmitter = new FakeEmitter();
+  const sdkHolder: { instance?: { emitter: FakeEmitter } } = {};
+  const fakeWindow = {
+    location: { origin: "https://onetalk.alibaba.com" },
+    IcbuIM: { IMBaaSSDK: { IcbuEventServiceImpl: sdkHolder } },
+    postMessage: (m: PostedMessage) => posted.push(m),
+    setInterval: (fn: () => void) => {
+      scheduled.push(fn);
+      return scheduled.length;
+    },
+    clearInterval: () => {}
+  };
+
+  installOneTalkMessageTap(fakeWindow as unknown as Window);
+  // Emitter not present yet → install scheduled a poll.
+  assert.equal(scheduled.length, 1, "should schedule a poll when emitter is absent");
+
+  // SDK finishes initializing; next poll tick wraps it.
+  sdkHolder.instance = { emitter: lateEmitter };
+  scheduled[0]();
+
+  lateEmitter.emit("onMessageReceived", {
+    messageModel: { cid: "conv-9", messageId: "m9", content: { text: { content: "late" } } }
+  });
+  const observed = observedOf(posted);
+  assert.equal(observed.length, 1);
+  assert.equal(observed[0].externalConversationId, "conv-9");
 });

@@ -8,6 +8,7 @@ const accountValidation = document.querySelector<HTMLParagraphElement>("#account
 const headline = document.querySelector<HTMLSpanElement>("#headline");
 const realtime = document.querySelector<HTMLParagraphElement>("#realtime");
 const sync = document.querySelector<HTMLParagraphElement>("#sync");
+const capture = document.querySelector<HTMLParagraphElement>("#capture");
 const error = document.querySelector<HTMLParagraphElement>("#error");
 
 void renderStatus();
@@ -48,6 +49,7 @@ async function renderStatus(): Promise<void> {
   headline?.replaceChildren(view.headlineLabel);
   realtime?.replaceChildren(view.realtimeLabel);
   sync?.replaceChildren(view.syncLabel);
+  capture?.replaceChildren(view.captureLabel);
   error?.replaceChildren(view.errorLabel);
   document.querySelector<HTMLButtonElement>("#reconnect")?.replaceChildren(view.reconnectActionLabel);
 }

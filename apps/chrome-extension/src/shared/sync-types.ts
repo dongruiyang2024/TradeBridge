@@ -85,10 +85,17 @@ export interface ExtensionStatus {
   accountValidation?: ExtensionAccountValidationStatus;
   realtime?: ExtensionRealtimeStatus;
   lastDiagnostics?: SyncDiagnostics;
+  captureDiagnostics?: ExtensionCaptureDiagnostics;
   lastError?: {
     code: string;
     message: string;
   };
+}
+
+export interface ExtensionCaptureDiagnostics {
+  observedMessageCount: number;
+  lastObservedAt?: string;
+  seenEventNames: string[];
 }
 
 export interface ExtensionAccountValidationStatus {

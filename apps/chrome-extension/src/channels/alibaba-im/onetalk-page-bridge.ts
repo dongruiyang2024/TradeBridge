@@ -46,19 +46,30 @@ function installBridge(): void {
 
 // Forward passively-tapped OneTalk messages from the page script (MAIN world)
 // to the background worker. The page script only emits already-sanitized
-// message bodies grouped by conversation id.
+// message bodies grouped by conversation id. Capture diagnostics (seen event
+// names) are forwarded too, for the popup debug panel.
 function observeTappedMessages(): void {
   window.addEventListener("message", (event) => {
     if (event.source !== window || !isRecord(event.data)) return;
     if (event.data.source !== "tradebridge-onetalk-page") return;
-    if (event.data.type !== "onetalk-messages-observed") return;
-    const externalConversationId =
-      typeof event.data.externalConversationId === "string" ? event.data.externalConversationId : "";
-    const messages = Array.isArray(event.data.messages) ? event.data.messages.filter(isRecord) : [];
-    if (!externalConversationId || !messages.length) return;
-    void chromeApi.runtime
-      .sendMessage({ type: "onetalk-messages-observed", externalConversationId, messages })
-      .catch(() => undefined);
+    if (event.data.type === "onetalk-messages-observed") {
+      const externalConversationId =
+        typeof event.data.externalConversationId === "string" ? event.data.externalConversationId : "";
+      const messages = Array.isArray(event.data.messages) ? event.data.messages.filter(isRecord) : [];
+      if (!externalConversationId || !messages.length) return;
+      void chromeApi.runtime
+        .sendMessage({ type: "onetalk-messages-observed", externalConversationId, messages })
+        .catch(() => undefined);
+      return;
+    }
+    if (event.data.type === "onetalk-capture-diagnostics") {
+      const seenEventNames = Array.isArray(event.data.seenEventNames)
+        ? event.data.seenEventNames.filter((name: unknown): name is string => typeof name === "string")
+        : [];
+      void chromeApi.runtime
+        .sendMessage({ type: "onetalk-capture-diagnostics", seenEventNames })
+        .catch(() => undefined);
+    }
   });
 }
 

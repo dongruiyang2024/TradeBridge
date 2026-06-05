@@ -15,6 +15,7 @@ export interface PopupViewModel {
   accountValidationLabel: string;
   realtimeLabel: string;
   syncLabel: string;
+  captureLabel: string;
   errorLabel: string;
   headlineLabel: string;
   reconnectActionLabel: string;
@@ -27,10 +28,19 @@ export function createPopupViewModel(input: PopupViewInput): PopupViewModel {
     accountValidationLabel: accountValidationSummary(input.status),
     realtimeLabel,
     syncLabel: input.status.lastSyncedAt ? `最近同步：${input.status.lastSyncedAt}` : "最近同步：未同步",
+    captureLabel: captureSummary(input.status),
     errorLabel: input.status.lastError ? `最近错误：${input.status.lastError.code}` : "最近错误：无",
     headlineLabel: realtimeLabel.replace("实时连接：", ""),
     reconnectActionLabel: "重新连接"
   };
+}
+
+function captureSummary(status: ExtensionStatus): string {
+  const capture = status.captureDiagnostics;
+  if (!capture || (!capture.observedMessageCount && !capture.seenEventNames.length)) return "抓取诊断：未抓取";
+  const parts = [`已抓取 ${capture.observedMessageCount} 条`];
+  if (capture.seenEventNames.length) parts.push(`事件:${capture.seenEventNames.slice(0, 6).join(",")}`);
+  return `抓取诊断：${parts.join("，")}`;
 }
 
 function accountValidationSummary(status: ExtensionStatus): string {

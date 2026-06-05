@@ -63,7 +63,14 @@ chromeApi.alarms.onAlarm.addListener((alarm) => {
 chromeApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const typed = message as ExtensionMessage;
   if (typed.type === "onetalk-messages-observed") {
-    void messageBuffer.add(typed.externalConversationId, typed.messages).then(() => sendResponse({ ok: true }));
+    void messageBuffer
+      .add(typed.externalConversationId, typed.messages)
+      .then(() => recordObservedMessages(typed.messages.length))
+      .then(() => sendResponse({ ok: true }));
+    return true;
+  }
+  if (typed.type === "onetalk-capture-diagnostics") {
+    void recordSeenEventNames(typed.seenEventNames).then(() => sendResponse({ ok: true }));
     return true;
   }
   if (typed.type === "sync-now") {
@@ -119,6 +126,31 @@ async function readDashboard() {
     tradeBridgeAccountEmail: validatedStatus.accountValidation?.email || config?.tradeBridgeAccountEmail,
     status: validatedStatus
   };
+}
+
+async function recordObservedMessages(count: number): Promise<void> {
+  if (count <= 0) return;
+  const previous = await stateStore.getStatus();
+  const capture = previous.captureDiagnostics || { observedMessageCount: 0, seenEventNames: [] };
+  await stateStore.saveStatus({
+    ...previous,
+    captureDiagnostics: {
+      ...capture,
+      observedMessageCount: capture.observedMessageCount + count,
+      lastObservedAt: new Date().toISOString()
+    }
+  });
+}
+
+async function recordSeenEventNames(names: string[]): Promise<void> {
+  if (!names.length) return;
+  const previous = await stateStore.getStatus();
+  const capture = previous.captureDiagnostics || { observedMessageCount: 0, seenEventNames: [] };
+  const merged = Array.from(new Set([...capture.seenEventNames, ...names])).slice(0, 60);
+  await stateStore.saveStatus({
+    ...previous,
+    captureDiagnostics: { ...capture, seenEventNames: merged }
+  });
 }
 
 async function validateStoredTradeBridgeAccount(

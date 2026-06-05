@@ -10,6 +10,7 @@ export type ExtensionMessage =
   | { type: "onetalk-page-ready"; url: string }
   | { type: "onetalk-login-required"; url: string }
   | { type: "onetalk-messages-observed"; externalConversationId: string; messages: Record<string, unknown>[] }
+  | { type: "onetalk-capture-diagnostics"; seenEventNames: string[] }
   | { type: "send-onetalk-message"; message: OutboundMessage }
   | { type: "get-onetalk-customer-profiles"; contacts: OneTalkCustomerProfileContact[] }
   | { type: "get-onetalk-conversations"; cursor: number; count: number }
