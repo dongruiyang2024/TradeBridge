@@ -108,10 +108,15 @@ function buildPageRuntimeJavascript() {
   return `
 (() => {
   const probeId = "__PROBE_ID__";
-  const observeMs = __OBSERVE_MS__;
   const isRecord = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+  const reached = [];
+  const errors = [];
+  const mark = (m) => reached.push(m);
+  const errOf = (e) => (e && (e.message || e.name)) ? String(e.message || e.name) : String(e);
+  const post = (result) => {
+    try { window.postMessage({ source: "tradebridge-receive-shape-probe", probeId, result }, window.location.origin); } catch (e) {}
+  };
 
-  // Recursive key paths (names only, never values), bounded depth/breadth.
   const keyPaths = (value, prefix, depth, out) => {
     if (depth < 0 || out.size > 200) return;
     if (Array.isArray(value)) { if (value.length) keyPaths(value[0], prefix + "[]", depth - 1, out); return; }
@@ -123,78 +128,95 @@ function buildPageRuntimeJavascript() {
     }
   };
 
-  const sdk = window.IcbuIM && window.IcbuIM.IMBaaSSDK && window.IcbuIM.IMBaaSSDK.default;
-  if (!sdk) { post({ ok: false, error: "sdk_default_unavailable" }); return; }
+  // Capture buffer for inbound messages; stashed on window so a later poll can
+  // read whatever arrived after this immediate report.
+  const captures = (window["__tbReceiveCaptures_" + probeId] = window["__tbReceiveCaptures_" + probeId] || []);
 
-  const svc = typeof sdk.getMessageServiceV2 === "function" ? sdk.getMessageServiceV2()
-            : typeof sdk.getMessageService === "function" ? sdk.getMessageService() : null;
-  if (!svc) { post({ ok: false, error: "message_service_unavailable" }); return; }
+  let delegateInfo = null;
+  let wrapped = 0;
 
-  // --- 1) Inspect delegateList interface (names only) ---
-  const delegateInfo = (() => {
+  try {
+    mark("start");
+    const sdk = window.IcbuIM && window.IcbuIM.IMBaaSSDK && window.IcbuIM.IMBaaSSDK.default;
+    if (!sdk) { post({ ok: false, error: "sdk_default_unavailable", hasIcbuIM: !!window.IcbuIM, reached }); return "done"; }
+    mark("sdk-ok");
+
+    const getService = (name) => { try { return typeof sdk[name] === "function" ? sdk[name]() : null; } catch (e) { errors.push(name + ": " + errOf(e)); return null; } };
+    const svc = getService("getMessageServiceV2") || getService("getMessageService");
+    if (!svc) { post({ ok: false, error: "message_service_unavailable", reached, errors }); return "done"; }
+    mark("svc-ok");
+
     try {
       const list = svc.delegateList;
-      if (!Array.isArray(list)) return { isArray: false, type: typeof list };
-      return {
+      if (!Array.isArray(list)) delegateInfo = { isArray: false, type: typeof list };
+      else delegateInfo = {
         isArray: true,
         count: list.length,
-        entries: list.slice(0, 8).map((d) => ({
-          ctor: (d && d.constructor && d.constructor.name) || typeof d,
-          methods: d ? Array.from(new Set([
-            ...Object.getOwnPropertyNames(d),
-            ...(Object.getPrototypeOf(d) ? Object.getOwnPropertyNames(Object.getPrototypeOf(d)) : [])
-          ])).filter((k) => { try { return typeof d[k] === "function" && k !== "constructor"; } catch { return false; } }).slice(0, 40) : []
-        }))
+        entries: list.slice(0, 8).map((d) => {
+          try {
+            return {
+              ctor: (d && d.constructor && d.constructor.name) || typeof d,
+              methods: d ? Array.from(new Set([
+                ...Object.getOwnPropertyNames(d),
+                ...(Object.getPrototypeOf(d) ? Object.getOwnPropertyNames(Object.getPrototypeOf(d)) : [])
+              ])).filter((k) => { try { return typeof d[k] === "function" && k !== "constructor"; } catch { return false; } }).slice(0, 40) : []
+            };
+          } catch (e) { return { error: errOf(e) }; }
+        })
       };
-    } catch (e) { return { error: String(e && e.message || e) }; }
-  })();
+    } catch (e) { delegateInfo = { error: errOf(e) }; }
+    mark("delegate-ok");
 
-  // --- 2) Wrap notifyReceiveMsg (pass-through) to capture arg shape ---
-  const captures = [];
-  let wrapped = false;
-  const wrapOn = (target, label) => {
+    const wrapOn = (target, label) => {
+      try {
+        if (!target || typeof target.notifyReceiveMsg !== "function" || target.__tbReceiveWrapped) return;
+        const original = target.notifyReceiveMsg;
+        target.notifyReceiveMsg = function (...args) {
+          try {
+            if (captures.length < 5) {
+              captures.push({
+                source: label,
+                argCount: args.length,
+                argTypes: args.map((a) => Array.isArray(a) ? "array(" + a.length + ")" : (a === null ? "null" : typeof a)),
+                argKeyPaths: args.map((a) => { const s = new Set(); keyPaths(a, "", 5, s); return Array.from(s).sort().slice(0, 120); })
+              });
+            }
+          } catch {}
+          return original.apply(this, args);
+        };
+        target.__tbReceiveWrapped = true;
+        wrapped += 1;
+      } catch (e) { errors.push("wrap-" + label + ": " + errOf(e)); }
+    };
+
+    wrapOn(svc, "instance");
+    try { wrapOn(Object.getPrototypeOf(svc), "prototype"); } catch (e) { errors.push("proto: " + errOf(e)); }
     try {
-      if (!target || typeof target.notifyReceiveMsg !== "function" || target.__tbReceiveWrapped) return;
-      const original = target.notifyReceiveMsg;
-      target.notifyReceiveMsg = function (...args) {
-        try {
-          if (captures.length < 5) {
-            captures.push({
-              source: label,
-              argCount: args.length,
-              argTypes: args.map((a) => Array.isArray(a) ? "array(" + a.length + ")" : (a === null ? "null" : typeof a)),
-              argKeyPaths: args.map((a) => { const s = new Set(); keyPaths(a, "", 5, s); return Array.from(s).sort().slice(0, 120); })
-            });
-          }
-        } catch {}
-        return original.apply(this, args);
-      };
-      target.__tbReceiveWrapped = true;
-      wrapped = true;
-    } catch {}
-  };
-  // Wrap on the instance and on its prototype (the page may hold a different instance).
-  wrapOn(svc, "instance");
-  const proto = Object.getPrototypeOf(svc);
-  wrapOn(proto, "prototype");
-  // Also try the inner messageService delegate if present (V2 wraps it).
-  if (svc.messageService) { wrapOn(svc.messageService, "inner"); const ip = Object.getPrototypeOf(svc.messageService); wrapOn(ip, "inner-prototype"); }
-
-  window.setTimeout(() => {
-    post({
-      ok: true,
-      note: "notifyReceiveMsg wrapped pass-through; arg key NAMES only. Needs a REAL inbound message during the window (have another account message this seller).",
-      observedMs,
-      wrapped,
-      delegateInfo,
-      captureCount: captures.length,
-      captures
-    });
-  }, observeMs);
-
-  function post(result) {
-    window.postMessage({ source: "tradebridge-receive-shape-probe", probeId, result }, window.location.origin);
+      if (svc.messageService) {
+        wrapOn(svc.messageService, "inner");
+        wrapOn(Object.getPrototypeOf(svc.messageService), "inner-prototype");
+      }
+    } catch (e) { errors.push("inner: " + errOf(e)); }
+    mark("wrap-done");
+  } catch (e) {
+    errors.push("fatal: " + errOf(e));
+    post({ ok: false, error: "fatal", detail: errOf(e), reached, errors });
+    return "done";
   }
+
+  // Report immediately — delegateInfo and wrap status do not need to wait for a
+  // message. captures (if any arrive later) are read by the capture poll.
+  post({
+    ok: true,
+    note: "Immediate report. delegateInfo/wrap status are ready now. To capture notifyReceiveMsg arg shape, run again after a real inbound message — captures persist on window.",
+    reached,
+    errors,
+    wrapped,
+    delegateInfo,
+    captureCount: captures.length,
+    captures
+  });
+  return "done";
 })()
 `;
 }
