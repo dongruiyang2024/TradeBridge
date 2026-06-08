@@ -70,6 +70,7 @@ test("internal trial flow uploads Chrome extension data and exercises the Web cu
     const syncResult = await runSyncOnce({
       stateStore: extensionState,
       onetalkClient: fixtureOnetalkWebClient(),
+      messageSource: fixtureMessageSource(),
       uploadSyncBatch: (options) => uploadBatchThroughServer(app, options.batch, collectorToken),
       now: () => new Date("2026-05-25T10:50:00.000Z")
     });
@@ -83,7 +84,9 @@ test("internal trial flow uploads Chrome extension data and exercises the Web cu
     let dashboard = await loadCustomerList(createInitialDashboardState(), client);
 
     assert.equal(dashboard.customers.length, 1);
-    assert.equal(dashboard.selectedCustomerId, "buyer-trial");
+    // The mapper anchors a buyer on the stable contactLoginId, not the rotating
+    // contactAccountId, so the selected customer id is the login id.
+    assert.equal(dashboard.selectedCustomerId, "trial_buyer");
     assert.equal(dashboard.customers[0].channel, "alibaba-im");
     assert.equal(dashboard.customers[0].channelAccountExternalId, SELLER_ACCOUNT_ID);
     assert.equal(dashboard.customers[0].channelSurface, "onetalk-web");
@@ -133,30 +136,45 @@ function fixtureOnetalkWebClient() {
           selfAliId: "seller-ali"
         }
       ]
-    }),
-    getChatMessages: async () => ({
-      status: 200,
-      contentType: "application/json",
-      code: 200,
-      raw: {},
-      messages: [
-        {
-          messageId: "trial-msg-1",
-          senderAliId: "buyer-ali",
-          messageType: "text",
-          content: "Can you confirm delivery?",
-          sendTime: 1779706140000,
-          cookie2: SECRET_COOKIE
-        },
-        {
-          messageId: "trial-msg-2",
-          senderAliId: "seller-ali",
-          messageType: "text",
-          content: "Delivery is booked for tomorrow.",
-          sendTime: 1779706200000
-        }
-      ]
     })
+  };
+}
+
+// Messages now reach sync through the passive page-socket message buffer
+// (SyncMessageSource), not by polling getChatMessages. The fixture mirrors that
+// contract: read() returns the buffered messages keyed by conversation cid, and
+// acknowledge() drains exactly what was uploaded.
+function fixtureMessageSource() {
+  const buffered: Record<string, Record<string, unknown>[]> = {
+    "conv-trial": [
+      {
+        messageId: "trial-msg-1",
+        senderAliId: "buyer-ali",
+        messageType: "text",
+        content: "Can you confirm delivery?",
+        sendTime: 1779706140000,
+        cookie2: SECRET_COOKIE
+      },
+      {
+        messageId: "trial-msg-2",
+        senderAliId: "seller-ali",
+        messageType: "text",
+        content: "Delivery is booked for tomorrow.",
+        sendTime: 1779706200000
+      }
+    ]
+  };
+
+  return {
+    read: async () => structuredClone(buffered),
+    acknowledge: async (uploaded: Record<string, Record<string, unknown>[]>) => {
+      for (const [conversationId, uploadedMessages] of Object.entries(uploaded)) {
+        const uploadedIds = new Set(uploadedMessages.map((message) => message.messageId));
+        const remaining = (buffered[conversationId] || []).filter((message) => !uploadedIds.has(message.messageId));
+        if (remaining.length) buffered[conversationId] = remaining;
+        else delete buffered[conversationId];
+      }
+    }
   };
 }
 

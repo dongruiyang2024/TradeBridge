@@ -29,7 +29,7 @@ WANGWANG_SERVER_PORT=5032
 如果使用本仓库提供的 PostgreSQL Docker Compose，建议使用：
 
 ```bash
-DATABASE_URL=postgres://wait9yan:Weite123@127.0.0.1:5432/tradebridge
+DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:5432/tradebridge
 ```
 
 如果使用你本机已有 PostgreSQL，请让 `DATABASE_URL` 和实际用户名、密码、数据库名保持一致。
@@ -246,7 +246,7 @@ npm run test:e2e
 检查 `.env.local` 的 `DATABASE_URL` 是否和 PostgreSQL 实际账号密码一致。使用本仓库 compose 时应为：
 
 ```bash
-DATABASE_URL=postgres://wait9yan:Weite123@127.0.0.1:5432/tradebridge
+DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:5432/tradebridge
 ```
 
 ### Web 显示未授权

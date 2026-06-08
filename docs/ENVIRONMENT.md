@@ -61,7 +61,7 @@ Chrome 插件会在设置页提交：
 默认情况下，内部服务端使用内存存储，服务重启后数据会丢失。如需持久化数据，配置 PostgreSQL：
 
 ```bash
-DATABASE_URL=postgres://wait9yan:Weite123@127.0.0.1:5432/tradebridge
+DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:5432/tradebridge
 ```
 
 AI 任务默认走本地同步 fallback。如需使用 Redis/BullMQ 队列，配置：

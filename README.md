@@ -106,7 +106,7 @@ docker compose -f docker-compose.postgres.yml up -d
 `.env.local` 中配置：
 
 ```bash
-DATABASE_URL=postgres://wait9yan:Weite123@127.0.0.1:5432/tradebridge
+DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:5432/tradebridge
 ```
 
 ### 4. 启动服务端和 Web 工作台

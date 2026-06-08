@@ -74,6 +74,12 @@ export interface CreateServerOptions {
   aiProvider?: AiProvider;
   aiJobQueue?: AiJobQueue;
   logger?: boolean;
+  /**
+   * Extra Web workbench origins allowed to call the internal API, e.g.
+   * `https://workbench.example.com`. Local dev origins and Chrome extension
+   * origins are always allowed regardless of this list.
+   */
+  allowedWebOrigins?: string[];
 }
 
 export interface CreateServerFromEnvOptions {
@@ -128,6 +134,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   const store = options.store || new InMemorySyncStore();
   const aiProvider = options.aiProvider || createDeterministicAiProvider();
   const aiJobQueue = options.aiJobQueue || createSyncAiJobQueue();
+  const allowedWebOrigins = normalizeAllowedWebOrigins(options.allowedWebOrigins);
   const realtimeHub = createCollectorRealtimeHub();
   const internalAccessRoles: InternalRole[] = ["admin", "supervisor", "sales"];
   const adminRoles: InternalRole[] = ["admin"];
@@ -143,7 +150,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   await registerCollectorWsRoutes(app, { store, hub: realtimeHub });
 
   app.addHook("onRequest", async (request, reply) => {
-    applyCorsHeaders(request, reply);
+    applyCorsHeaders(request, reply, allowedWebOrigins);
     if (request.method === "OPTIONS") {
       return reply.code(204).send();
     }
@@ -1000,8 +1007,14 @@ export async function createServerFromEnv(options: CreateServerFromEnvOptions = 
   return createServer({
     store,
     aiJobQueue,
-    logger: options.logger
+    logger: options.logger,
+    allowedWebOrigins: parseEnvWebOrigins(env)
   });
+}
+
+function parseEnvWebOrigins(env: Record<string, string | undefined>): string[] {
+  const raw = env.WANGWANG_WEB_ORIGINS || env.WANGWANG_ALLOWED_WEB_ORIGINS;
+  return raw ? [raw] : [];
 }
 
 async function createAiJobQueueFromEnv(env: Record<string, string | undefined>): Promise<AiJobQueue | undefined> {
@@ -1050,9 +1063,9 @@ function collectorSellerAccountExternalId(device: CollectorDevice): string {
   return device.sellerAccountExternalId || DEFAULT_SELLER_ACCOUNT_EXTERNAL_ID;
 }
 
-function applyCorsHeaders(request: FastifyRequest, reply: FastifyReply): void {
+function applyCorsHeaders(request: FastifyRequest, reply: FastifyReply, allowedWebOrigins: Set<string>): void {
   const origin = requestOrigin(request);
-  if (!origin || !isAllowedCorsOrigin(origin)) return;
+  if (!origin || !isAllowedCorsOrigin(origin, allowedWebOrigins)) return;
 
   reply.header("Access-Control-Allow-Origin", origin);
   reply.header("Vary", "Origin");
@@ -1066,11 +1079,33 @@ function requestOrigin(request: FastifyRequest): string | null {
   return typeof origin === "string" && origin.trim() ? origin.trim() : null;
 }
 
-function isAllowedCorsOrigin(origin: string): boolean {
+function isAllowedCorsOrigin(origin: string, allowedWebOrigins: Set<string>): boolean {
   return (
     /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin) ||
-    /^chrome-extension:\/\/[a-p]{32}$/.test(origin)
+    /^chrome-extension:\/\/[a-p]{32}$/.test(origin) ||
+    allowedWebOrigins.has(origin)
   );
+}
+
+/**
+ * Parse a comma/whitespace separated list of production Web origins into a
+ * normalized Set. Each entry is reduced to its scheme://host[:port] form so a
+ * trailing slash or path in configuration still matches browser Origin headers.
+ */
+function normalizeAllowedWebOrigins(origins: string[] | undefined): Set<string> {
+  const normalized = new Set<string>();
+  for (const raw of origins || []) {
+    for (const part of raw.split(/[\s,]+/)) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      try {
+        normalized.add(new URL(trimmed).origin);
+      } catch {
+        // Ignore malformed origins so one bad config entry can't break startup.
+      }
+    }
+  }
+  return normalized;
 }
 
 function allowedCorsHeaders(request: FastifyRequest): string {
