@@ -10,10 +10,24 @@ test("internal sync migrations expose the initial schema in order", () => {
       ["002_outbound_message_queue", "002_outbound_message_queue.sql"],
       ["003_outbound_message_claim_lease", "003_outbound_message_claim_lease.sql"],
       ["004_collector_device_activation_account", "004_collector_device_activation_account.sql"],
-      ["005_channel_dimension", "005_channel_dimension.sql"]
+      ["005_channel_dimension", "005_channel_dimension.sql"],
+      ["006_customer_profile_enrichment", "006_customer_profile_enrichment.sql"]
     ]
   );
   assert.doesNotMatch(INTERNAL_SYNC_MIGRATIONS[0].sql, /CREATE TABLE IF NOT EXISTS org/i);
+});
+
+test("customer profile enrichment migration adds whitelisted OneTalk profile columns", () => {
+  const normalized = INTERNAL_SYNC_MIGRATIONS[5].sql.replace(/\s+/g, " ").toLowerCase();
+
+  assert.match(normalized, /alter table customer add column if not exists company_name text/);
+  assert.match(normalized, /alter table customer add column if not exists avatar_url text/);
+  assert.match(normalized, /alter table customer add column if not exists current_time_zone text/);
+  assert.match(normalized, /alter table customer add column if not exists account_id text/);
+  assert.match(normalized, /alter table customer add column if not exists account_id_encrypt text/);
+  assert.match(normalized, /alter table customer add column if not exists ali_id text/);
+  assert.match(normalized, /alter table customer add column if not exists ali_id_encrypt text/);
+  assert.match(normalized, /alter table customer add column if not exists login_id_encrypt text/);
 });
 
 test("outbound queue migration upgrades existing databases", () => {

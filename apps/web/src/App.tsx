@@ -552,7 +552,7 @@ export function DashboardView(props: DashboardViewProps) {
     (customer) => customer.externalCustomerId === props.state.selectedCustomerId
   );
   const filteredCustomers = props.state.customers.filter((customer) => {
-    const haystack = [customer.displayName, customer.loginId, customer.externalCustomerId, customer.country]
+    const haystack = [customer.displayName, customer.companyName, customer.loginId, customer.externalCustomerId, customer.country]
       .filter(Boolean)
       .join(" ")
       .toLowerCase();
@@ -631,7 +631,7 @@ export function DashboardView(props: DashboardViewProps) {
               >
                 <span className="customer-name">{customer.displayName || customer.loginId || customer.externalCustomerId}</span>
                 <span className="customer-meta">
-                  {customer.country || "未知地区"} · {customer.stage || "未分层"}
+                  {customer.companyName || customer.country || "未知地区"} · {customer.stage || "未分层"}
                 </span>
                 <span className="customer-id">{customer.loginId || customer.externalCustomerId}</span>
               </button>
@@ -730,10 +730,18 @@ export function DashboardView(props: DashboardViewProps) {
               <CheckCircle2 size={17} />
             </div>
             <InfoRow label="显示名称" value={selectedCustomer?.displayName} />
+            <InfoRow label="公司名称" value={selectedCustomer?.companyName} />
             <InfoRow label="登录 ID" value={selectedCustomer?.loginId} />
+            <InfoRow label="加密登录 ID" value={selectedCustomer?.loginIdEncrypt} />
             <InfoRow label="客户外部 ID" value={selectedCustomer?.externalCustomerId} />
+            <InfoRow label="账号 ID" value={selectedCustomer?.accountId} />
+            <InfoRow label="加密账号 ID" value={selectedCustomer?.accountIdEncrypt} />
+            <InfoRow label="Ali ID" value={selectedCustomer?.aliId} />
+            <InfoRow label="加密 Ali ID" value={selectedCustomer?.aliIdEncrypt} />
             <InfoRow label="Seller" value={selectedCustomer?.sellerAccountExternalId} />
             <InfoRow label="国家/地区" value={selectedCustomer?.country} />
+            <InfoRow label="客户时区" value={selectedCustomer?.currentTimeZone} />
+            <InfoRow label="头像" value={selectedCustomer?.avatarUrl} />
             <InfoRow label="客户阶段" value={selectedCustomer?.stage} />
             <InfoRow label="数据负责人" value={selectedCustomer?.ownerUserId} />
             <InfoRow label="分配给" value={props.state.assignment?.assignedToUserId} />
@@ -1020,7 +1028,11 @@ function InfoRow({ label, value }: { label: string; value?: string | number | nu
 }
 
 function customerSubtitle(customer: NonNullable<DashboardState["customers"][number]>): string {
-  return [customer.country, customer.stage, customer.loginId].filter(Boolean).join(" · ") || customer.externalCustomerId;
+  return (
+    [customer.companyName, customer.country, customer.currentTimeZone, customer.stage, customer.loginId]
+      .filter(Boolean)
+      .join(" · ") || customer.externalCustomerId
+  );
 }
 
 function renderNonText(messageType?: string | number): string {

@@ -1,5 +1,6 @@
 import { requestCustomerProfilesFromPageRuntime } from "./onetalk-customer-profile.js";
 import { requestConversationsFromPageRuntime } from "./onetalk-conversation.js";
+import { requestHistoryMessagesFromPageRuntime } from "./onetalk-history-message.js";
 import { installOneTalkMessageTap } from "./onetalk-message-tap.js";
 import type { OneTalkCustomerProfileContact } from "../../shared/extension-messages.js";
 import type { OutboundMessage } from "../../shared/sync-types.js";
@@ -39,6 +40,10 @@ if (!pageWindow.__tradeBridgeOneTalkPageBridgeInstalled) {
     }
     if (event.data.type === "get-onetalk-conversations") {
       void handleConversationsRequest(event.data);
+      return;
+    }
+    if (event.data.type === "get-onetalk-history-messages") {
+      void handleHistoryMessagesRequest(event.data);
     }
   });
 }
@@ -104,6 +109,28 @@ async function handleConversationsRequest(data: Record<string, unknown>): Promis
   }
 }
 
+async function handleHistoryMessagesRequest(data: Record<string, unknown>): Promise<void> {
+  const requestId = typeof data.requestId === "string" ? data.requestId : "";
+  const conversations = Array.isArray(data.conversations) ? data.conversations.filter(isRecord) : [];
+  const count = numericValue(data.count) || 20;
+  if (!requestId || !conversations.length) {
+    publishHistoryMessagesResult(requestId, false, {}, "invalid_history_message_request");
+    return;
+  }
+
+  try {
+    const messagesByConversationId = await requestHistoryMessagesFromPageRuntime(pageWindow, { conversations, count });
+    publishHistoryMessagesResult(requestId, true, messagesByConversationId);
+  } catch (error) {
+    publishHistoryMessagesResult(
+      requestId,
+      false,
+      {},
+      error instanceof Error ? error.message : "onetalk_history_message_fetch_failed"
+    );
+  }
+}
+
 function publishCustomerProfilesResult(
   requestId: string,
   ok: boolean,
@@ -140,6 +167,25 @@ function publishConversationsResult(
       conversations,
       nextCursor,
       hasMore,
+      error
+    },
+    window.location.origin
+  );
+}
+
+function publishHistoryMessagesResult(
+  requestId: string,
+  ok: boolean,
+  messagesByConversationId: Record<string, Record<string, unknown>[]>,
+  error?: string
+): void {
+  window.postMessage(
+    {
+      source: "tradebridge-onetalk-page",
+      type: "get-onetalk-history-messages-result",
+      requestId,
+      ok,
+      messagesByConversationId,
       error
     },
     window.location.origin

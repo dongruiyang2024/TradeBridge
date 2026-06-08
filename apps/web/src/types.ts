@@ -7,8 +7,16 @@ export interface StoredCustomer {
   channelAccountExternalId?: string;
   channelSurface?: string;
   loginId?: string;
+  loginIdEncrypt?: string;
   displayName?: string;
+  companyName?: string;
+  avatarUrl?: string;
   country?: string;
+  currentTimeZone?: string;
+  accountId?: string;
+  accountIdEncrypt?: string;
+  aliId?: string;
+  aliIdEncrypt?: string;
   ownerUserId?: string;
   stage?: string;
 }

@@ -59,6 +59,7 @@ test("mapWebliteToSyncBatch maps stable LWP customer id and CRM profile natural 
       externalCustomerId: "buyer-ali",
       loginId: "buyer-login",
       displayName: "Buyer Sample",
+      companyName: "Buyer Tools Co.",
       country: "CN"
     }
   ]);

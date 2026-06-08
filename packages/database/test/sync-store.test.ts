@@ -9,7 +9,22 @@ test("acceptSyncBatch stores seller account, customer, conversation, and message
     device: { deviceId: "device-1", deviceName: "MacBook" },
     cursor: { since: "2026-05-01T00:00:00.000Z" },
     sourceMeta: { collectedAt: "2026-05-25T10:00:00.000Z", collectorVersion: "0.1.0" },
-    customers: [{ externalCustomerId: "customer-1", loginId: "buyer", displayName: "Buyer", country: "US" }],
+    customers: [
+      {
+        externalCustomerId: "customer-1",
+        loginId: "buyer",
+        displayName: "Buyer",
+        companyName: "Buyer Company LLC",
+        avatarUrl: "https://img.example/buyer.png",
+        country: "US",
+        currentTimeZone: "America/Los_Angeles",
+        accountId: "buyer-account",
+        accountIdEncrypt: "buyer-account-encrypted",
+        aliId: "buyer-ali",
+        aliIdEncrypt: "buyer-ali-encrypted",
+        loginIdEncrypt: "buyer-login-encrypted"
+      }
+    ],
     conversations: [
       {
         externalConversationId: "conv-1",
@@ -34,6 +49,21 @@ test("acceptSyncBatch stores seller account, customer, conversation, and message
   assert.equal(result.nextCursor, "2026-05-25T09:00:00.000Z");
   assert.equal(store.listSellerAccounts().length, 1);
   assert.equal(store.listCustomers().length, 1);
+  assert.deepEqual(store.listCustomers()[0], {
+    sellerAccountExternalId: "seller-1",
+    externalCustomerId: "customer-1",
+    loginId: "buyer",
+    displayName: "Buyer",
+    companyName: "Buyer Company LLC",
+    avatarUrl: "https://img.example/buyer.png",
+    country: "US",
+    currentTimeZone: "America/Los_Angeles",
+    accountId: "buyer-account",
+    accountIdEncrypt: "buyer-account-encrypted",
+    aliId: "buyer-ali",
+    aliIdEncrypt: "buyer-ali-encrypted",
+    loginIdEncrypt: "buyer-login-encrypted"
+  });
   assert.equal(store.listConversations().length, 1);
   assert.equal(store.listMessages().length, 1);
 });

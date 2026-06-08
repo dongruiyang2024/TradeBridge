@@ -1,4 +1,5 @@
 import { AutoSyncScheduler } from "./auto-sync-scheduler.js";
+import { OneTalkHistoryMessageSource } from "./onetalk-history-message-source.js";
 import { OneTalkMessageBuffer } from "./onetalk-message-buffer.js";
 import { OneTalkPageWebliteSource } from "./onetalk-page-weblite-source.js";
 import { runOutboundDelivery, sendOutboundMessagesViaOneTalk } from "./outbound-orchestrator.js";
@@ -113,6 +114,7 @@ async function runDefaultSync() {
     stateStore,
     onetalkClient: new OneTalkPageWebliteSource({ chromeApi }),
     messageSource: messageBuffer,
+    historyMessageSource: new OneTalkHistoryMessageSource({ chromeApi }),
     uploadSyncBatch
   });
 }

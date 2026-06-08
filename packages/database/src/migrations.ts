@@ -12,7 +12,8 @@ export const INTERNAL_SYNC_MIGRATIONS: DatabaseMigration[] = [
   loadMigration("002_outbound_message_queue", "002_outbound_message_queue.sql"),
   loadMigration("003_outbound_message_claim_lease", "003_outbound_message_claim_lease.sql"),
   loadMigration("004_collector_device_activation_account", "004_collector_device_activation_account.sql"),
-  loadMigration("005_channel_dimension", "005_channel_dimension.sql")
+  loadMigration("005_channel_dimension", "005_channel_dimension.sql"),
+  loadMigration("006_customer_profile_enrichment", "006_customer_profile_enrichment.sql")
 ];
 
 function loadMigration(id: string, filename: string): DatabaseMigration {

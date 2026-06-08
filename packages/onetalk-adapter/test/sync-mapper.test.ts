@@ -267,8 +267,12 @@ test("mapWebliteToSyncBatch maps SDK conversation customer fields without DOM sn
             name: "Contact Natural Name",
             companyName: "Contact Co.",
             loginId: "contact-login",
+            loginIdEncrypt: "buyer-login-encrypted",
             accountIdEncrypt: "buyer-account-encrypted",
-            complianceCountryCode: "US"
+            aliIdEncrypt: "buyer-ali-encrypted",
+            fullPortrait: "https://img.example/contact.png",
+            complianceCountryCode: "US",
+            currentTimeZone: "Asia/Shanghai"
           }
         }
       ]
@@ -283,7 +287,13 @@ test("mapWebliteToSyncBatch maps SDK conversation customer fields without DOM sn
       externalCustomerId: "contact-login",
       loginId: "contact-login",
       displayName: "Contact Natural Name",
-      country: "US"
+      country: "US",
+      companyName: "Contact Co.",
+      avatarUrl: "https://img.example/contact.png",
+      currentTimeZone: "Asia/Shanghai",
+      accountIdEncrypt: "buyer-account-encrypted",
+      aliIdEncrypt: "buyer-ali-encrypted",
+      loginIdEncrypt: "buyer-login-encrypted"
     }
   ]);
   assert.deepEqual(batch.conversations, [

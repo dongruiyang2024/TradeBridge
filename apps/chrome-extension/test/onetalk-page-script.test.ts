@@ -10,6 +10,7 @@ interface PostedMessage {
   deviceId?: string;
   profiles?: unknown[];
   conversations?: unknown[];
+  messagesByConversationId?: Record<string, unknown[]>;
   error?: string;
 }
 
@@ -194,6 +195,85 @@ test("OneTalk page conversation request returns sanitized SDK conversation field
   }
 });
 
+test("OneTalk page history message request returns sanitized SDK message fields", async () => {
+  const posted: PostedMessage[] = [];
+  const historyRequests: unknown[] = [];
+  const fakeWindow = createFakeWindow({
+    resources: [],
+    request: () => undefined,
+    messageHistory: async (options) => {
+      historyRequests.push(options);
+      return {
+        hasMore: false,
+        data: [
+          {
+            messageId: "history-1",
+            uuid: "history-uuid-1",
+            conversationCode: "conversation-code",
+            messageType: "text",
+            content: { text: { content: "older message" }, chatToken: "must-not-leave-page" },
+            sendTime: 1779862700000,
+            sender: { uid: "buyer-ali", chatToken: "must-not-leave-page" },
+            contact: { chatToken: "must-not-leave-page" }
+          }
+        ]
+      };
+    },
+    posted
+  });
+
+  Reflect.set(globalThis, "window", fakeWindow);
+  await import(`../src/channels/alibaba-im/onetalk-page-script?history-messages-${Date.now()}`);
+
+  fakeWindow.dispatchMessage({
+    source: "tradebridge-extension",
+    type: "get-onetalk-history-messages",
+    requestId: "request-history",
+    conversations: [{ cid: "conversation-code", latestMessage: { message: { sendTime: 1779862800000 } } }],
+    count: 20
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(posted[0]?.ok, true, posted[0]?.error);
+  assert.deepEqual(
+    historyRequests.map((request) => {
+      const record = request as Record<string, unknown>;
+      return {
+        conversationCode: record.conversationCode,
+        sendTime: record.sendTime,
+        count: record.count,
+        fetchType: record.fetchType
+      };
+    }),
+    [
+      {
+        conversationCode: "conversation-code",
+        sendTime: 1779862800000,
+        count: 20,
+        fetchType: false
+      }
+    ]
+  );
+  assert.deepEqual(posted[0]?.messagesByConversationId, {
+    "conversation-code": [
+      {
+        message: {
+          messageId: "history-1",
+          uuid: "history-uuid-1",
+          cid: "conversation-code",
+          conversationCode: "conversation-code",
+          messageType: "text",
+          content: { text: { content: "older message" } },
+          sendTime: 1779862700000,
+          sender: { uid: "buyer-ali" }
+        }
+      }
+    ]
+  });
+  assert.equal(JSON.stringify(posted[0]).includes("must-not-leave-page"), false);
+});
+
 function createFakeWindow(input: {
   resources: FakeResourceEntry[];
   request: (options: unknown, callback: (response: unknown) => void) => void;
@@ -201,6 +281,7 @@ function createFakeWindow(input: {
   conversationPage?: (options: unknown) => Promise<unknown> | unknown;
   legacyConversationPage?: (options: unknown) => Promise<unknown> | unknown;
   conversationContactDetails?: (contacts: unknown[]) => Promise<unknown> | unknown;
+  messageHistory?: (options: unknown) => Promise<unknown> | unknown;
   posted: PostedMessage[];
 }) {
   const listeners: Array<(event: { source: unknown; data: unknown }) => void> = [];
@@ -235,6 +316,18 @@ function createFakeWindow(input: {
               (() => {
                 throw new Error("legacy_conversation_service_should_not_be_called");
               })
+          }),
+          getMessageServiceV2: () => ({
+            listMessageWithConversationCodeForHistory: input.messageHistory
+              ? (options: Record<string, unknown>) => {
+                  void Promise.resolve(input.messageHistory?.(options)).then(options.dataCallback as (value: unknown) => void);
+                }
+              : undefined,
+            listMessageWithConversationCode: input.messageHistory
+              ? (options: Record<string, unknown>) => {
+                  void Promise.resolve(input.messageHistory?.(options)).then(options.dataCallback as (value: unknown) => void);
+                }
+              : undefined
           })
         }
       },
@@ -256,4 +349,3 @@ function createFakeWindow(input: {
   };
   return fakeWindow;
 }
-

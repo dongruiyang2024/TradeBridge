@@ -1,4 +1,5 @@
 import {
+  companyNameFromProfile,
   countryFromProfile,
   customerProfileFor,
   displayNameFromProfile,
@@ -123,6 +124,21 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
             "latestMessage.message.contact.companyName"
           ]) ||
           displayNameFromProfile(customerProfile),
+        companyName:
+          firstString(conversation, [
+            "contact.companyName",
+            "latestMessage.message.contact.companyName",
+            "companyName",
+            "buyerCompanyName"
+          ]) ||
+          companyNameFromProfile(customerProfile),
+        avatarUrl: firstString(conversation, [
+          "contact.fullPortrait",
+          "latestMessage.message.contact.fullPortrait",
+          "fullPortrait",
+          "avatarUrl",
+          "portraitUrl"
+        ]),
         country:
           firstString(conversation, [
             "contact.country",
@@ -133,7 +149,33 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
             "latestMessage.message.contact.complianceCountryCode",
             "country"
           ]) ||
-          countryFromProfile(customerProfile)
+          countryFromProfile(customerProfile),
+        currentTimeZone: firstString(conversation, [
+          "contact.currentTimeZone",
+          "latestMessage.message.contact.currentTimeZone",
+          "currentTimeZone"
+        ]),
+        accountId: firstString(conversation, [
+          "contact.accountId",
+          "latestMessage.message.contact.accountId",
+          "accountId"
+        ]),
+        accountIdEncrypt: firstString(conversation, [
+          "contact.accountIdEncrypt",
+          "latestMessage.message.contact.accountIdEncrypt",
+          "accountIdEncrypt"
+        ]),
+        aliId: firstString(conversation, ["contact.aliId", "latestMessage.message.contact.aliId", "aliId"]),
+        aliIdEncrypt: firstString(conversation, [
+          "contact.aliIdEncrypt",
+          "latestMessage.message.contact.aliIdEncrypt",
+          "aliIdEncrypt"
+        ]),
+        loginIdEncrypt: firstString(conversation, [
+          "contact.loginIdEncrypt",
+          "latestMessage.message.contact.loginIdEncrypt",
+          "loginIdEncrypt"
+        ])
       })
     );
 

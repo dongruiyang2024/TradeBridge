@@ -37,7 +37,15 @@ class FakePostgresClient implements SqlClient {
             externalCustomerId: "customer-1",
             loginId: "buyer_login",
             displayName: "Buyer One",
+            companyName: "Buyer Company LLC",
+            avatarUrl: "https://img.example/buyer.png",
             country: "US",
+            currentTimeZone: "America/Los_Angeles",
+            accountId: "buyer-account",
+            accountIdEncrypt: "buyer-account-encrypted",
+            aliId: "buyer-ali",
+            aliIdEncrypt: "buyer-ali-encrypted",
+            loginIdEncrypt: "buyer-login-encrypted",
             ownerUserId: "user-1",
             stage: "qualified"
           }
@@ -700,7 +708,22 @@ test("PostgresSyncStore writes channel-aware sync entities", async () => {
     sellerAccount: { externalAccountId: "seller-1", displayName: "Seller One" },
     device: { deviceId: "device-1", deviceName: "Chrome Extension" },
     sourceMeta: { collectedAt: "2026-05-25T10:00:00.000Z", sourceBatchKey: "batch-channel-1" },
-    customers: [{ externalCustomerId: "customer-1", displayName: "Buyer" }],
+    customers: [
+      {
+        externalCustomerId: "customer-1",
+        loginId: "buyer-login",
+        displayName: "Buyer",
+        companyName: "Buyer Company LLC",
+        avatarUrl: "https://img.example/buyer.png",
+        country: "US",
+        currentTimeZone: "America/Los_Angeles",
+        accountId: "buyer-account",
+        accountIdEncrypt: "buyer-account-encrypted",
+        aliId: "buyer-ali",
+        aliIdEncrypt: "buyer-ali-encrypted",
+        loginIdEncrypt: "buyer-login-encrypted"
+      }
+    ],
     conversations: [{ externalConversationId: "conv-1", externalCustomerId: "customer-1" }],
     messages: [
       {
@@ -728,6 +751,22 @@ test("PostgresSyncStore writes channel-aware sync entities", async () => {
   const upsertCustomer = client.queries.find((query) => /upsert_customer/i.test(query.sql));
   assert.ok(upsertCustomer);
   assert.match(upsertCustomer.sql, /channel_account_id/i);
+  assert.match(upsertCustomer.sql, /company_name/i);
+  assert.match(upsertCustomer.sql, /avatar_url/i);
+  assert.match(upsertCustomer.sql, /current_time_zone/i);
+  assert.deepEqual(upsertCustomer.params.slice(4, 15), [
+    "buyer-login",
+    "buyer-login-encrypted",
+    "Buyer",
+    "Buyer Company LLC",
+    "https://img.example/buyer.png",
+    "US",
+    "America/Los_Angeles",
+    "buyer-account",
+    "buyer-account-encrypted",
+    "buyer-ali",
+    "buyer-ali-encrypted"
+  ]);
   assert.deepEqual(upsertCustomer.params.slice(0, 4), [
     "seller-db-id",
     "channel-account-db-id",
@@ -870,7 +909,15 @@ test("PostgresSyncStore lists customers without organization scope", async () =>
       externalCustomerId: "customer-1",
       loginId: "buyer_login",
       displayName: "Buyer One",
+      companyName: "Buyer Company LLC",
+      avatarUrl: "https://img.example/buyer.png",
       country: "US",
+      currentTimeZone: "America/Los_Angeles",
+      accountId: "buyer-account",
+      accountIdEncrypt: "buyer-account-encrypted",
+      aliId: "buyer-ali",
+      aliIdEncrypt: "buyer-ali-encrypted",
+      loginIdEncrypt: "buyer-login-encrypted",
       ownerUserId: "user-1",
       stage: "qualified"
     }

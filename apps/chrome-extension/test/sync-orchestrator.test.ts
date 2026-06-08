@@ -31,6 +31,18 @@ function staticMessageSource(byConversationId: Record<string, Record<string, unk
   return { read: async () => byConversationId, acknowledge: async () => undefined };
 }
 
+function message(messageId: string, content: string): Record<string, unknown> {
+  return {
+    message: {
+      messageId,
+      cid: "conv-1",
+      sender: { uid: "buyer-ali" },
+      content: { text: { content } },
+      createAt: 1779706200000
+    }
+  };
+}
+
 test("runSyncOnce maps buffered messages with page-SDK conversations, sanitizes, uploads, and saves cursor", async () => {
   const store = new MemoryStateStore();
   const uploaded: SyncBatch[] = [];
@@ -88,6 +100,68 @@ test("runSyncOnce maps buffered messages with page-SDK conversations, sanitizes,
     [["conv-1", 200, 1]]
   );
   assert.deepEqual(store.status.lastDiagnostics?.lwpRoutes?.map((item) => item.route), ["page-socket-tap"]);
+});
+
+test("runSyncOnce merges live buffer messages with SDK history messages without acknowledging history", async () => {
+  const store = new MemoryStateStore();
+  const uploaded: SyncBatch[] = [];
+  const liveMessages = {
+    "conv-1": [message("m-live", "live message"), message("m-dup", "live wins")]
+  };
+  let acknowledged: Record<string, Record<string, unknown>[]> | null = null;
+
+  const result = await runSyncOnce({
+    now: () => new Date("2026-05-26T08:10:00.000Z"),
+    stateStore: store,
+    onetalkClient: {
+      fetchWeblite: async () => ({
+        html: "",
+        bootstrap: { aliId: "self-ali" },
+        conversations: [
+          {
+            singleChatUserConversation: {
+              singleChatConversation: { cid: "conv-1", pairFirst: "self-ali", pairSecond: "buyer-ali" }
+            }
+          }
+        ]
+      })
+    },
+    messageSource: {
+      read: async () => liveMessages,
+      acknowledge: async (snapshot) => {
+        acknowledged = snapshot;
+      }
+    },
+    historyMessageSource: {
+      read: async () => ({
+        "conv-1": [message("m-dup", "history duplicate"), message("m-history", "older history")]
+      })
+    },
+    uploadSyncBatch: async (options) => {
+      uploaded.push(options.batch);
+      return {
+        acceptedCount: options.batch.messages?.length || 0,
+        rejectedCount: 0,
+        nextCursor: "2026-05-25T10:50:00.000Z",
+        warnings: []
+      };
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(
+    uploaded[0].messages?.map((item) => [item.externalMessageId, item.content]),
+    [
+      ["m-live", "live message"],
+      ["m-dup", "live wins"],
+      ["m-history", "older history"]
+    ]
+  );
+  assert.equal(acknowledged, liveMessages);
+  assert.deepEqual(store.status.lastDiagnostics?.lwpRoutes?.map((item) => [item.route, item.listLength]), [
+    ["page-socket-tap", 2],
+    ["page-sdk-history", 2]
+  ]);
 });
 
 test("runSyncOnce uploads buffered messages even when local status has an old cursor", async () => {

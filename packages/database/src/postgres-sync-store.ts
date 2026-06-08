@@ -64,8 +64,16 @@ interface CustomerRow {
   channelSurface: string | null;
   externalCustomerId: string;
   loginId: string | null;
+  loginIdEncrypt: string | null;
   displayName: string | null;
+  companyName: string | null;
+  avatarUrl: string | null;
   country: string | null;
+  currentTimeZone: string | null;
+  accountId: string | null;
+  accountIdEncrypt: string | null;
+  aliId: string | null;
+  aliIdEncrypt: string | null;
   ownerUserId: string | null;
   stage: string | null;
 }
@@ -338,8 +346,16 @@ export class PostgresSyncStore {
         ca.surface AS "channelSurface",
         c.external_customer_id AS "externalCustomerId",
         c.login_id AS "loginId",
+        c.login_id_encrypt AS "loginIdEncrypt",
         c.display_name AS "displayName",
+        c.company_name AS "companyName",
+        c.avatar_url AS "avatarUrl",
         c.country AS "country",
+        c.current_time_zone AS "currentTimeZone",
+        c.account_id AS "accountId",
+        c.account_id_encrypt AS "accountIdEncrypt",
+        c.ali_id AS "aliId",
+        c.ali_id_encrypt AS "aliIdEncrypt",
         c.owner_user_id AS "ownerUserId",
         c.stage AS "stage"
       FROM customer c
@@ -358,8 +374,16 @@ export class PostgresSyncStore {
         channelAccountExternalId: row.channelAccountExternalId,
         channelSurface: row.channelSurface,
         loginId: row.loginId,
+        loginIdEncrypt: row.loginIdEncrypt,
         displayName: row.displayName,
+        companyName: row.companyName,
+        avatarUrl: row.avatarUrl,
         country: row.country,
+        currentTimeZone: row.currentTimeZone,
+        accountId: row.accountId,
+        accountIdEncrypt: row.accountIdEncrypt,
+        aliId: row.aliId,
+        aliIdEncrypt: row.aliIdEncrypt,
         ownerUserId: row.ownerUserId,
         stage: row.stage
       })
@@ -1934,16 +1958,32 @@ export class PostgresSyncStore {
         channel,
         external_customer_id,
         login_id,
+        login_id_encrypt,
         display_name,
+        company_name,
+        avatar_url,
         country,
+        current_time_zone,
+        account_id,
+        account_id_encrypt,
+        ali_id,
+        ali_id_encrypt,
         stage
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       ON CONFLICT (seller_account_id, channel, external_customer_id)
       DO UPDATE SET
         login_id = COALESCE(EXCLUDED.login_id, customer.login_id),
+        login_id_encrypt = COALESCE(EXCLUDED.login_id_encrypt, customer.login_id_encrypt),
         display_name = COALESCE(EXCLUDED.display_name, customer.display_name),
+        company_name = COALESCE(EXCLUDED.company_name, customer.company_name),
+        avatar_url = COALESCE(EXCLUDED.avatar_url, customer.avatar_url),
         country = COALESCE(EXCLUDED.country, customer.country),
+        current_time_zone = COALESCE(EXCLUDED.current_time_zone, customer.current_time_zone),
+        account_id = COALESCE(EXCLUDED.account_id, customer.account_id),
+        account_id_encrypt = COALESCE(EXCLUDED.account_id_encrypt, customer.account_id_encrypt),
+        ali_id = COALESCE(EXCLUDED.ali_id, customer.ali_id),
+        ali_id_encrypt = COALESCE(EXCLUDED.ali_id_encrypt, customer.ali_id_encrypt),
         stage = COALESCE(EXCLUDED.stage, customer.stage),
         updated_at = now()
       RETURNING id
@@ -1954,8 +1994,16 @@ export class PostgresSyncStore {
         scope.channel,
         externalCustomerId,
         customer?.loginId || null,
+        customer?.loginIdEncrypt || null,
         customer?.displayName || null,
+        customer?.companyName || null,
+        customer?.avatarUrl || null,
         customer?.country || null,
+        customer?.currentTimeZone || null,
+        customer?.accountId || null,
+        customer?.accountIdEncrypt || null,
+        customer?.aliId || null,
+        customer?.aliIdEncrypt || null,
         customer?.stage || null
       ]
     );
