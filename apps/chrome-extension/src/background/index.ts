@@ -78,6 +78,19 @@ chromeApi.alarms.onAlarm.addListener((alarm) => {
 
 chromeApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const typed = message as ExtensionMessage;
+  if (typed.type === "onetalk-page-ready") {
+    void ensureRealtimeConnection()
+      .then(() => {
+        autoSyncScheduler.schedule();
+        sendResponse({ ok: true });
+      })
+      .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
+    return true;
+  }
+  if (typed.type === "onetalk-login-required") {
+    sendResponse({ ok: true });
+    return false;
+  }
   if (typed.type === "onetalk-messages-observed") {
     void messageBuffer
       .add(typed.externalConversationId, typed.messages)
@@ -113,6 +126,10 @@ chromeApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (typed.type === "config-updated") {
     void configurePeriodicSync()
       .then(() => startRealtimeConnection())
+      .then((response) => {
+        autoSyncScheduler.schedule();
+        return response;
+      })
       .then(sendResponse);
     return true;
   }
