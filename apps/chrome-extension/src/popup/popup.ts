@@ -9,6 +9,7 @@ const headline = document.querySelector<HTMLSpanElement>("#headline");
 const realtime = document.querySelector<HTMLParagraphElement>("#realtime");
 const sync = document.querySelector<HTMLParagraphElement>("#sync");
 const capture = document.querySelector<HTMLParagraphElement>("#capture");
+const history = document.querySelector<HTMLParagraphElement>("#history");
 const error = document.querySelector<HTMLParagraphElement>("#error");
 
 void renderStatus();
@@ -50,6 +51,7 @@ async function renderStatus(): Promise<void> {
   realtime?.replaceChildren(view.realtimeLabel);
   sync?.replaceChildren(view.syncLabel);
   capture?.replaceChildren(view.captureLabel);
+  history?.replaceChildren(view.historyLabel);
   error?.replaceChildren(view.errorLabel);
   document.querySelector<HTMLButtonElement>("#reconnect")?.replaceChildren(view.reconnectActionLabel);
 }

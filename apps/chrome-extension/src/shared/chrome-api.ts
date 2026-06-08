@@ -50,6 +50,16 @@ export interface ChromeScriptingApi {
   executeScript(injection: { target: { tabId: number }; files: string[] }): Promise<unknown[]>;
 }
 
+export interface ChromePermissionsRequest {
+  origins?: string[];
+  permissions?: string[];
+}
+
+export interface ChromePermissionsApi {
+  contains(permissions: ChromePermissionsRequest): Promise<boolean>;
+  request(permissions: ChromePermissionsRequest): Promise<boolean>;
+}
+
 export interface ChromeApi {
   runtime: ChromeRuntimeApi;
   storage: {
@@ -58,6 +68,7 @@ export interface ChromeApi {
   alarms: ChromeAlarmsApi;
   tabs?: ChromeTabsApi;
   scripting?: ChromeScriptingApi;
+  permissions?: ChromePermissionsApi;
 }
 
 export function getChrome(): ChromeApi {

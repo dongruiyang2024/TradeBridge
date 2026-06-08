@@ -11,6 +11,7 @@ test("manifest uses minimal permissions for internal OneTalk collector", () => {
     minimum_chrome_version?: string;
     permissions?: string[];
     host_permissions?: string[];
+    optional_host_permissions?: string[];
     background?: { service_worker?: string; type?: string };
     content_scripts?: Array<{ run_at?: string }>;
     web_accessible_resources?: Array<{ resources?: string[]; matches?: string[] }>;
@@ -19,10 +20,12 @@ test("manifest uses minimal permissions for internal OneTalk collector", () => {
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.minimum_chrome_version, "116");
   assert.deepEqual(manifest.permissions?.sort(), ["alarms", "scripting", "storage"]);
-  assert.ok(manifest.host_permissions?.includes("https://onetalk.alibaba.com/*"));
-  assert.ok(manifest.host_permissions?.includes("http://127.0.0.1:5032/*"));
-  assert.ok(manifest.host_permissions?.includes("ws://127.0.0.1:5032/*"));
+  assert.deepEqual(manifest.host_permissions, ["https://onetalk.alibaba.com/*"]);
+  assert.deepEqual(manifest.optional_host_permissions?.sort(), ["http://*/*", "https://*/*"]);
+  assert.equal(manifest.host_permissions?.includes("http://127.0.0.1:5032/*"), false);
+  assert.equal(manifest.host_permissions?.includes("ws://127.0.0.1:5032/*"), false);
   assert.equal(manifest.host_permissions?.includes("<all_urls>"), false);
+  assert.equal(manifest.optional_host_permissions?.includes("<all_urls>"), false);
   assert.equal(manifest.host_permissions?.includes("https://*.alibaba.com/*"), false);
   assert.equal(manifest.permissions?.includes("cookies"), false);
   assert.equal(manifest.permissions?.includes("webRequest"), false);

@@ -1,4 +1,4 @@
-import type { ExtensionStatus } from "../shared/sync-types.js";
+import type { ExtensionStatus, LwpRouteDiagnostic } from "../shared/sync-types.js";
 
 export interface PopupViewInput {
   tradeBridgeAccountEmail?: string;
@@ -16,6 +16,7 @@ export interface PopupViewModel {
   realtimeLabel: string;
   syncLabel: string;
   captureLabel: string;
+  historyLabel: string;
   errorLabel: string;
   headlineLabel: string;
   reconnectActionLabel: string;
@@ -29,6 +30,7 @@ export function createPopupViewModel(input: PopupViewInput): PopupViewModel {
     realtimeLabel,
     syncLabel: input.status.lastSyncedAt ? `最近同步：${input.status.lastSyncedAt}` : "最近同步：未同步",
     captureLabel: captureSummary(input.status),
+    historyLabel: historySummary(input.status),
     errorLabel: input.status.lastError ? `最近错误：${input.status.lastError.code}` : "最近错误：无",
     headlineLabel: realtimeLabel.replace("实时连接：", ""),
     reconnectActionLabel: "重新连接"
@@ -41,6 +43,20 @@ function captureSummary(status: ExtensionStatus): string {
   const parts = [`已抓取 ${capture.observedMessageCount} 条`];
   if (capture.seenEventNames.length) parts.push(`事件:${capture.seenEventNames.slice(0, 6).join(",")}`);
   return `抓取诊断：${parts.join("，")}`;
+}
+
+function historySummary(status: ExtensionStatus): string {
+  const diagnostics = status.lastDiagnostics;
+  if (!diagnostics) return "历史回补：暂无诊断";
+  const historyCount = routeTotal(diagnostics.lwpRoutes, "page-sdk-history");
+  const liveCount = routeTotal(diagnostics.lwpRoutes, "page-socket-tap");
+  return `历史回补：本轮 ${historyCount} 条 / 实时 ${liveCount} 条 / 会话 ${diagnostics.conversations} 个`;
+}
+
+function routeTotal(routes: LwpRouteDiagnostic[] | undefined, route: string): number {
+  return (routes || [])
+    .filter((item) => item.route === route)
+    .reduce((total, item) => total + (item.listLength || 0), 0);
 }
 
 function accountValidationSummary(status: ExtensionStatus): string {

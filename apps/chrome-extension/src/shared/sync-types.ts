@@ -77,6 +77,8 @@ export interface ExtensionConfig {
   deviceId: string;
   deviceName?: string;
   syncIntervalMinutes?: number;
+  historyBackfillEnabled?: boolean;
+  historyMessagesPerConversation?: number;
 }
 
 export interface ExtensionStatus {

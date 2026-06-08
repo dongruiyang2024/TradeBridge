@@ -19,6 +19,14 @@ test("createPopupViewModel shows TradeBridge account and operational status", ()
         sessionId: "session-1",
         connectedAt: "2026-06-01T06:30:00.000Z",
         lastChangedAt: "2026-06-01T06:30:00.000Z"
+      },
+      lastDiagnostics: {
+        conversations: 3,
+        messageRequests: [],
+        lwpRoutes: [
+          { route: "page-socket-tap", status: 200, listLength: 4 },
+          { route: "page-sdk-history", status: 200, listLength: 12 }
+        ]
       }
     }
   });
@@ -27,6 +35,7 @@ test("createPopupViewModel shows TradeBridge account and operational status", ()
   assert.equal(view.accountValidationLabel, "账号校验：已验证");
   assert.equal(view.realtimeLabel, "实时连接：已连接");
   assert.equal(view.syncLabel, "最近同步：2026-06-01T06:32:00.000Z");
+  assert.equal(view.historyLabel, "历史回补：本轮 12 条 / 实时 4 条 / 会话 3 个");
   assert.equal(view.reconnectActionLabel, "重新连接");
 });
 
@@ -67,6 +76,7 @@ test("popup markup exposes reconnect without showing technical details", () => {
 
   assert.equal(markup.includes('id="reconnect"'), true);
   assert.equal(markup.includes('id="account-validation"'), true);
+  assert.equal(markup.includes('id="history"'), true);
   assert.equal(markup.includes("店铺"), false);
   assert.equal(markup.includes("设备"), false);
   assert.equal(markup.includes("服务"), false);

@@ -4,7 +4,7 @@
 
 - Chrome 浏览器。
 - 用户已能访问 `https://onetalk.alibaba.com/` 并完成登录。
-- TradeBridge server 运行在 `http://127.0.0.1:5032`。
+- 内部试运行时 TradeBridge server 可运行在 `http://127.0.0.1:5032`；发布候选包应使用正式 HTTPS 域名。
 - 已创建 TradeBridge 管理员账号。
 
 ## 渠道说明
@@ -43,11 +43,14 @@ apps/chrome-extension/dist
 
 在插件设置页完成采集端激活：
 
-- Server URL：`http://127.0.0.1:5032`
+- Server URL：内部试运行使用 `http://127.0.0.1:5032`，发布候选使用正式 HTTPS 域名
 - 邮箱：管理员邮箱
 - 密码：管理员密码
+- 同步间隔：默认 30 分钟，可按试运行需要调整
+- 启用历史消息回补：默认开启
+- 每会话回补条数：默认 20 条，最大 100 条
 
-点击“激活采集端”后，插件会自动生成并复用设备 ID，设备名称默认使用 `Chrome Extension`，然后调用 `/collector/v1/auth/login` 并保存服务端返回的 collector token。后续同步只使用该 collector token，不保存管理员密码。
+点击“保存并激活”后，Chrome 会按 Server URL 申请 TradeBridge 服务端访问权限。授权后插件会自动生成并复用设备 ID，设备名称默认使用 `Chrome Extension`，然后调用 `/collector/v1/auth/login` 并保存服务端返回的 collector token。后续同步只使用该 collector token，不保存管理员密码。
 
 不要在设置页填写 OneTalk Cookie、`ctoken`、`_tb_token_`、`sgcookie`、`x5sec`、`chatToken` 或任何第三方平台 token。
 
@@ -57,9 +60,10 @@ apps/chrome-extension/dist
 2. 确认 OneTalk Web 页面已登录。
 3. 打开插件设置页并完成采集端激活。
 4. 点击插件弹窗里的同步按钮。
-5. 打开 TradeBridge Web 工作台。
-6. 确认客户、会话和消息可见。
-7. 撤销 collector token 后再次同步，确认插件显示 `tradebridge_unauthorized`。
+5. 确认插件弹窗显示实时连接、最近同步、抓取诊断和历史回补摘要。
+6. 打开 TradeBridge Web 工作台。
+7. 确认客户详情、会话和消息可见。
+8. 撤销 collector token 后再次同步，确认插件显示 `tradebridge_unauthorized`。
 
 ## 安全检查
 

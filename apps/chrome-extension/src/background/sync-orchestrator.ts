@@ -26,7 +26,10 @@ export interface SyncMessageSource {
 }
 
 export interface SyncHistoryMessageSource {
-  read(conversations: Record<string, unknown>[]): Promise<Record<string, Record<string, unknown>[]>>;
+  read(
+    conversations: Record<string, unknown>[],
+    config: ExtensionConfig
+  ): Promise<Record<string, Record<string, unknown>[]>>;
 }
 
 export interface RunSyncOnceOptions {
@@ -57,7 +60,7 @@ export async function runSyncOnce(options: RunSyncOnceOptions): Promise<RunSyncR
     const weblite = await options.onetalkClient.fetchWeblite();
     const liveMessagesByConversationId = await options.messageSource.read();
     const historyMessagesByConversationId =
-      (await options.historyMessageSource?.read(weblite.conversations.filter(isRecord))) || {};
+      (await options.historyMessageSource?.read(weblite.conversations.filter(isRecord), config)) || {};
     const messagesByConversationId = mergeMessagesByConversationId(
       liveMessagesByConversationId,
       historyMessagesByConversationId

@@ -24,7 +24,12 @@ const messageBuffer = new OneTalkMessageBuffer(chromeApi.storage.local);
 // Single pacer shared by both delivery paths (alarm + realtime claim) so the
 // per-account rate window is continuous, not reset per invocation.
 const outboundPacer = new OutboundPacer();
+const SYNC_ALARM = "tradebridge-sync";
+const OUTBOUND_ALARM = "tradebridge-outbound";
 const REALTIME_WATCHDOG_ALARM = "tradebridge-realtime-watchdog";
+const DEFAULT_SYNC_INTERVAL_MINUTES = 30;
+const MIN_SYNC_INTERVAL_MINUTES = 5;
+const MAX_SYNC_INTERVAL_MINUTES = 1440;
 let realtimeClient: TradeBridgeWsClient | null = null;
 let realtimeConnecting: Promise<void> | null = null;
 let realtimeGeneration = 0;
@@ -48,21 +53,22 @@ const autoSyncScheduler = new AutoSyncScheduler({
 });
 
 chromeApi.runtime.onInstalled.addListener(() => {
-  chromeApi.alarms.create("tradebridge-sync", { periodInMinutes: 30 });
-  chromeApi.alarms.create("tradebridge-outbound", { periodInMinutes: 1 });
+  void configurePeriodicSync();
+  chromeApi.alarms.create(OUTBOUND_ALARM, { periodInMinutes: 1 });
   chromeApi.alarms.create(REALTIME_WATCHDOG_ALARM, { periodInMinutes: 1 });
   void ensureRealtimeConnection();
 });
 
 chromeApi.runtime.onStartup?.addListener(() => {
+  void configurePeriodicSync();
   void ensureRealtimeConnection();
 });
 
 chromeApi.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "tradebridge-sync") {
+  if (alarm.name === SYNC_ALARM) {
     void runDefaultSyncAndOutbound();
   }
-  if (alarm.name === "tradebridge-outbound") {
+  if (alarm.name === OUTBOUND_ALARM) {
     void runDefaultOutboundDelivery();
   }
   if (alarm.name === REALTIME_WATCHDOG_ALARM) {
@@ -104,6 +110,12 @@ chromeApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     void startRealtimeConnection().then(sendResponse);
     return true;
   }
+  if (typed.type === "config-updated") {
+    void configurePeriodicSync()
+      .then(() => startRealtimeConnection())
+      .then(sendResponse);
+    return true;
+  }
   return false;
 });
 
@@ -133,6 +145,18 @@ function runDefaultOutboundDelivery() {
     listOutboundMessages,
     markOutboundMessageDelivered
   });
+}
+
+async function configurePeriodicSync(): Promise<void> {
+  const config = await stateStore.getConfig();
+  chromeApi.alarms.create(SYNC_ALARM, {
+    periodInMinutes: boundedSyncInterval(config?.syncIntervalMinutes)
+  });
+}
+
+function boundedSyncInterval(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_SYNC_INTERVAL_MINUTES;
+  return Math.min(MAX_SYNC_INTERVAL_MINUTES, Math.max(MIN_SYNC_INTERVAL_MINUTES, Math.trunc(value)));
 }
 
 async function readDashboard() {

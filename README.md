@@ -172,7 +172,7 @@ curl -X POST http://127.0.0.1:5032/collector/v1/auth/login \
 
 2. 在 Chrome 扩展管理页加载 `apps/chrome-extension/dist`。
 3. 打开并登录 `https://onetalk.alibaba.com/`。
-4. 在插件设置页填写 Server URL、管理员邮箱和密码，完成激活。
+4. 在插件设置页填写 Server URL、管理员邮箱、密码、同步间隔和历史回补设置，授予服务端访问权限后完成激活。
 5. 点击插件弹窗里的同步按钮。
 6. 回到 Web 工作台查看客户、会话和消息。
 
@@ -220,6 +220,7 @@ curl -X POST http://127.0.0.1:5032/collector/v1/auth/login \
 - Chrome 插件使用 collector token。
 - 两类 token 不能混用。
 - 服务端只保存 collector token hash。
+- Chrome 插件安装时只固定请求 OneTalk 页面权限，TradeBridge 服务端访问权限由用户在设置页按 Server URL 授权。
 - 插件上传前会过滤 cookie、authorization、ctoken、`_tb_token_`、cookie2、sgcookie、chatToken、accessToken、refreshToken 等敏感字段。
 - 服务端会用 collector token 绑定的卖家和设备覆盖上传体中的 seller/device，避免伪造归属。
 - `.env.local`、真实数据库地址、Redis 地址和 collector token 不要提交。
@@ -231,12 +232,14 @@ curl -X POST http://127.0.0.1:5032/collector/v1/auth/login \
 - [环境变量配置](docs/ENVIRONMENT.md)
 - [内部试运行手册](docs/internal-trial-runbook.md)
 - [Chrome 插件试运行手册](docs/chrome-extension-trial-runbook.md)
+- [Chrome 插件发布清单](docs/chrome-extension-release-checklist.md)
+- [Chrome 插件隐私与数据说明](docs/chrome-extension-privacy.md)
 - [当前系统设计方案](docs/superpowers/specs/2026-06-01-tradebridge-current-system-design.md)
 
 ## 当前已知限制
 
 - Chrome 插件当前更依赖服务端幂等去重，尚未真正使用本地 `nextCursor` 做严格增量同步。
-- Chrome 插件默认每个会话只拉取 1 页消息，高活跃会话可能需要扩展分页策略。
+- Chrome 插件默认每个会话回补 20 条历史消息，可在设置页调整到 1 到 100 条；高活跃会话仍可能需要扩展分页策略。
 - 阿里国际站消息通道当前通过 OneTalk Web 实现面接入，页面 SDK 和 LWP 协议依赖外部页面运行时，后续需要持续做真实账号 smoke 验证。
 - 多渠道架构正在重构中，当前首个真实渠道仍是 `alibaba-im` 的 OneTalk Web 实现面。
 - AI provider 当前默认是确定性 fallback，不是正式大模型集成。

@@ -164,6 +164,54 @@ test("runSyncOnce merges live buffer messages with SDK history messages without 
   ]);
 });
 
+test("runSyncOnce passes extension config to history source", async () => {
+  const store = new MemoryStateStore();
+  store.config = {
+    ...store.config!,
+    historyBackfillEnabled: false,
+    historyMessagesPerConversation: 5
+  };
+  const historyConfigs: ExtensionConfig[] = [];
+
+  const result = await runSyncOnce({
+    now: () => new Date("2026-05-26T08:10:00.000Z"),
+    stateStore: store,
+    onetalkClient: {
+      fetchWeblite: async () => ({
+        html: "",
+        bootstrap: { aliId: "self-ali" },
+        conversations: [
+          {
+            singleChatUserConversation: {
+              singleChatConversation: { cid: "conv-1", pairFirst: "self-ali", pairSecond: "buyer-ali" }
+            }
+          }
+        ]
+      })
+    },
+    messageSource: staticMessageSource({
+      "conv-1": [message("m-live", "live message")]
+    }),
+    historyMessageSource: {
+      read: async (_conversations, config) => {
+        historyConfigs.push(config);
+        return {};
+      }
+    },
+    uploadSyncBatch: async (options) => ({
+      acceptedCount: options.batch.messages?.length || 0,
+      rejectedCount: 0,
+      nextCursor: null,
+      warnings: []
+    })
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(historyConfigs.length, 1);
+  assert.equal(historyConfigs[0].historyBackfillEnabled, false);
+  assert.equal(historyConfigs[0].historyMessagesPerConversation, 5);
+});
+
 test("runSyncOnce uploads buffered messages even when local status has an old cursor", async () => {
   const store = new MemoryStateStore();
   store.status = { nextCursor: "2026-05-28T08:00:00.000Z" };

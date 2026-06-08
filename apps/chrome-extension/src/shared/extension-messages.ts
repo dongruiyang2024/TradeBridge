@@ -17,6 +17,7 @@ export type ExtensionMessage =
   | { type: "get-onetalk-history-messages"; conversations: Record<string, unknown>[]; count: number }
   | { type: "sync-now" }
   | { type: "realtime-reconnect" }
+  | { type: "config-updated" }
   | { type: "open-options" }
   | { type: "read-status" }
   | { type: "read-dashboard" };
