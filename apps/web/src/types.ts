@@ -3,9 +3,20 @@ export type MessageDirection = "received" | "sent" | "unknown";
 export interface StoredCustomer {
   sellerAccountExternalId: string;
   externalCustomerId: string;
+  channel?: string;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
   loginId?: string;
+  loginIdEncrypt?: string;
   displayName?: string;
+  companyName?: string;
+  avatarUrl?: string;
   country?: string;
+  currentTimeZone?: string;
+  accountId?: string;
+  accountIdEncrypt?: string;
+  aliId?: string;
+  aliIdEncrypt?: string;
   ownerUserId?: string;
   stage?: string;
 }
@@ -13,6 +24,9 @@ export interface StoredCustomer {
 export interface StoredConversation {
   sellerAccountExternalId: string;
   externalConversationId: string;
+  channel?: string;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
   externalCustomerId?: string;
   lastMessageAt?: string;
 }
@@ -21,6 +35,9 @@ export interface StoredMessage {
   sellerAccountExternalId: string;
   externalConversationId: string;
   externalMessageId?: string;
+  channel?: string;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
   direction: MessageDirection;
   messageType?: string | number;
   content?: string;
@@ -37,6 +54,9 @@ export interface StoredOutboundMessage {
   sellerAccountExternalId: string;
   externalCustomerId: string;
   externalConversationId: string;
+  channel?: string;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
   content: string;
   status: OutboundMessageStatus;
   createdByUserId?: string;

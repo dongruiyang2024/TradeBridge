@@ -3,15 +3,76 @@
   <head>
     <meta charset="UTF-8" />
     <title>TradeBridge 设置</title>
+    <link rel="stylesheet" href="./options.css" />
   </head>
   <body>
-    <main>
+    <main class="options-shell">
+      <header>
+        <h1>TradeBridge 设置</h1>
+        <p>连接 TradeBridge 服务器并激活 OneTalk 采集端</p>
+      </header>
+
       <form id="options-form">
-        <label>Server URL <input name="serverUrl" value="http://127.0.0.1:5032" /></label>
-        <label>邮箱 <input name="email" type="email" autocomplete="username" /></label>
-        <label>密码 <input name="password" type="password" autocomplete="current-password" /></label>
-        <button type="submit">激活采集端</button>
+        <section class="settings-panel" aria-label="连接配置">
+          <label>
+            <span>Server URL</span>
+            <input name="serverUrl" type="url" placeholder="https://tradebridge.example.com" autocomplete="url" required />
+          </label>
+
+          <div class="field-row">
+            <label>
+              <span>邮箱</span>
+              <input name="email" type="email" autocomplete="username" required />
+            </label>
+            <label>
+              <span>密码</span>
+              <input name="password" type="password" autocomplete="current-password" required />
+            </label>
+          </div>
+
+          <label>
+            <span>Trade-Mind Binding Token</span>
+            <input name="tradeMindBindingToken" type="text" autocomplete="off" placeholder="从 Trade-Mind 沟通助手复制" />
+          </label>
+
+          <div class="field-row">
+            <label>
+              <span>OneTalk Login ID</span>
+              <input name="channelAccountExternalId" type="text" autocomplete="off" placeholder="selfLoginId" />
+            </label>
+            <label>
+              <span>OneTalk Ali ID</span>
+              <input name="sellerAccountExternalId" type="text" autocomplete="off" placeholder="selfAliId" />
+            </label>
+          </div>
+
+          <div class="field-row">
+            <label>
+              <span>同步间隔（分钟）</span>
+              <input name="syncIntervalMinutes" type="number" min="5" max="1440" step="1" value="30" />
+            </label>
+            <label>
+              <span>每会话回补条数</span>
+              <input name="historyMessagesPerConversation" type="number" min="1" max="100" step="1" value="20" />
+            </label>
+          </div>
+
+          <label class="checkbox-row">
+            <input name="historyBackfillEnabled" type="checkbox" checked />
+            <span>启用历史消息回补</span>
+          </label>
+        </section>
+
+        <section class="status-panel" aria-label="当前状态">
+          <p><span>当前账号</span><strong id="current-account">未激活</strong></p>
+          <p><span>采集设备</span><strong id="current-device">未创建</strong></p>
+          <p><span>设备 ID</span><strong id="current-device-id">未创建</strong></p>
+        </section>
+
+        <p class="security-note">只填写 TradeBridge 管理员账号；不要填写 OneTalk 密码、Cookie 或 Token。</p>
+        <button type="submit">保存并激活</button>
       </form>
+
       <p id="options-status"></p>
     </main>
     <script type="module" src="./options.ts"></script>

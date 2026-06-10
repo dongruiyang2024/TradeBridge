@@ -1,11 +1,9 @@
-import {
-  contactProfileRequestsFromConversations,
-  requestOneTalkCustomerProfiles
-} from "./onetalk-customer-profile-client.js";
-import { requestOneTalkConversations } from "./onetalk-conversation-client.js";
-import { BrowserOnetalkLwpClient } from "./onetalk-lwp-client.js";
-import { requestOneTalkImToken } from "./onetalk-token-client.js";
+import { AutoSyncScheduler } from "./auto-sync-scheduler.js";
+import { OneTalkHistoryMessageSource } from "./onetalk-history-message-source.js";
+import { OneTalkMessageBuffer } from "./onetalk-message-buffer.js";
+import { OneTalkPageWebliteSource } from "./onetalk-page-weblite-source.js";
 import { runOutboundDelivery, sendOutboundMessagesViaOneTalk } from "./outbound-orchestrator.js";
+import { OutboundPacer } from "./outbound-pacer.js";
 import { createRealtimeOrchestrator } from "./realtime-orchestrator.js";
 import { ExtensionStateStore, validateConfig } from "./storage.js";
 import { runSyncOnce } from "./sync-orchestrator.js";
@@ -22,7 +20,16 @@ import type { ExtensionConfig, ExtensionRealtimeStatus, ExtensionStatus } from "
 
 const chromeApi = getChrome();
 const stateStore = new ExtensionStateStore(chromeApi.storage.local);
+const messageBuffer = new OneTalkMessageBuffer(chromeApi.storage.local);
+// Single pacer shared by both delivery paths (alarm + realtime claim) so the
+// per-account rate window is continuous, not reset per invocation.
+const outboundPacer = new OutboundPacer();
+const SYNC_ALARM = "tradebridge-sync";
+const OUTBOUND_ALARM = "tradebridge-outbound";
 const REALTIME_WATCHDOG_ALARM = "tradebridge-realtime-watchdog";
+const DEFAULT_SYNC_INTERVAL_MINUTES = 30;
+const MIN_SYNC_INTERVAL_MINUTES = 5;
+const MAX_SYNC_INTERVAL_MINUTES = 1440;
 let realtimeClient: TradeBridgeWsClient | null = null;
 let realtimeConnecting: Promise<void> | null = null;
 let realtimeGeneration = 0;
@@ -32,26 +39,36 @@ const realtimeOrchestrator = createRealtimeOrchestrator({
     if (!realtimeClient) throw new Error("collector_ws_not_connected");
     realtimeClient.send(message);
   },
-  sendOutboundMessagesViaOneTalk: ({ messages }) => sendOutboundMessagesViaOneTalk({ chromeApi, messages }),
+  sendOutboundMessagesViaOneTalk: ({ messages }) =>
+    sendOutboundMessagesViaOneTalk({ chromeApi, messages, pacer: outboundPacer }),
   runSyncNow: runDefaultSyncAndOutbound
 });
 
+// Coalesces inbound-triggered syncs: when the page tap observes new messages we
+// schedule() instead of uploading on every burst. The periodic alarm stays as a
+// backstop, but this is what makes captured messages reach the server within a
+// couple of seconds without a manual sync.
+const autoSyncScheduler = new AutoSyncScheduler({
+  runSync: runDefaultSyncAndOutbound
+});
+
 chromeApi.runtime.onInstalled.addListener(() => {
-  chromeApi.alarms.create("tradebridge-sync", { periodInMinutes: 30 });
-  chromeApi.alarms.create("tradebridge-outbound", { periodInMinutes: 1 });
+  void configurePeriodicSync();
+  chromeApi.alarms.create(OUTBOUND_ALARM, { periodInMinutes: 1 });
   chromeApi.alarms.create(REALTIME_WATCHDOG_ALARM, { periodInMinutes: 1 });
   void ensureRealtimeConnection();
 });
 
 chromeApi.runtime.onStartup?.addListener(() => {
+  void configurePeriodicSync();
   void ensureRealtimeConnection();
 });
 
 chromeApi.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "tradebridge-sync") {
+  if (alarm.name === SYNC_ALARM) {
     void runDefaultSyncAndOutbound();
   }
-  if (alarm.name === "tradebridge-outbound") {
+  if (alarm.name === OUTBOUND_ALARM) {
     void runDefaultOutboundDelivery();
   }
   if (alarm.name === REALTIME_WATCHDOG_ALARM) {
@@ -61,6 +78,35 @@ chromeApi.alarms.onAlarm.addListener((alarm) => {
 
 chromeApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const typed = message as ExtensionMessage;
+  if (typed.type === "onetalk-page-ready") {
+    void ensureRealtimeConnection()
+      .then(() => {
+        autoSyncScheduler.schedule();
+        sendResponse({ ok: true });
+      })
+      .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
+    return true;
+  }
+  if (typed.type === "onetalk-login-required") {
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (typed.type === "onetalk-messages-observed") {
+    void messageBuffer
+      .add(typed.externalConversationId, typed.messages)
+      .then(() => recordObservedMessages(typed.messages.length))
+      .then(() => {
+        // New messages buffered — push them to the server shortly. Debounced so
+        // a burst of messages produces one upload, not one per message.
+        if (typed.messages.length > 0) autoSyncScheduler.schedule();
+      })
+      .then(() => sendResponse({ ok: true }));
+    return true;
+  }
+  if (typed.type === "onetalk-capture-diagnostics") {
+    void recordSeenEventNames(typed.seenEventNames).then(() => sendResponse({ ok: true }));
+    return true;
+  }
   if (typed.type === "sync-now") {
     void runDefaultSyncAndOutbound().then(sendResponse);
     return true;
@@ -77,39 +123,27 @@ chromeApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     void startRealtimeConnection().then(sendResponse);
     return true;
   }
+  if (typed.type === "config-updated") {
+    void configurePeriodicSync()
+      .then(() => startRealtimeConnection())
+      .then((response) => {
+        autoSyncScheduler.schedule();
+        return response;
+      })
+      .then(sendResponse);
+    return true;
+  }
   return false;
 });
 
 void ensureRealtimeConnection();
 
 async function runDefaultSync() {
-  const config = await stateStore.getConfig();
   return runSyncOnce({
     stateStore,
-    onetalkClient: new BrowserOnetalkLwpClient({
-      appKey: "12574478",
-      deviceId: config?.deviceId || "chrome-extension",
-      userAgent: navigator.userAgent,
-      tokenProvider: async () =>
-        requestOneTalkImToken({
-          chromeApi,
-          appKey: "12574478",
-          deviceId: config?.deviceId || "chrome-extension"
-        }),
-      conversationProvider: async () => {
-        const page = await requestOneTalkConversations({
-          chromeApi,
-          cursor: Date.now(),
-          count: 100
-        });
-        return page.conversations;
-      },
-      customerProfileProvider: async (conversations) =>
-        requestOneTalkCustomerProfiles({
-          chromeApi,
-          contacts: contactProfileRequestsFromConversations(conversations)
-        })
-    }),
+    onetalkClient: new OneTalkPageWebliteSource({ chromeApi }),
+    messageSource: messageBuffer,
+    historyMessageSource: new OneTalkHistoryMessageSource({ chromeApi }),
     uploadSyncBatch
   });
 }
@@ -124,9 +158,22 @@ function runDefaultOutboundDelivery() {
   return runOutboundDelivery({
     stateStore,
     chromeApi,
+    pacer: outboundPacer,
     listOutboundMessages,
     markOutboundMessageDelivered
   });
+}
+
+async function configurePeriodicSync(): Promise<void> {
+  const config = await stateStore.getConfig();
+  chromeApi.alarms.create(SYNC_ALARM, {
+    periodInMinutes: boundedSyncInterval(config?.syncIntervalMinutes)
+  });
+}
+
+function boundedSyncInterval(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_SYNC_INTERVAL_MINUTES;
+  return Math.min(MAX_SYNC_INTERVAL_MINUTES, Math.max(MIN_SYNC_INTERVAL_MINUTES, Math.trunc(value)));
 }
 
 async function readDashboard() {
@@ -136,6 +183,31 @@ async function readDashboard() {
     tradeBridgeAccountEmail: validatedStatus.accountValidation?.email || config?.tradeBridgeAccountEmail,
     status: validatedStatus
   };
+}
+
+async function recordObservedMessages(count: number): Promise<void> {
+  if (count <= 0) return;
+  const previous = await stateStore.getStatus();
+  const capture = previous.captureDiagnostics || { observedMessageCount: 0, seenEventNames: [] };
+  await stateStore.saveStatus({
+    ...previous,
+    captureDiagnostics: {
+      ...capture,
+      observedMessageCount: capture.observedMessageCount + count,
+      lastObservedAt: new Date().toISOString()
+    }
+  });
+}
+
+async function recordSeenEventNames(names: string[]): Promise<void> {
+  if (!names.length) return;
+  const previous = await stateStore.getStatus();
+  const capture = previous.captureDiagnostics || { observedMessageCount: 0, seenEventNames: [] };
+  const merged = Array.from(new Set([...capture.seenEventNames, ...names])).slice(0, 60);
+  await stateStore.saveStatus({
+    ...previous,
+    captureDiagnostics: { ...capture, seenEventNames: merged }
+  });
 }
 
 async function validateStoredTradeBridgeAccount(

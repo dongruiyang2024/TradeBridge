@@ -9,12 +9,15 @@ export interface OneTalkCustomerProfileContact {
 export type ExtensionMessage =
   | { type: "onetalk-page-ready"; url: string }
   | { type: "onetalk-login-required"; url: string }
+  | { type: "onetalk-messages-observed"; externalConversationId: string; messages: Record<string, unknown>[] }
+  | { type: "onetalk-capture-diagnostics"; seenEventNames: string[] }
   | { type: "send-onetalk-message"; message: OutboundMessage }
-  | { type: "get-onetalk-im-token"; appKey: string; deviceId: string }
   | { type: "get-onetalk-customer-profiles"; contacts: OneTalkCustomerProfileContact[] }
   | { type: "get-onetalk-conversations"; cursor: number; count: number }
+  | { type: "get-onetalk-history-messages"; conversations: Record<string, unknown>[]; count: number }
   | { type: "sync-now" }
   | { type: "realtime-reconnect" }
+  | { type: "config-updated" }
   | { type: "open-options" }
   | { type: "read-status" }
   | { type: "read-dashboard" };

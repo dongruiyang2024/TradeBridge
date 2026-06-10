@@ -2,13 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FastifyInstance } from "fastify";
 import { InMemorySyncStore, type SyncBatch } from "@wangwang/database";
-import { collectOnce } from "../../apps/collector-desktop/src/collector.js";
-import type {
-  CollectorLastError,
-  CollectorLocalState,
-  CollectorStateStore,
-  QueuedFailedBatch
-} from "../../apps/collector-desktop/src/local-state.js";
+import { runSyncOnce } from "../../apps/chrome-extension/src/background/sync-orchestrator.js";
+import type { ExtensionConfig, ExtensionStatus } from "../../apps/chrome-extension/src/shared/sync-types.js";
 import { hashPassword } from "../../apps/server/src/auth.js";
 import { createServer } from "../../apps/server/src/server.js";
 import { createInternalApiClient } from "../../apps/web/src/internal-api";
@@ -21,9 +16,10 @@ import {
 } from "../../apps/web/src/dashboard-state";
 
 const SELLER_ACCOUNT_ID = "seller-trial";
-const SECRET_COOKIE = "one-talk-cookie-must-not-leave-collector";
+const DEVICE_ID = "chrome-extension-trial";
+const SECRET_COOKIE = "one-talk-cookie-must-not-leave-extension";
 
-test("internal trial flow uploads collector data and exercises the Web customer workflow", async () => {
+test("internal trial flow uploads Chrome extension data and exercises the Web customer workflow", async () => {
   const store = new InMemorySyncStore();
   await store.createInternalUser({
     email: "trial-admin@example.com",
@@ -39,14 +35,17 @@ test("internal trial flow uploads collector data and exercises the Web customer 
     url: "/collector/v1/auth/login",
     payload: {
       email: "trial-admin@example.com",
-      password: "secret"
+      password: "secret",
+      sellerAccountExternalId: SELLER_ACCOUNT_ID,
+      deviceExternalId: DEVICE_ID,
+      deviceName: "Chrome Extension"
     }
   });
   assert.equal(activationResponse.statusCode, 200);
   const activation = activationResponse.json();
-  assert.equal(activation.device.sellerAccountExternalId, "default-seller");
-  assert.match(activation.device.externalDeviceId, /^collector-/);
-  assert.equal(activation.device.deviceName, "TradeBridge Collector");
+  assert.equal(activation.device.sellerAccountExternalId, SELLER_ACCOUNT_ID);
+  assert.equal(activation.device.externalDeviceId, DEVICE_ID);
+  assert.equal(activation.device.deviceName, "Chrome Extension");
   const collectorToken = activation.token;
 
   const loginResponse = await app.inject({
@@ -60,26 +59,41 @@ test("internal trial flow uploads collector data and exercises the Web customer 
   const fetchImpl = fastifyFetch(app);
 
   try {
-    const state = new MemoryCollectorStateStore();
-    const uploadResult = await collectOnce({
-      sellerAccount: { externalAccountId: SELLER_ACCOUNT_ID, displayName: "Trial Seller" },
-      device: { deviceId: "trial-device", deviceName: "Trial Mac" },
-      state,
-      adapter: fixtureCollectorAdapter(),
-      uploadBatch: (batch) => uploadBatchThroughServer(app, batch, collectorToken),
-      collectedAt: "2026-05-25T10:50:00.000Z"
+    const extensionState = new MemoryExtensionStateStore({
+      serverUrl: baseUrl,
+      collectorToken,
+      sellerAccountExternalId: SELLER_ACCOUNT_ID,
+      sellerAccountDisplayName: "Trial Seller",
+      deviceId: DEVICE_ID,
+      deviceName: "Chrome Extension"
+    });
+    const syncResult = await runSyncOnce({
+      stateStore: extensionState,
+      onetalkClient: fixtureOnetalkWebClient(),
+      messageSource: fixtureMessageSource(),
+      uploadSyncBatch: (options) => uploadBatchThroughServer(app, options.batch, collectorToken),
+      now: () => new Date("2026-05-25T10:50:00.000Z")
     });
 
-    assert.equal(uploadResult.acceptedCount, 2);
-    assert.equal(uploadResult.rejectedCount, 0);
-    assert.equal(await state.getCursor(SELLER_ACCOUNT_ID), "2026-05-25T10:50:00.000Z");
+    assert.equal(syncResult.ok, true);
+    assert.equal(syncResult.acceptedCount, 2);
+    assert.equal(syncResult.rejectedCount, 0);
+    assert.equal(extensionState.status.nextCursor, "2026-05-25T10:50:00.000Z");
 
     const client = createInternalApiClient({ baseUrl, token: internalToken, fetchImpl });
     let dashboard = await loadCustomerList(createInitialDashboardState(), client);
 
     assert.equal(dashboard.customers.length, 1);
-    assert.equal(dashboard.selectedCustomerId, "buyer-trial");
+    // The mapper anchors a buyer on the stable contactLoginId, not the rotating
+    // contactAccountId, so the selected customer id is the login id.
+    assert.equal(dashboard.selectedCustomerId, "trial_buyer");
+    assert.equal(dashboard.customers[0].channel, "alibaba-im");
+    assert.equal(dashboard.customers[0].channelAccountExternalId, SELLER_ACCOUNT_ID);
+    assert.equal(dashboard.customers[0].channelSurface, "onetalk-web");
+    assert.equal(dashboard.conversations[0].channel, "alibaba-im");
+    assert.equal(dashboard.conversations[0].channelSurface, "onetalk-web");
     assert.equal(dashboard.messages.length, 2);
+    assert.deepEqual([...new Set(dashboard.messages.map((message) => message.channel))], ["alibaba-im"]);
     assert.deepEqual(
       dashboard.messages.map((message) => [message.externalMessageId, message.direction, message.content]),
       [
@@ -106,20 +120,9 @@ test("internal trial flow uploads collector data and exercises the Web customer 
   }
 });
 
-function fixtureCollectorAdapter() {
+function fixtureOnetalkWebClient() {
   return {
-    detectSession: () => ({
-      cookies: { cookie2: SECRET_COOKIE },
-      cookieNames: ["cookie2"],
-      hasCtoken: false,
-      hasTbToken: false,
-      hasCookie2: true,
-      hasSgcookie: false,
-      logPaths: [],
-      cookieDbPaths: [],
-      tokenCachePaths: []
-    }),
-    fetchConversations: async () => ({
+    fetchWeblite: async () => ({
       html: "<html></html>",
       bootstrap: { aliId: "seller-ali" },
       conversations: [
@@ -133,29 +136,45 @@ function fixtureCollectorAdapter() {
           selfAliId: "seller-ali"
         }
       ]
-    }),
-    fetchMessages: async () => ({
-      status: 200,
-      contentType: "application/json",
-      code: 200,
-      raw: {},
-      messages: [
-        {
-          messageId: "trial-msg-1",
-          senderAliId: "buyer-ali",
-          messageType: "text",
-          content: "Can you confirm delivery?",
-          sendTime: 1779706140000
-        },
-        {
-          messageId: "trial-msg-2",
-          senderAliId: "seller-ali",
-          messageType: "text",
-          content: "Delivery is booked for tomorrow.",
-          sendTime: 1779706200000
-        }
-      ]
     })
+  };
+}
+
+// Messages now reach sync through the passive page-socket message buffer
+// (SyncMessageSource), not by polling getChatMessages. The fixture mirrors that
+// contract: read() returns the buffered messages keyed by conversation cid, and
+// acknowledge() drains exactly what was uploaded.
+function fixtureMessageSource() {
+  const buffered: Record<string, Record<string, unknown>[]> = {
+    "conv-trial": [
+      {
+        messageId: "trial-msg-1",
+        senderAliId: "buyer-ali",
+        messageType: "text",
+        content: "Can you confirm delivery?",
+        sendTime: 1779706140000,
+        cookie2: SECRET_COOKIE
+      },
+      {
+        messageId: "trial-msg-2",
+        senderAliId: "seller-ali",
+        messageType: "text",
+        content: "Delivery is booked for tomorrow.",
+        sendTime: 1779706200000
+      }
+    ]
+  };
+
+  return {
+    read: async () => structuredClone(buffered),
+    acknowledge: async (uploaded: Record<string, Record<string, unknown>[]>) => {
+      for (const [conversationId, uploadedMessages] of Object.entries(uploaded)) {
+        const uploadedIds = new Set(uploadedMessages.map((message) => message.messageId));
+        const remaining = (buffered[conversationId] || []).filter((message) => !uploadedIds.has(message.messageId));
+        if (remaining.length) buffered[conversationId] = remaining;
+        else delete buffered[conversationId];
+      }
+    }
   };
 }
 
@@ -196,48 +215,20 @@ function fastifyFetch(app: FastifyInstance): typeof fetch {
   };
 }
 
-class MemoryCollectorStateStore implements CollectorStateStore {
-  private state: CollectorLocalState = {
-    cursors: {},
-    failedBatches: []
-  };
+class MemoryExtensionStateStore {
+  status: ExtensionStatus = {};
 
-  async read(): Promise<CollectorLocalState> {
-    return this.state;
+  constructor(private readonly config: ExtensionConfig) {}
+
+  async getConfig(): Promise<ExtensionConfig> {
+    return this.config;
   }
 
-  async getCursor(sellerAccountExternalId: string): Promise<string | null> {
-    return this.state.cursors[sellerAccountExternalId] || null;
+  async getStatus(): Promise<ExtensionStatus> {
+    return this.status;
   }
 
-  async saveCursor(sellerAccountExternalId: string, cursor: string): Promise<void> {
-    this.state.cursors[sellerAccountExternalId] = cursor;
-  }
-
-  async recordFailedBatch(batch: SyncBatch, reason: string): Promise<QueuedFailedBatch> {
-    const failed = {
-      id: `failed-${this.state.failedBatches.length + 1}`,
-      batch,
-      reason,
-      createdAt: new Date().toISOString()
-    };
-    this.state.failedBatches.push(failed);
-    return failed;
-  }
-
-  async listFailedBatches(): Promise<QueuedFailedBatch[]> {
-    return this.state.failedBatches;
-  }
-
-  async clearFailedBatch(id: string): Promise<void> {
-    this.state.failedBatches = this.state.failedBatches.filter((batch) => batch.id !== id);
-  }
-
-  async setLastError(error: CollectorLastError): Promise<void> {
-    this.state.lastError = error;
-  }
-
-  async clearLastError(): Promise<void> {
-    delete this.state.lastError;
+  async saveStatus(status: ExtensionStatus): Promise<void> {
+    this.status = status;
   }
 }

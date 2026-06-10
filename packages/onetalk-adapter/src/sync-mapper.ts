@@ -1,59 +1,28 @@
 import {
+  companyNameFromProfile,
   countryFromProfile,
   customerProfileFor,
   displayNameFromProfile,
   loginIdFromProfile,
   lwpCustomerIdentity
 } from "./customer-profile.js";
+import type {
+  ChannelSyncBatch,
+  ChannelSyncContact,
+  ChannelSyncConversation,
+  ChannelSyncDeviceInput,
+  ChannelSyncMessage,
+  ChannelSyncSellerAccountInput
+} from "@wangwang/collector-protocol";
 import type { WebliteData } from "./onetalk-client.js";
 
-export type MessageDirection = "received" | "sent" | "unknown";
-
-export interface BrowserSyncSellerAccountInput {
-  externalAccountId: string;
-  displayName?: string;
-  status?: string;
-}
-
-export interface BrowserSyncDeviceInput {
-  deviceId: string;
-  deviceName?: string;
-}
-
-export interface BrowserSyncCustomerInput {
-  externalCustomerId: string;
-  loginId?: string;
-  displayName?: string;
-  country?: string;
-  ownerUserId?: string;
-  stage?: string;
-}
-
-export interface BrowserSyncConversationInput {
-  externalConversationId: string;
-  externalCustomerId?: string;
-  lastMessageAt?: string;
-}
-
-export interface BrowserSyncMessageInput {
-  externalConversationId: string;
-  externalMessageId?: string;
-  direction: MessageDirection;
-  messageType?: string | number;
-  content?: string;
-  sentAt?: string;
-  rawSanitized?: Record<string, unknown>;
-}
-
-export interface BrowserSyncBatch {
-  sellerAccount: BrowserSyncSellerAccountInput;
-  device: BrowserSyncDeviceInput;
-  cursor?: Record<string, unknown>;
-  sourceMeta?: Record<string, unknown>;
-  customers?: BrowserSyncCustomerInput[];
-  conversations?: BrowserSyncConversationInput[];
-  messages?: BrowserSyncMessageInput[];
-}
+export type MessageDirection = ChannelSyncMessage["direction"];
+export type BrowserSyncSellerAccountInput = ChannelSyncSellerAccountInput;
+export type BrowserSyncDeviceInput = ChannelSyncDeviceInput;
+export type BrowserSyncCustomerInput = ChannelSyncContact;
+export type BrowserSyncConversationInput = ChannelSyncConversation;
+export type BrowserSyncMessageInput = ChannelSyncMessage;
+export type BrowserSyncBatch = ChannelSyncBatch;
 
 export interface MapWebliteToSyncBatchOptions {
   sellerAccount: BrowserSyncSellerAccountInput;
@@ -101,11 +70,21 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
     const externalConversationId =
       firstString(conversation, ["cid", "conversationCode", "conversationId", "id"]) ||
       firstString(lwpConversation, ["cid"]);
+    // loginId is the most stable cross-session identity for a buyer; prefer it
+    // as the dedup anchor so the same person never splits into multiple
+    // customers when unstable ids (encrypted ids, cid-pair guesses) differ.
+    const buyerLoginId = firstString(conversation, [
+      "contact.loginId",
+      "latestMessage.message.contact.loginId",
+      "loginId",
+      "contactLoginId"
+    ]);
     const externalCustomerId =
+      buyerLoginId ||
       lwpIdentity.pairCustomerId ||
-      customerIdFromConversationId(externalConversationId, options.weblite.bootstrap) ||
       lwpIdentity.accountId ||
       firstString(conversation, STABLE_CUSTOMER_ID_PATHS) ||
+      customerIdFromConversationId(externalConversationId, options.weblite.bootstrap) ||
       lwpIdentity.accountIdEncrypt ||
       lwpIdentity.aliIdEncrypt ||
       firstString(conversation, ENCRYPTED_CUSTOMER_ID_FALLBACK_PATHS);
@@ -145,6 +124,21 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
             "latestMessage.message.contact.companyName"
           ]) ||
           displayNameFromProfile(customerProfile),
+        companyName:
+          firstString(conversation, [
+            "contact.companyName",
+            "latestMessage.message.contact.companyName",
+            "companyName",
+            "buyerCompanyName"
+          ]) ||
+          companyNameFromProfile(customerProfile),
+        avatarUrl: firstString(conversation, [
+          "contact.fullPortrait",
+          "latestMessage.message.contact.fullPortrait",
+          "fullPortrait",
+          "avatarUrl",
+          "portraitUrl"
+        ]),
         country:
           firstString(conversation, [
             "contact.country",
@@ -155,7 +149,33 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
             "latestMessage.message.contact.complianceCountryCode",
             "country"
           ]) ||
-          countryFromProfile(customerProfile)
+          countryFromProfile(customerProfile),
+        currentTimeZone: firstString(conversation, [
+          "contact.currentTimeZone",
+          "latestMessage.message.contact.currentTimeZone",
+          "currentTimeZone"
+        ]),
+        accountId: firstString(conversation, [
+          "contact.accountId",
+          "latestMessage.message.contact.accountId",
+          "accountId"
+        ]),
+        accountIdEncrypt: firstString(conversation, [
+          "contact.accountIdEncrypt",
+          "latestMessage.message.contact.accountIdEncrypt",
+          "accountIdEncrypt"
+        ]),
+        aliId: firstString(conversation, ["contact.aliId", "latestMessage.message.contact.aliId", "aliId"]),
+        aliIdEncrypt: firstString(conversation, [
+          "contact.aliIdEncrypt",
+          "latestMessage.message.contact.aliIdEncrypt",
+          "aliIdEncrypt"
+        ]),
+        loginIdEncrypt: firstString(conversation, [
+          "contact.loginIdEncrypt",
+          "latestMessage.message.contact.loginIdEncrypt",
+          "loginIdEncrypt"
+        ])
       })
     );
 
@@ -176,11 +196,19 @@ export function mapWebliteToSyncBatch(options: MapWebliteToSyncBatchOptions): Br
   }
 
   return compact({
+    channel: "alibaba-im",
+    channelAccount: compact({
+      channel: "alibaba-im",
+      externalAccountId: options.sellerAccount.externalAccountId,
+      displayName: options.sellerAccount.displayName,
+      surface: "onetalk-web"
+    }),
     sellerAccount: options.sellerAccount,
     device: options.device,
     cursor: options.previousCursor ? { previousCursor: options.previousCursor } : undefined,
     sourceMeta: {
       source: options.source,
+      surface: "onetalk-web",
       collectedAt: options.collectedAt,
       sourceBatchKey: `${options.sellerAccount.externalAccountId}:${options.device.deviceId}:${options.collectedAt}`
     },
@@ -318,7 +346,10 @@ function lwpCustomerId(lwpConversation: Record<string, unknown>, bootstrap: Reco
   const self = bootstrap.aliId;
   if (self && pairFirst === self) return pairSecond;
   if (self && pairSecond === self) return pairFirst;
-  return pairSecond || pairFirst;
+  // Without the seller's own aliId we cannot tell which side of the pair is the
+  // buyer; guessing flips per conversation and splits one buyer into several
+  // customers. Defer to stable ids (loginId/accountId) instead.
+  return undefined;
 }
 
 function customerIdFromConversationId(
@@ -331,7 +362,9 @@ function customerIdFromConversationId(
   const self = bootstrap.aliId;
   if (self && left === self) return right;
   if (self && right === self) return left;
-  return left;
+  // Without the seller's own id, "left" is not reliably the buyer (the seller
+  // can be on either side depending on the conversation), so do not guess.
+  return undefined;
 }
 
 function conversationIdPair(externalConversationId: string | undefined): [string, string] | null {

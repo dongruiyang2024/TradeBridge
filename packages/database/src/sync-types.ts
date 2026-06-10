@@ -11,17 +11,38 @@ export interface SyncDeviceInput {
   deviceName?: string;
 }
 
+export interface SyncChannelAccountInput {
+  channel: string;
+  externalAccountId: string;
+  displayName?: string;
+  surface?: string;
+}
+
 export interface SyncCustomerInput {
   externalCustomerId: string;
+  channel?: string;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
   loginId?: string;
+  loginIdEncrypt?: string;
   displayName?: string;
+  companyName?: string;
+  avatarUrl?: string;
   country?: string;
+  currentTimeZone?: string;
+  accountId?: string;
+  accountIdEncrypt?: string;
+  aliId?: string;
+  aliIdEncrypt?: string;
   ownerUserId?: string;
   stage?: string;
 }
 
 export interface SyncConversationInput {
   externalConversationId: string;
+  channel?: string;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
   externalCustomerId?: string;
   lastMessageAt?: string;
 }
@@ -29,6 +50,9 @@ export interface SyncConversationInput {
 export interface SyncMessageInput {
   externalConversationId: string;
   externalMessageId?: string;
+  channel?: string;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
   direction: MessageDirection;
   messageType?: string | number;
   content?: string;
@@ -37,6 +61,8 @@ export interface SyncMessageInput {
 }
 
 export interface SyncBatch {
+  channel?: string;
+  channelAccount?: SyncChannelAccountInput;
   sellerAccount: SyncSellerAccountInput;
   device: SyncDeviceInput;
   cursor?: Record<string, unknown>;
@@ -223,6 +249,9 @@ export interface MarkOutboundMessageDeliveredInput {
 
 export interface StoredOutboundMessage extends ConversationCustomerScope {
   id: string;
+  channel?: string;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
   content: string;
   status: OutboundMessageStatus;
   createdByUserId?: string;
@@ -334,6 +363,7 @@ export interface CollectorDevice {
   id: string;
   externalDeviceId?: string;
   sellerAccountExternalId?: string;
+  tradeMindBindingToken?: string;
   deviceName?: string;
   activatedByUserId?: string;
   activatedByUserEmail?: string;
@@ -352,6 +382,7 @@ export interface RegisteredCollectorDevice extends CollectorDevice {
 
 export interface RegisterCollectorDeviceInput {
   sellerAccountExternalId?: string;
+  tradeMindBindingToken?: string;
   externalDeviceId?: string;
   deviceName?: string;
   activatedByUserId?: string;

@@ -42,7 +42,15 @@ test("mapWebliteToSyncBatch maps conversations and messages into collector batch
   });
 
   assert.equal(Object.hasOwn(batch, ["org", "Id"].join("")), false);
+  assert.equal(batch.channel, "alibaba-im");
+  assert.deepEqual(batch.channelAccount, {
+    channel: "alibaba-im",
+    externalAccountId: "seller-demo",
+    displayName: "Seller Demo",
+    surface: "onetalk-web"
+  });
   assert.equal(batch.sourceMeta?.source, "chrome-extension");
+  assert.equal(batch.sourceMeta?.surface, "onetalk-web");
   assert.equal(batch.sourceMeta?.sourceBatchKey, "seller-demo:chrome-extension-demo:2026-05-26T08:10:00.000Z");
   assert.deepEqual(batch.customers, [
     {
@@ -259,8 +267,12 @@ test("mapWebliteToSyncBatch maps SDK conversation customer fields without DOM sn
             name: "Contact Natural Name",
             companyName: "Contact Co.",
             loginId: "contact-login",
+            loginIdEncrypt: "buyer-login-encrypted",
             accountIdEncrypt: "buyer-account-encrypted",
-            complianceCountryCode: "US"
+            aliIdEncrypt: "buyer-ali-encrypted",
+            fullPortrait: "https://img.example/contact.png",
+            complianceCountryCode: "US",
+            currentTimeZone: "Asia/Shanghai"
           }
         }
       ]
@@ -272,24 +284,30 @@ test("mapWebliteToSyncBatch maps SDK conversation customer fields without DOM sn
 
   assert.deepEqual(batch.customers, [
     {
-      externalCustomerId: "buyer-account-encrypted",
+      externalCustomerId: "contact-login",
       loginId: "contact-login",
       displayName: "Contact Natural Name",
-      country: "US"
+      country: "US",
+      companyName: "Contact Co.",
+      avatarUrl: "https://img.example/contact.png",
+      currentTimeZone: "Asia/Shanghai",
+      accountIdEncrypt: "buyer-account-encrypted",
+      aliIdEncrypt: "buyer-ali-encrypted",
+      loginIdEncrypt: "buyer-login-encrypted"
     }
   ]);
   assert.deepEqual(batch.conversations, [
     {
       externalConversationId: "conv-sdk-1",
-      externalCustomerId: "buyer-account-encrypted",
+      externalCustomerId: "contact-login",
       lastMessageAt: "2026-05-27T09:20:00.000Z"
     }
   ]);
 });
 
-test("mapWebliteToSyncBatch prefers stable cid counterpart over rotating encrypted contact id", () => {
-  const buyerStableId = "2500000676595";
+test("mapWebliteToSyncBatch uses stable loginId as the customer anchor across rotating encrypted ids", () => {
   const sellerStableId = "2500001744639";
+  const buyerStableId = "2500000676595";
   const first = mapWebliteToSyncBatch({
     sellerAccount: { externalAccountId: "seller-demo" },
     device: { deviceId: "chrome-extension-demo" },
@@ -335,8 +353,42 @@ test("mapWebliteToSyncBatch prefers stable cid counterpart over rotating encrypt
     messagesByConversationId: {}
   });
 
-  assert.equal(first.customers?.[0].externalCustomerId, buyerStableId);
-  assert.equal(second.customers?.[0].externalCustomerId, buyerStableId);
-  assert.equal(first.conversations?.[0].externalCustomerId, buyerStableId);
-  assert.equal(second.conversations?.[0].externalCustomerId, buyerStableId);
+  assert.equal(first.customers?.[0].externalCustomerId, "contact-login");
+  assert.equal(second.customers?.[0].externalCustomerId, "contact-login");
+  assert.equal(first.conversations?.[0].externalCustomerId, "contact-login");
+  assert.equal(second.conversations?.[0].externalCustomerId, "contact-login");
+});
+
+test("mapWebliteToSyncBatch does not split one buyer across conversations when bootstrap.aliId is missing", () => {
+  // Regression: with the page-SDK source, bootstrap.aliId is empty. The cid
+  // pair places the seller on either side, so the old cid-guess produced a
+  // different externalCustomerId per conversation, splitting one buyer into
+  // several customers. loginId is the same across both, so they must collapse.
+  const batch = mapWebliteToSyncBatch({
+    sellerAccount: { externalAccountId: "seller-demo" },
+    device: { deviceId: "chrome-extension-demo" },
+    collectedAt: "2026-05-27T09:20:00.000Z",
+    source: "chrome-extension",
+    previousCursor: null,
+    weblite: {
+      html: "",
+      bootstrap: {},
+      conversations: [
+        {
+          cid: "2208575300890-2500001744639#11011@icbu",
+          contact: { name: "Mark Liu", loginId: "cn1533540714pmvw" }
+        },
+        {
+          cid: "2500001744639-2208575300890#22022@icbu",
+          contact: { name: "Mark Liu", loginId: "cn1533540714pmvw" }
+        }
+      ]
+    },
+    messagesByConversationId: {}
+  });
+
+  assert.equal(batch.customers?.length, 1, "one buyer, one customer");
+  assert.equal(batch.customers?.[0].externalCustomerId, "cn1533540714pmvw");
+  assert.equal(batch.conversations?.length, 2, "both conversations retained");
+  assert.ok(batch.conversations?.every((c) => c.externalCustomerId === "cn1533540714pmvw"));
 });

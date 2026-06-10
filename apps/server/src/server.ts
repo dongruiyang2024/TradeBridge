@@ -74,6 +74,21 @@ export interface CreateServerOptions {
   aiProvider?: AiProvider;
   aiJobQueue?: AiJobQueue;
   logger?: boolean;
+  tradeMindForwarder?: TradeMindForwarderOptions;
+  /**
+   * Extra Web workbench origins allowed to call the internal API, e.g.
+   * `https://workbench.example.com`. Local dev origins and Chrome extension
+   * origins are always allowed regardless of this list.
+   */
+  allowedWebOrigins?: string[];
+}
+
+export interface TradeMindForwarderOptions {
+  ingestUrl: string;
+  ingestSecret: string;
+  fetch?: typeof fetch;
+  now?: () => Date;
+  nonce?: () => string;
 }
 
 export interface CreateServerFromEnvOptions {
@@ -128,6 +143,8 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   const store = options.store || new InMemorySyncStore();
   const aiProvider = options.aiProvider || createDeterministicAiProvider();
   const aiJobQueue = options.aiJobQueue || createSyncAiJobQueue();
+  const allowedWebOrigins = normalizeAllowedWebOrigins(options.allowedWebOrigins);
+  const tradeMindForwarder = normalizeTradeMindForwarder(options.tradeMindForwarder);
   const realtimeHub = createCollectorRealtimeHub();
   const internalAccessRoles: InternalRole[] = ["admin", "supervisor", "sales"];
   const adminRoles: InternalRole[] = ["admin"];
@@ -143,7 +160,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   await registerCollectorWsRoutes(app, { store, hub: realtimeHub });
 
   app.addHook("onRequest", async (request, reply) => {
-    applyCorsHeaders(request, reply);
+    applyCorsHeaders(request, reply, allowedWebOrigins);
     if (request.method === "OPTIONS") {
       return reply.code(204).send();
     }
@@ -178,6 +195,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
 
     const registered = await store.registerCollectorDevice({
       sellerAccountExternalId,
+      tradeMindBindingToken: bodyStringField(request.body, "tradeMindBindingToken") || undefined,
       externalDeviceId: deviceExternalId,
       deviceName,
       activatedByUserId: credentials.id,
@@ -228,11 +246,27 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       return reply.code(400).send({ ok: false, error: "invalid_sync_batch" });
     }
 
-    const result = await store.acceptSyncBatch(collectorScopedBatch(batch, collectorDevice));
-    return {
-      ok: true,
-      ...result
-    };
+    const scopedBatch = collectorScopedBatch(batch, collectorDevice);
+    let result: SyncBatchResult;
+    try {
+      result = await store.acceptSyncBatch(scopedBatch);
+    } catch (error) {
+      // Surface the store failure instead of a bare 500 so the collector and
+      // logs can tell what went wrong (e.g. a schema/constraint mismatch).
+      request.log.error({ err: error }, "sync_batch_persist_failed");
+      return reply.code(502).send({ ok: false, error: "sync_batch_persist_failed" });
+    }
+
+    try {
+      await forwardSyncBatchToTradeMind(scopedBatch, collectorDevice, tradeMindForwarder);
+      return {
+        ok: true,
+        ...result
+      };
+    } catch (error) {
+      request.log.error({ err: error }, "trademind_forward_failed");
+      return reply.code(502).send({ ok: false, error: "trademind_forward_failed" });
+    }
   });
 
   app.get("/collector/v1/outbound-messages", async (request, reply) => {
@@ -505,6 +539,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
 
     const registered = await store.registerCollectorDevice({
       sellerAccountExternalId: bodyStringField(request.body, "sellerAccountExternalId") || undefined,
+      tradeMindBindingToken: bodyStringField(request.body, "tradeMindBindingToken") || undefined,
       externalDeviceId: bodyStringField(request.body, "deviceExternalId") || undefined,
       deviceName: bodyStringField(request.body, "deviceName") || undefined
     });
@@ -993,8 +1028,22 @@ export async function createServerFromEnv(options: CreateServerFromEnvOptions = 
   return createServer({
     store,
     aiJobQueue,
-    logger: options.logger
+    logger: options.logger,
+    allowedWebOrigins: parseEnvWebOrigins(env),
+    tradeMindForwarder: createTradeMindForwarderFromEnv(env)
   });
+}
+
+function createTradeMindForwarderFromEnv(env: Record<string, string | undefined>): TradeMindForwarderOptions | undefined {
+  const ingestUrl = env.TRADEMIND_INGEST_URL?.trim();
+  const ingestSecret = env.TRADEMIND_INGEST_SECRET?.trim();
+  if (!ingestUrl || !ingestSecret) return undefined;
+  return { ingestSecret, ingestUrl };
+}
+
+function parseEnvWebOrigins(env: Record<string, string | undefined>): string[] {
+  const raw = env.WANGWANG_WEB_ORIGINS || env.WANGWANG_ALLOWED_WEB_ORIGINS;
+  return raw ? [raw] : [];
 }
 
 async function createAiJobQueueFromEnv(env: Record<string, string | undefined>): Promise<AiJobQueue | undefined> {
@@ -1043,9 +1092,78 @@ function collectorSellerAccountExternalId(device: CollectorDevice): string {
   return device.sellerAccountExternalId || DEFAULT_SELLER_ACCOUNT_EXTERNAL_ID;
 }
 
-function applyCorsHeaders(request: FastifyRequest, reply: FastifyReply): void {
+interface NormalizedTradeMindForwarder {
+  ingestUrl: string;
+  ingestSecret: string;
+  fetch: typeof fetch;
+  now: () => Date;
+  nonce: () => string;
+}
+
+function normalizeTradeMindForwarder(options?: TradeMindForwarderOptions): NormalizedTradeMindForwarder | undefined {
+  const ingestUrl = options?.ingestUrl.trim();
+  const ingestSecret = options?.ingestSecret.trim();
+  const fetchImpl = options?.fetch || fetch;
+  const now = options?.now || (() => new Date());
+  const nonce = options?.nonce || (() => crypto.randomBytes(16).toString("hex"));
+  if (!ingestUrl || !ingestSecret) return undefined;
+  return {
+    ingestUrl,
+    ingestSecret,
+    fetch: fetchImpl,
+    now,
+    nonce
+  };
+}
+
+async function forwardSyncBatchToTradeMind(
+  batch: SyncBatch,
+  device: CollectorDevice,
+  forwarder: NormalizedTradeMindForwarder | undefined
+): Promise<void> {
+  if (!forwarder || !device.tradeMindBindingToken) return;
+
+  const body = {
+    ...batch,
+    bindingToken: device.tradeMindBindingToken,
+    sourceBatchId: createTradeMindSourceBatchId(batch)
+  };
+  const rawBody = JSON.stringify(body);
+  const timestamp = Math.floor(forwarder.now().getTime() / 1000).toString();
+  const nonce = forwarder.nonce();
+  const signature = crypto
+    .createHmac("sha256", forwarder.ingestSecret)
+    .update(`${timestamp}.${nonce}.${rawBody}`)
+    .digest("hex");
+  const response = await forwarder.fetch(forwarder.ingestUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-trademind-ingest-secret": forwarder.ingestSecret,
+      "x-trademind-timestamp": timestamp,
+      "x-trademind-nonce": nonce,
+      "x-trademind-signature": signature
+    },
+    body: rawBody
+  });
+  if (!response.ok) {
+    throw new Error(`trademind_forward_failed_${response.status}`);
+  }
+}
+
+function createTradeMindSourceBatchId(batch: SyncBatch): string {
+  const sourceBatchKey = typeof batch.sourceMeta?.sourceBatchKey === "string" ? batch.sourceMeta.sourceBatchKey : "";
+  const digest = crypto
+    .createHash("sha256")
+    .update(`${sourceBatchKey}\n${JSON.stringify(batch)}`)
+    .digest("hex")
+    .slice(0, 48);
+  return `tb_${digest}`;
+}
+
+function applyCorsHeaders(request: FastifyRequest, reply: FastifyReply, allowedWebOrigins: Set<string>): void {
   const origin = requestOrigin(request);
-  if (!origin || !isAllowedCorsOrigin(origin)) return;
+  if (!origin || !isAllowedCorsOrigin(origin, allowedWebOrigins)) return;
 
   reply.header("Access-Control-Allow-Origin", origin);
   reply.header("Vary", "Origin");
@@ -1059,11 +1177,33 @@ function requestOrigin(request: FastifyRequest): string | null {
   return typeof origin === "string" && origin.trim() ? origin.trim() : null;
 }
 
-function isAllowedCorsOrigin(origin: string): boolean {
+function isAllowedCorsOrigin(origin: string, allowedWebOrigins: Set<string>): boolean {
   return (
     /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin) ||
-    /^chrome-extension:\/\/[a-p]{32}$/.test(origin)
+    /^chrome-extension:\/\/[a-p]{32}$/.test(origin) ||
+    allowedWebOrigins.has(origin)
   );
+}
+
+/**
+ * Parse a comma/whitespace separated list of production Web origins into a
+ * normalized Set. Each entry is reduced to its scheme://host[:port] form so a
+ * trailing slash or path in configuration still matches browser Origin headers.
+ */
+function normalizeAllowedWebOrigins(origins: string[] | undefined): Set<string> {
+  const normalized = new Set<string>();
+  for (const raw of origins || []) {
+    for (const part of raw.split(/[\s,]+/)) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      try {
+        normalized.add(new URL(trimmed).origin);
+      } catch {
+        // Ignore malformed origins so one bad config entry can't break startup.
+      }
+    }
+  }
+  return normalized;
 }
 
 function allowedCorsHeaders(request: FastifyRequest): string {

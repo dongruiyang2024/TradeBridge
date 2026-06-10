@@ -35,7 +35,7 @@ test("realtime orchestrator claims outbound messages and reports delivery", asyn
 
   const claim = parseCollectorWsMessage(sent[0]);
   assert.equal(claim.type, "outbound.claim");
-  assert.equal(claim.payload.limit, 10);
+  assert.equal(claim.payload.limit, 4);
 
   await orchestrator.handleMessage(
     buildCollectorWsMessage({

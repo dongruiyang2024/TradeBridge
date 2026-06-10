@@ -90,6 +90,11 @@ export function displayNameFromProfile(profile: Record<string, unknown>): string
   );
 }
 
+export function companyNameFromProfile(profile: Record<string, unknown>): string | undefined {
+  const buyerInfo = buyerInfoFromProfile(profile);
+  return firstString(profile, ["companyName", "data.object.companyName"]) || firstString(buyerInfo, ["companyName"]);
+}
+
 export function loginIdFromProfile(profile: Record<string, unknown>): string | undefined {
   const buyerInfo = buyerInfoFromProfile(profile);
   return (

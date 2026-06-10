@@ -1,6 +1,6 @@
 import { getChrome } from "../shared/chrome-api.js";
 import { createPopupViewModel } from "./popup-view.js";
-import type { ExtensionDashboardResponse, SyncNowResponse } from "../shared/extension-messages.js";
+import type { ExtensionDashboardResponse } from "../shared/extension-messages.js";
 
 const chromeApi = getChrome();
 const account = document.querySelector<HTMLParagraphElement>("#account");
@@ -8,22 +8,14 @@ const accountValidation = document.querySelector<HTMLParagraphElement>("#account
 const headline = document.querySelector<HTMLSpanElement>("#headline");
 const realtime = document.querySelector<HTMLParagraphElement>("#realtime");
 const sync = document.querySelector<HTMLParagraphElement>("#sync");
+const capture = document.querySelector<HTMLParagraphElement>("#capture");
+const history = document.querySelector<HTMLParagraphElement>("#history");
 const error = document.querySelector<HTMLParagraphElement>("#error");
+const reconnectButton = document.querySelector<HTMLButtonElement>("#reconnect");
 
 void renderStatus();
 
-document.querySelector<HTMLButtonElement>("#sync-now")?.addEventListener("click", async () => {
-  sync?.replaceChildren("最近同步：同步中...");
-  const result = (await chromeApi.runtime.sendMessage({ type: "sync-now" })) as SyncNowResponse;
-  if (result.ok) {
-    sync?.replaceChildren(`最近同步：已同步 ${result.acceptedCount || 0} 条消息`);
-    await renderStatus();
-  } else {
-    error?.replaceChildren(`最近错误：${result.error || "sync_failed"}`);
-  }
-});
-
-document.querySelector<HTMLButtonElement>("#reconnect")?.addEventListener("click", async () => {
+reconnectButton?.addEventListener("click", async () => {
   realtime?.replaceChildren("实时连接：重新连接中...");
   const result = (await chromeApi.runtime.sendMessage({ type: "realtime-reconnect" })) as {
     ok: boolean;
@@ -48,6 +40,11 @@ async function renderStatus(): Promise<void> {
   headline?.replaceChildren(view.headlineLabel);
   realtime?.replaceChildren(view.realtimeLabel);
   sync?.replaceChildren(view.syncLabel);
+  capture?.replaceChildren(view.captureLabel);
+  history?.replaceChildren(view.historyLabel);
   error?.replaceChildren(view.errorLabel);
-  document.querySelector<HTMLButtonElement>("#reconnect")?.replaceChildren(view.reconnectActionLabel);
+  if (reconnectButton) {
+    reconnectButton.hidden = view.reconnectActionHidden;
+    reconnectButton.replaceChildren(view.reconnectActionLabel);
+  }
 }

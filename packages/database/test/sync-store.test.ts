@@ -9,7 +9,22 @@ test("acceptSyncBatch stores seller account, customer, conversation, and message
     device: { deviceId: "device-1", deviceName: "MacBook" },
     cursor: { since: "2026-05-01T00:00:00.000Z" },
     sourceMeta: { collectedAt: "2026-05-25T10:00:00.000Z", collectorVersion: "0.1.0" },
-    customers: [{ externalCustomerId: "customer-1", loginId: "buyer", displayName: "Buyer", country: "US" }],
+    customers: [
+      {
+        externalCustomerId: "customer-1",
+        loginId: "buyer",
+        displayName: "Buyer",
+        companyName: "Buyer Company LLC",
+        avatarUrl: "https://img.example/buyer.png",
+        country: "US",
+        currentTimeZone: "America/Los_Angeles",
+        accountId: "buyer-account",
+        accountIdEncrypt: "buyer-account-encrypted",
+        aliId: "buyer-ali",
+        aliIdEncrypt: "buyer-ali-encrypted",
+        loginIdEncrypt: "buyer-login-encrypted"
+      }
+    ],
     conversations: [
       {
         externalConversationId: "conv-1",
@@ -34,6 +49,21 @@ test("acceptSyncBatch stores seller account, customer, conversation, and message
   assert.equal(result.nextCursor, "2026-05-25T09:00:00.000Z");
   assert.equal(store.listSellerAccounts().length, 1);
   assert.equal(store.listCustomers().length, 1);
+  assert.deepEqual(store.listCustomers()[0], {
+    sellerAccountExternalId: "seller-1",
+    externalCustomerId: "customer-1",
+    loginId: "buyer",
+    displayName: "Buyer",
+    companyName: "Buyer Company LLC",
+    avatarUrl: "https://img.example/buyer.png",
+    country: "US",
+    currentTimeZone: "America/Los_Angeles",
+    accountId: "buyer-account",
+    accountIdEncrypt: "buyer-account-encrypted",
+    aliId: "buyer-ali",
+    aliIdEncrypt: "buyer-ali-encrypted",
+    loginIdEncrypt: "buyer-login-encrypted"
+  });
   assert.equal(store.listConversations().length, 1);
   assert.equal(store.listMessages().length, 1);
 });
@@ -72,6 +102,46 @@ test("acceptSyncBatch is idempotent by external message id", async () => {
   assert.equal(store.listMessages().length, 1);
 });
 
+test("acceptSyncBatch keeps identical external ids isolated by channel", async () => {
+  const store = new InMemorySyncStore();
+
+  const first = await store.acceptSyncBatch(channelBatch("alibaba-im", "seller-alibaba", "hello from alibaba"));
+  const second = await store.acceptSyncBatch(channelBatch("mock-web", "seller-web", "hello from web chat"));
+
+  assert.equal(first.acceptedCount, 1);
+  assert.equal(second.acceptedCount, 1);
+  assert.deepEqual(
+    store.listCustomers().map((customer) => [customer.channel, customer.channelAccountExternalId, customer.externalCustomerId]),
+    [
+      ["alibaba-im", "seller-alibaba", "customer-same"],
+      ["mock-web", "seller-web", "customer-same"]
+    ]
+  );
+  assert.deepEqual(
+    store.listConversations().map((conversation) => [
+      conversation.channel,
+      conversation.channelAccountExternalId,
+      conversation.externalConversationId
+    ]),
+    [
+      ["alibaba-im", "seller-alibaba", "conv-same"],
+      ["mock-web", "seller-web", "conv-same"]
+    ]
+  );
+  assert.deepEqual(
+    store.listMessages().map((message) => [
+      message.channel,
+      message.channelAccountExternalId,
+      message.externalMessageId,
+      message.content
+    ]),
+    [
+      ["alibaba-im", "seller-alibaba", "msg-same", "hello from alibaba"],
+      ["mock-web", "seller-web", "msg-same", "hello from web chat"]
+    ]
+  );
+});
+
 test("acceptSyncBatch deduplicates messages without upstream ids by content hash", async () => {
   const store = new InMemorySyncStore();
   await store.acceptSyncBatch({
@@ -97,6 +167,31 @@ test("acceptSyncBatch deduplicates messages without upstream ids by content hash
   assert.equal(store.listMessages().length, 1);
   assert.equal(store.listMessages()[0].contentHash.length, 64);
 });
+
+function channelBatch(channel: string, channelAccountExternalId: string, content: string) {
+  return {
+    channel,
+    channelAccount: {
+      channel,
+      externalAccountId: channelAccountExternalId,
+      displayName: channelAccountExternalId,
+      surface: channel === "alibaba-im" ? "onetalk-web" : "mock-web"
+    },
+    sellerAccount: { externalAccountId: "seller-1" },
+    device: { deviceId: `device-${channel}` },
+    customers: [{ externalCustomerId: "customer-same", displayName: `Buyer ${channel}` }],
+    conversations: [{ externalConversationId: "conv-same", externalCustomerId: "customer-same" }],
+    messages: [
+      {
+        externalConversationId: "conv-same",
+        externalMessageId: "msg-same",
+        direction: "received" as const,
+        content,
+        sentAt: "2026-05-25T09:00:00.000Z"
+      }
+    ]
+  };
+}
 
 test("acceptSyncBatch rejects messages for unknown conversations", async () => {
   const store = new InMemorySyncStore();

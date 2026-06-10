@@ -192,6 +192,30 @@ test("POST /collector/v1/auth/login activates a collector device for admin users
   assert.equal(auditLogs.some((log) => log.action === "collector_device.activated"), true);
 });
 
+test("POST /collector/v1/auth/login stores Trade-Mind binding tokens without exposing them publicly", async () => {
+  const { app, store } = await createAuthApp();
+  const response = await app.inject({
+    method: "POST",
+    url: "/collector/v1/auth/login",
+    payload: {
+      email: "admin@example.com",
+      password: "secret",
+      sellerAccountExternalId: "self-ali-1",
+      tradeMindBindingToken: "tm-binding-token",
+      deviceExternalId: "chrome-extension-1",
+      deviceName: "Chrome Extension"
+    }
+  });
+
+  assert.equal(response.statusCode, 200);
+  const body = response.json();
+  assert.equal(body.device.sellerAccountExternalId, "self-ali-1");
+  assert.equal("tradeMindBindingToken" in body.device, false);
+
+  const devices = await store.listCollectorDevices();
+  assert.equal(devices[0].tradeMindBindingToken, "tm-binding-token");
+});
+
 test("GET /collector/v1/me resolves the TradeBridge account bound to a collector token", async () => {
   const { app } = await createAuthApp();
   const loginResponse = await app.inject({

@@ -1,8 +1,24 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 import { runOutboundDelivery, sendOutboundMessagesViaOneTalk } from "../src/background/outbound-orchestrator.js";
+import { OutboundPacer } from "../src/background/outbound-pacer.js";
 import type { ChromeApi } from "../src/shared/chrome-api.js";
 import type { ExtensionConfig, ExtensionStatus, OutboundMessage } from "../src/shared/sync-types.js";
+
+// A pacer with no delays and generous caps, so delivery tests assert routing
+// and reporting without waiting on real timers. Pacing itself is covered in
+// outbound-pacer.test.ts.
+function instantPacer() {
+  return new OutboundPacer({
+    minDelayMs: 0,
+    maxDelayMs: 0,
+    maxPerMinute: 1000,
+    maxPerHour: 1000,
+    sleep: async () => undefined
+  });
+}
 
 class MemoryStateStore {
   config: ExtensionConfig | null = {
@@ -34,6 +50,7 @@ test("runOutboundDelivery sends queued messages through an open OneTalk tab and 
   const result = await runOutboundDelivery({
     stateStore: store,
     chromeApi: fakeChromeApi(sentToTab, { ok: true, externalMessageId: "onetalk-msg-1" }),
+    pacer: instantPacer(),
     listOutboundMessages: async () => [outboundMessage()],
     markOutboundMessageDelivered: async (options) => {
       delivered.push(options);
@@ -56,6 +73,7 @@ test("runOutboundDelivery marks queued messages failed when no OneTalk tab is op
   const result = await runOutboundDelivery({
     stateStore: store,
     chromeApi: fakeChromeApi([], { ok: false }, []),
+    pacer: instantPacer(),
     listOutboundMessages: async () => [outboundMessage()],
     markOutboundMessageDelivered: async (options) => {
       delivered.push(options);
@@ -76,6 +94,7 @@ test("runOutboundDelivery marks sent when OneTalk page reports success without e
   const result = await runOutboundDelivery({
     stateStore: store,
     chromeApi: fakeChromeApi([], { ok: true }),
+    pacer: instantPacer(),
     listOutboundMessages: async () => [outboundMessage()],
     markOutboundMessageDelivered: async (options) => {
       delivered.push(options);
@@ -94,7 +113,8 @@ test("sendOutboundMessagesViaOneTalk sends provided messages and returns deliver
 
   const reports = await sendOutboundMessagesViaOneTalk({
     chromeApi: fakeChromeApi(sentToTab, { ok: true, externalMessageId: "onetalk-msg-1" }),
-    messages: [outboundMessage()]
+    messages: [outboundMessage()],
+    pacer: instantPacer()
   });
 
   assert.deepEqual(reports, [
@@ -105,6 +125,41 @@ test("sendOutboundMessagesViaOneTalk sends provided messages and returns deliver
     }
   ]);
   assert.deepEqual(sentToTab, [{ type: "send-onetalk-message", message: outboundMessage() }]);
+});
+
+test("sendOutboundMessagesViaOneTalk stops at the pacer rate cap, leaving the rest unreported for retry", async () => {
+  const sentToTab: unknown[] = [];
+  const pacer = new OutboundPacer({
+    minDelayMs: 0,
+    maxDelayMs: 0,
+    maxPerMinute: 2,
+    maxPerHour: 1000,
+    sleep: async () => undefined
+  });
+  const messages = [
+    { ...outboundMessage(), id: "outbound-1" },
+    { ...outboundMessage(), id: "outbound-2" },
+    { ...outboundMessage(), id: "outbound-3" }
+  ];
+
+  const reports = await sendOutboundMessagesViaOneTalk({
+    chromeApi: fakeChromeApi(sentToTab, { ok: true, externalMessageId: "x" }),
+    messages,
+    pacer
+  });
+
+  // Only the first two pass the per-minute cap; the third is deferred (no
+  // report), so it stays queued and retries next cycle.
+  assert.deepEqual(reports.map((report) => report.outboundMessageId), ["outbound-1", "outbound-2"]);
+  assert.equal(sentToTab.length, 2);
+});
+
+test("outbound send payload carries no third-party marker", () => {
+  // The send payload is built in onetalk-page-script sendTextMessage. Guard
+  // against reintroducing an ext/source marker that would travel upstream.
+  const source = fs.readFileSync(path.resolve("src/channels/alibaba-im/onetalk-page-script.ts"), "utf8");
+  assert.equal(source.includes('source: "tradebridge"'), false);
+  assert.equal(/ext:\s*\{/.test(source), false);
 });
 
 function fakeChromeApi(sentToTab: unknown[], response: unknown, tabs = [{ id: 9 }]): ChromeApi {

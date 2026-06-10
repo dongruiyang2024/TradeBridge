@@ -4,13 +4,15 @@
   "version": "0.1.0",
   "description": "Sync authorized OneTalk conversations to TradeBridge without uploading OneTalk credentials.",
   "minimum_chrome_version": "116",
-  "permissions": ["storage", "alarms", "cookies", "scripting"],
-  "host_permissions": [
-    "https://onetalk.alibaba.com/*",
-    "https://*.alibaba.com/*",
-    "http://127.0.0.1:5032/*",
-    "ws://127.0.0.1:5032/*"
-  ],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "permissions": ["storage", "alarms", "scripting"],
+  "host_permissions": ["https://onetalk.alibaba.com/*"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
   "background": {
     "service_worker": "background/index.js",
     "type": "module"
@@ -18,17 +20,22 @@
   "content_scripts": [
     {
       "matches": ["https://onetalk.alibaba.com/*"],
-      "js": ["content/onetalk-page-bridge.js"],
+      "js": ["channels/alibaba-im/onetalk-page-bridge.js"],
       "run_at": "document_start"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["content/onetalk-page-script.js"],
+      "resources": ["channels/alibaba-im/onetalk-page-script.js"],
       "matches": ["https://onetalk.alibaba.com/*"]
     }
   ],
   "action": {
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    },
     "default_popup": "popup/popup.html"
   },
   "options_page": "options/options.html"

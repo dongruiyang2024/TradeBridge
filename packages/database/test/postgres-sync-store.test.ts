@@ -15,6 +15,9 @@ class FakePostgresClient implements SqlClient {
     if (/upsert_collector_device/i.test(sql)) {
       return { rows: [{ id: "device-db-id" }] as T[], rowCount: 1 };
     }
+    if (/upsert_channel_account/i.test(sql)) {
+      return { rows: [{ id: "channel-account-db-id" }] as T[], rowCount: 1 };
+    }
     if (/upsert_customer/i.test(sql)) {
       return { rows: [{ id: "customer-db-id" }] as T[], rowCount: 1 };
     }
@@ -34,7 +37,15 @@ class FakePostgresClient implements SqlClient {
             externalCustomerId: "customer-1",
             loginId: "buyer_login",
             displayName: "Buyer One",
+            companyName: "Buyer Company LLC",
+            avatarUrl: "https://img.example/buyer.png",
             country: "US",
+            currentTimeZone: "America/Los_Angeles",
+            accountId: "buyer-account",
+            accountIdEncrypt: "buyer-account-encrypted",
+            aliId: "buyer-ali",
+            aliIdEncrypt: "buyer-ali-encrypted",
+            loginIdEncrypt: "buyer-login-encrypted",
             ownerUserId: "user-1",
             stage: "qualified"
           }
@@ -682,6 +693,98 @@ test("PostgresSyncStore upserts entities and inserts messages with idempotent co
   assert.equal(client.queries.filter((query) => /insert_message/i.test(query.sql)).length, 2);
 });
 
+test("PostgresSyncStore writes channel-aware sync entities", async () => {
+  const client = new FakePostgresClient();
+  const store = new PostgresSyncStore(client);
+
+  await store.acceptSyncBatch({
+    channel: "alibaba-im",
+    channelAccount: {
+      channel: "alibaba-im",
+      externalAccountId: "seller-ali",
+      displayName: "Seller Ali",
+      surface: "onetalk-web"
+    },
+    sellerAccount: { externalAccountId: "seller-1", displayName: "Seller One" },
+    device: { deviceId: "device-1", deviceName: "Chrome Extension" },
+    sourceMeta: { collectedAt: "2026-05-25T10:00:00.000Z", sourceBatchKey: "batch-channel-1" },
+    customers: [
+      {
+        externalCustomerId: "customer-1",
+        loginId: "buyer-login",
+        displayName: "Buyer",
+        companyName: "Buyer Company LLC",
+        avatarUrl: "https://img.example/buyer.png",
+        country: "US",
+        currentTimeZone: "America/Los_Angeles",
+        accountId: "buyer-account",
+        accountIdEncrypt: "buyer-account-encrypted",
+        aliId: "buyer-ali",
+        aliIdEncrypt: "buyer-ali-encrypted",
+        loginIdEncrypt: "buyer-login-encrypted"
+      }
+    ],
+    conversations: [{ externalConversationId: "conv-1", externalCustomerId: "customer-1" }],
+    messages: [
+      {
+        externalConversationId: "conv-1",
+        externalMessageId: "msg-1",
+        direction: "received",
+        content: "hello",
+        sentAt: "2026-05-25T09:00:00.000Z"
+      }
+    ]
+  });
+
+  const upsertChannel = client.queries.find((query) => /upsert_channel_account/i.test(query.sql));
+  assert.ok(upsertChannel);
+  assert.match(upsertChannel.sql, /INSERT INTO channel_account/i);
+  assert.deepEqual(upsertChannel.params, [
+    "seller-db-id",
+    "alibaba-im",
+    "seller-ali",
+    "Seller Ali",
+    "onetalk-web",
+    "2026-05-25T10:00:00.000Z"
+  ]);
+
+  const upsertCustomer = client.queries.find((query) => /upsert_customer/i.test(query.sql));
+  assert.ok(upsertCustomer);
+  assert.match(upsertCustomer.sql, /channel_account_id/i);
+  assert.match(upsertCustomer.sql, /company_name/i);
+  assert.match(upsertCustomer.sql, /avatar_url/i);
+  assert.match(upsertCustomer.sql, /current_time_zone/i);
+  assert.deepEqual(upsertCustomer.params.slice(4, 15), [
+    "buyer-login",
+    "buyer-login-encrypted",
+    "Buyer",
+    "Buyer Company LLC",
+    "https://img.example/buyer.png",
+    "US",
+    "America/Los_Angeles",
+    "buyer-account",
+    "buyer-account-encrypted",
+    "buyer-ali",
+    "buyer-ali-encrypted"
+  ]);
+  assert.deepEqual(upsertCustomer.params.slice(0, 4), [
+    "seller-db-id",
+    "channel-account-db-id",
+    "alibaba-im",
+    "customer-1"
+  ]);
+
+  const insertMessage = client.queries.find((query) => /insert_message/i.test(query.sql));
+  assert.ok(insertMessage);
+  assert.match(insertMessage.sql, /channel_account_id/i);
+  assert.deepEqual(insertMessage.params.slice(0, 4), [
+    "seller-db-id",
+    "channel-account-db-id",
+    "alibaba-im",
+    "conversation-db-id"
+  ]);
+});
+
 test("PostgresSyncStore persists sync batch result statistics", async () => {
   const client = new FakePostgresClient();
   const store = new PostgresSyncStore(client);
@@ -711,7 +814,7 @@ test("PostgresSyncStore persists sync batch result statistics", async () => {
 
   const statsQuery = client.queries.find((query) => /update_sync_batch_result/i.test(query.sql));
   assert.ok(statsQuery);
-  assert.deepEqual(statsQuery.params, [1, 1, [], "seller-db-id", "batch-1"]);
+  assert.deepEqual(statsQuery.params, [1, 1, [], "seller-db-id", "channel-account-db-id", "alibaba-im", "batch-1"]);
 });
 
 test("PostgresSyncStore wraps sync batch writes in a transaction", async () => {
@@ -806,7 +909,15 @@ test("PostgresSyncStore lists customers without organization scope", async () =>
       externalCustomerId: "customer-1",
       loginId: "buyer_login",
       displayName: "Buyer One",
+      companyName: "Buyer Company LLC",
+      avatarUrl: "https://img.example/buyer.png",
       country: "US",
+      currentTimeZone: "America/Los_Angeles",
+      accountId: "buyer-account",
+      accountIdEncrypt: "buyer-account-encrypted",
+      aliId: "buyer-ali",
+      aliIdEncrypt: "buyer-ali-encrypted",
+      loginIdEncrypt: "buyer-login-encrypted",
       ownerUserId: "user-1",
       stage: "qualified"
     }

@@ -16,14 +16,18 @@
 
 body {
   width: 360px;
+  min-width: 360px;
   margin: 0;
   background: #f5f7fb;
+  overflow-x: hidden;
 }
 
 .popup-shell {
   display: grid;
   gap: 12px;
   padding: 16px;
+  max-height: 600px;
+  overflow-y: auto;
 }
 
 .popup-header {
@@ -31,6 +35,11 @@ body {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
+}
+
+.popup-header > div {
+  min-width: 0;
 }
 
 h1 {
@@ -69,7 +78,7 @@ p {
 
 .status-panel {
   display: grid;
-  gap: 8px;
+  gap: 7px;
   border: 1px solid #dce4f1;
   border-radius: 8px;
   padding: 12px;
@@ -79,10 +88,22 @@ p {
   line-height: 1.45;
 }
 
+.status-panel p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .actions {
-  display: grid;
-  grid-template-columns: 1fr 96px 72px;
+  display: flex;
   gap: 8px;
+}
+
+.actions button {
+  flex: 1 1 0;
+}
+
+button[hidden] {
+  display: none;
 }
 
 button {
@@ -95,6 +116,7 @@ button {
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
+  overflow-wrap: anywhere;
 }
 
 button:hover {

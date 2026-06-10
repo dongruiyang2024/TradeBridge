@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  BUILT_IN_CHANNEL_IDS,
   buildCollectorWsMessage,
   isCollectorHelloMessage,
+  isChannelSyncBatch,
   isOutboundClaimMessage,
   parseCollectorWsMessage
 } from "../src/index.js";
@@ -69,4 +71,41 @@ test("collector protocol builds typed messages with timestamps", () => {
       pendingCount: 2
     }
   });
+});
+
+test("collector protocol owns channel sync batch semantics", () => {
+  assert.deepEqual(BUILT_IN_CHANNEL_IDS, [
+    "alibaba-im",
+    "whatsapp-web",
+    "facebook-messenger",
+    "web-chat",
+    "mock-web"
+  ]);
+
+  assert.equal(
+    isChannelSyncBatch({
+      channel: "alibaba-im",
+      channelAccount: {
+        channel: "alibaba-im",
+        externalAccountId: "seller-ali",
+        displayName: "Trial Seller",
+        surface: "onetalk-web"
+      },
+      sellerAccount: { externalAccountId: "seller-trial" },
+      device: { deviceId: "chrome-extension-trial" },
+      sourceMeta: { source: "chrome-extension", surface: "onetalk-web" },
+      customers: [{ externalCustomerId: "buyer-trial", displayName: "Trial Buyer" }],
+      conversations: [{ externalConversationId: "conv-trial", externalCustomerId: "buyer-trial" }],
+      messages: [
+        {
+          externalConversationId: "conv-trial",
+          externalMessageId: "msg-1",
+          direction: "received",
+          content: "hello"
+        }
+      ]
+    }),
+    true
+  );
+  assert.equal(isChannelSyncBatch({ channel: "onetalk", sellerAccount: {}, device: {} }), false);
 });

@@ -6,6 +6,13 @@ const DEFAULT_DEVICE_NAME = "Chrome Extension";
 export interface CreateActivatedExtensionConfigInput {
   serverUrl: string;
   email: string;
+  tradeMindBindingToken?: string;
+  sellerAccountExternalId?: string;
+  sellerAccountDisplayName?: string;
+  channelAccountExternalId?: string;
+  syncIntervalMinutes?: number;
+  historyBackfillEnabled?: boolean;
+  historyMessagesPerConversation?: number;
   existingDeviceId?: string;
   existingDeviceName?: string;
   generatedDeviceId: string;
@@ -17,9 +24,18 @@ export function createActivatedExtensionConfig(input: CreateActivatedExtensionCo
   return {
     serverUrl: input.serverUrl,
     tradeBridgeAccountEmail: input.email.trim(),
-    sellerAccountExternalId: input.activation.device.sellerAccountExternalId || DEFAULT_SELLER_ACCOUNT_EXTERNAL_ID,
+    sellerAccountExternalId:
+      input.activation.device.sellerAccountExternalId ||
+      input.sellerAccountExternalId ||
+      DEFAULT_SELLER_ACCOUNT_EXTERNAL_ID,
+    sellerAccountDisplayName: input.sellerAccountDisplayName,
+    channelAccountExternalId: input.channelAccountExternalId,
+    tradeMindBindingToken: input.tradeMindBindingToken,
     deviceId: input.activation.device.externalDeviceId || input.existingDeviceId || input.generatedDeviceId,
     deviceName: input.activation.device.deviceName || deviceName,
-    collectorToken: input.activation.token
+    collectorToken: input.activation.token,
+    syncIntervalMinutes: input.syncIntervalMinutes,
+    historyBackfillEnabled: input.historyBackfillEnabled,
+    historyMessagesPerConversation: input.historyMessagesPerConversation
   };
 }

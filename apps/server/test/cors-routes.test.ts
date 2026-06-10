@@ -36,3 +36,36 @@ test("Chrome extension origins can preflight collector APIs", async () => {
   assert.equal(response.statusCode, 204);
   assert.equal(response.headers["access-control-allow-origin"], "chrome-extension://aaiambckmiggfpmjnigniblljihldjen");
 });
+
+test("configured production Web origins can preflight internal APIs", async () => {
+  const app = await createServer({
+    store: new InMemorySyncStore(),
+    allowedWebOrigins: ["https://workbench.example.com/"]
+  });
+  const response = await app.inject({
+    method: "OPTIONS",
+    url: "/internal/v1/customers",
+    headers: {
+      origin: "https://workbench.example.com",
+      "access-control-request-method": "GET",
+      "access-control-request-headers": "authorization,content-type"
+    }
+  });
+
+  assert.equal(response.statusCode, 204);
+  assert.equal(response.headers["access-control-allow-origin"], "https://workbench.example.com");
+});
+
+test("unconfigured production origins are rejected", async () => {
+  const app = await createServer({ store: new InMemorySyncStore() });
+  const response = await app.inject({
+    method: "OPTIONS",
+    url: "/internal/v1/customers",
+    headers: {
+      origin: "https://evil.example.com",
+      "access-control-request-method": "GET"
+    }
+  });
+
+  assert.equal(response.headers["access-control-allow-origin"], undefined);
+});

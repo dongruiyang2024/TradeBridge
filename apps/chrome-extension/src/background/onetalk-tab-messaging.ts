@@ -1,7 +1,7 @@
 import type { ChromeApi } from "../shared/chrome-api.js";
 
 const ONETALK_TAB_URL = "https://onetalk.alibaba.com/*";
-const ONETALK_CONTENT_BRIDGE_FILE = "content/onetalk-page-bridge.js";
+const ONETALK_CONTENT_BRIDGE_FILE = "channels/alibaba-im/onetalk-page-bridge.js";
 
 export async function sendMessageToOneTalkTab(chromeApi: ChromeApi, message: unknown): Promise<unknown> {
   if (!chromeApi.tabs) throw new Error("chrome_tabs_unavailable");
