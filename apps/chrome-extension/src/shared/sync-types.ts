@@ -16,6 +16,7 @@ export interface CollectorActivationInput {
   email: string;
   password: string;
   sellerAccountExternalId?: string;
+  tradeMindBindingToken?: string;
   deviceExternalId?: string;
   deviceName?: string;
 }
@@ -74,6 +75,8 @@ export interface ExtensionConfig {
   tradeBridgeAccountEmail?: string;
   sellerAccountExternalId: string;
   sellerAccountDisplayName?: string;
+  channelAccountExternalId?: string;
+  tradeMindBindingToken?: string;
   deviceId: string;
   deviceName?: string;
   syncIntervalMinutes?: number;

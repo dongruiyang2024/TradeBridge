@@ -102,6 +102,48 @@ test("runSyncOnce maps buffered messages with page-SDK conversations, sanitizes,
   assert.deepEqual(store.status.lastDiagnostics?.lwpRoutes?.map((item) => item.route), ["page-socket-tap"]);
 });
 
+test("runSyncOnce keeps channel login identity separate from seller ali identity", async () => {
+  const store = new MemoryStateStore();
+  store.config = {
+    ...store.config!,
+    channelAccountExternalId: "self-login-1",
+    sellerAccountExternalId: "self-ali-1"
+  };
+  const uploaded: SyncBatch[] = [];
+
+  const result = await runSyncOnce({
+    now: () => new Date("2026-05-26T08:10:00.000Z"),
+    stateStore: store,
+    onetalkClient: {
+      fetchWeblite: async () => ({
+        html: "",
+        bootstrap: { aliId: "self-ali-1" },
+        conversations: [
+          {
+            singleChatUserConversation: {
+              singleChatConversation: { cid: "conv-1", pairFirst: "self-ali-1", pairSecond: "buyer-ali" }
+            }
+          }
+        ]
+      })
+    },
+    messageSource: staticMessageSource({ "conv-1": [message("m1", "hello")] }),
+    uploadSyncBatch: async (options) => {
+      uploaded.push(options.batch);
+      return {
+        acceptedCount: options.batch.messages?.length || 0,
+        rejectedCount: 0,
+        nextCursor: null,
+        warnings: []
+      };
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(uploaded[0].channelAccount.externalAccountId, "self-login-1");
+  assert.equal(uploaded[0].sellerAccount.externalAccountId, "self-ali-1");
+});
+
 test("runSyncOnce merges live buffer messages with SDK history messages without acknowledging history", async () => {
   const store = new MemoryStateStore();
   const uploaded: SyncBatch[] = [];

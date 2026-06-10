@@ -533,6 +533,7 @@ export class InMemorySyncStore {
       id: existing?.id || this.nextCollectorDeviceId(),
       externalDeviceId: input.externalDeviceId ?? existing?.externalDeviceId,
       sellerAccountExternalId: input.sellerAccountExternalId,
+      tradeMindBindingToken: input.tradeMindBindingToken ?? existing?.tradeMindBindingToken,
       deviceName: input.deviceName ?? existing?.deviceName,
       activatedByUserId: input.activatedByUserId ?? existing?.activatedByUserId,
       activatedByUserEmail: input.activatedByUserEmail ?? existing?.activatedByUserEmail,
@@ -745,6 +746,7 @@ function toPublicCollectorDevice(device: CollectorDevice & { tokenHash: string }
     createdAt: device.createdAt,
     updatedAt: device.updatedAt,
     ...(device.activatedByUserId ? { activatedByUserId: device.activatedByUserId } : {}),
+    ...(device.tradeMindBindingToken ? { tradeMindBindingToken: device.tradeMindBindingToken } : {}),
     ...(device.activatedByUserEmail ? { activatedByUserEmail: device.activatedByUserEmail } : {}),
     ...(device.activatedByUserDisplayName ? { activatedByUserDisplayName: device.activatedByUserDisplayName } : {}),
     ...(device.activatedByUserRoles?.length ? { activatedByUserRoles: device.activatedByUserRoles } : {})

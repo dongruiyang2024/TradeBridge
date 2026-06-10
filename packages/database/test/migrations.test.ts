@@ -11,7 +11,8 @@ test("internal sync migrations expose the initial schema in order", () => {
       ["003_outbound_message_claim_lease", "003_outbound_message_claim_lease.sql"],
       ["004_collector_device_activation_account", "004_collector_device_activation_account.sql"],
       ["005_channel_dimension", "005_channel_dimension.sql"],
-      ["006_customer_profile_enrichment", "006_customer_profile_enrichment.sql"]
+      ["006_customer_profile_enrichment", "006_customer_profile_enrichment.sql"],
+      ["007_collector_device_trademind_binding", "007_collector_device_trademind_binding.sql"]
     ]
   );
   assert.doesNotMatch(INTERNAL_SYNC_MIGRATIONS[0].sql, /CREATE TABLE IF NOT EXISTS org/i);

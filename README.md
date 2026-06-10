@@ -93,6 +93,13 @@ WANGWANG_SERVER_HOST=127.0.0.1
 WANGWANG_SERVER_PORT=5032
 ```
 
+需要把同步批次转发到 Trade-Mind 沟通助手时，再配置：
+
+```bash
+TRADEMIND_INGEST_URL=http://127.0.0.1:3001/api/ingest/conversations
+TRADEMIND_INGEST_SECRET=和 Trade-Mind 的 TRADEMIND_INGEST_SECRET 保持一致
+```
+
 如果不配置 `DATABASE_URL`，服务端会使用内存存储，重启后数据会丢失。
 
 ### 3. 可选：启动 PostgreSQL
@@ -172,7 +179,7 @@ curl -X POST http://127.0.0.1:5032/collector/v1/auth/login \
 
 2. 在 Chrome 扩展管理页加载 `apps/chrome-extension/dist`。
 3. 打开并登录 `https://onetalk.alibaba.com/`。
-4. 在插件设置页填写 Server URL、管理员邮箱、密码、同步间隔和历史回补设置，授予服务端访问权限后完成激活。
+4. 在插件设置页填写 Server URL、管理员邮箱、密码、同步间隔和历史回补设置，授予服务端访问权限后完成激活。联调 Trade-Mind 时，额外填写 Trade-Mind Binding Token、OneTalk Login ID（selfLoginId）和 OneTalk Ali ID（selfAliId）。激活后把设置页展示的设备 ID 填回 Trade-Mind 的确认绑定弹窗。
 5. 点击插件弹窗里的同步按钮。
 6. 回到 Web 工作台查看客户、会话和消息。
 

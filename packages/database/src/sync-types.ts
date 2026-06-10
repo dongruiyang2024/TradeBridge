@@ -363,6 +363,7 @@ export interface CollectorDevice {
   id: string;
   externalDeviceId?: string;
   sellerAccountExternalId?: string;
+  tradeMindBindingToken?: string;
   deviceName?: string;
   activatedByUserId?: string;
   activatedByUserEmail?: string;
@@ -381,6 +382,7 @@ export interface RegisteredCollectorDevice extends CollectorDevice {
 
 export interface RegisterCollectorDeviceInput {
   sellerAccountExternalId?: string;
+  tradeMindBindingToken?: string;
   externalDeviceId?: string;
   deviceName?: string;
   activatedByUserId?: string;

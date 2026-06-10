@@ -105,6 +105,43 @@ test("activateCollectorDevice posts credentials and device metadata", async () =
   });
 });
 
+test("activateCollectorDevice posts the Trade-Mind binding token when present", async () => {
+  const requests: Request[] = [];
+  globalThis.fetch = async (input, init) => {
+    requests.push(new Request(input, init));
+    return Response.json({
+      ok: true,
+      token: "collector-token",
+      device: {
+        id: "collector-device-1",
+        externalDeviceId: "chrome-extension-demo",
+        sellerAccountExternalId: "self-ali-1",
+        deviceName: "Chrome Extension",
+        status: "active"
+      }
+    });
+  };
+
+  await activateCollectorDevice({
+    serverUrl: "http://127.0.0.1:5032",
+    email: "admin@example.com",
+    password: "secret",
+    sellerAccountExternalId: "self-ali-1",
+    tradeMindBindingToken: "tm-binding-token",
+    deviceExternalId: "chrome-extension-demo",
+    deviceName: "Chrome Extension"
+  });
+
+  assert.deepEqual(await requests[0].json(), {
+    email: "admin@example.com",
+    password: "secret",
+    sellerAccountExternalId: "self-ali-1",
+    tradeMindBindingToken: "tm-binding-token",
+    deviceExternalId: "chrome-extension-demo",
+    deviceName: "Chrome Extension"
+  });
+});
+
 test("listOutboundMessages reads queued replies with collector token", async () => {
   const requests: Request[] = [];
   globalThis.fetch = async (input, init) => {

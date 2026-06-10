@@ -30,6 +30,22 @@
             </label>
           </div>
 
+          <label>
+            <span>Trade-Mind Binding Token</span>
+            <input name="tradeMindBindingToken" type="text" autocomplete="off" placeholder="从 Trade-Mind 沟通助手复制" />
+          </label>
+
+          <div class="field-row">
+            <label>
+              <span>OneTalk Login ID</span>
+              <input name="channelAccountExternalId" type="text" autocomplete="off" placeholder="selfLoginId" />
+            </label>
+            <label>
+              <span>OneTalk Ali ID</span>
+              <input name="sellerAccountExternalId" type="text" autocomplete="off" placeholder="selfAliId" />
+            </label>
+          </div>
+
           <div class="field-row">
             <label>
               <span>同步间隔（分钟）</span>
@@ -50,6 +66,7 @@
         <section class="status-panel" aria-label="当前状态">
           <p><span>当前账号</span><strong id="current-account">未激活</strong></p>
           <p><span>采集设备</span><strong id="current-device">未创建</strong></p>
+          <p><span>设备 ID</span><strong id="current-device-id">未创建</strong></p>
         </section>
 
         <p class="security-note">只填写 TradeBridge 管理员账号；不要填写 OneTalk 密码、Cookie 或 Token。</p>

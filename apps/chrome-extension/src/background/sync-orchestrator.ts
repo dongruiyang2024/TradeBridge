@@ -80,6 +80,12 @@ export async function runSyncOnce(options: RunSyncOnceOptions): Promise<RunSyncR
       weblite,
       messagesByConversationId
     });
+    if (config.channelAccountExternalId?.trim()) {
+      mapped.channelAccount = {
+        ...mapped.channelAccount,
+        externalAccountId: config.channelAccountExternalId.trim()
+      };
+    }
 
     const sanitized = sanitizeForUpload(mapped);
     assertNoSensitiveFields(sanitized);

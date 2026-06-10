@@ -11,6 +11,7 @@ const form = document.querySelector<HTMLFormElement>("#options-form");
 const status = document.querySelector<HTMLParagraphElement>("#options-status");
 const currentAccount = document.querySelector<HTMLElement>("#current-account");
 const currentDevice = document.querySelector<HTMLElement>("#current-device");
+const currentDeviceId = document.querySelector<HTMLElement>("#current-device-id");
 const DEFAULT_DEVICE_NAME = "Chrome Extension";
 const DEFAULT_SYNC_INTERVAL_MINUTES = 30;
 const DEFAULT_HISTORY_MESSAGES_PER_CONVERSATION = 20;
@@ -38,6 +39,9 @@ form?.addEventListener("submit", async (event) => {
     });
     const deviceExternalId = currentConfig?.deviceId || createDeviceExternalId();
     const deviceName = currentConfig?.deviceName || DEFAULT_DEVICE_NAME;
+    const tradeMindBindingToken = optional(formData, "tradeMindBindingToken");
+    const sellerAccountExternalId = optional(formData, "sellerAccountExternalId");
+    const channelAccountExternalId = optional(formData, "channelAccountExternalId");
 
     status?.replaceChildren("申请服务器权限...");
     await ensureServerHostPermission(serverUrl);
@@ -46,12 +50,17 @@ form?.addEventListener("submit", async (event) => {
       serverUrl,
       email,
       password: required(formData, "password"),
+      sellerAccountExternalId,
+      tradeMindBindingToken,
       deviceExternalId,
       deviceName
     });
     const config = createActivatedExtensionConfig({
       serverUrl,
       email,
+      tradeMindBindingToken,
+      sellerAccountExternalId,
+      channelAccountExternalId,
       syncIntervalMinutes,
       historyBackfillEnabled,
       historyMessagesPerConversation,
@@ -84,6 +93,9 @@ async function hydrate(): Promise<void> {
   if (!form || !config) return;
   setInput("serverUrl", config.serverUrl);
   setInput("email", config.tradeBridgeAccountEmail);
+  setInput("tradeMindBindingToken", config.tradeMindBindingToken);
+  setInput("sellerAccountExternalId", config.sellerAccountExternalId);
+  setInput("channelAccountExternalId", config.channelAccountExternalId);
 }
 
 function setInput(name: string, value?: string): void {
@@ -102,6 +114,11 @@ function required(formData: FormData, name: string): string {
   return value;
 }
 
+function optional(formData: FormData, name: string): string | undefined {
+  const value = String(formData.get(name) || "").trim();
+  return value || undefined;
+}
+
 async function ensureServerHostPermission(serverUrl: string): Promise<void> {
   if (!chromeApi.permissions) return;
   const origins = serverHostPermissionPatterns(serverUrl);
@@ -112,6 +129,7 @@ async function ensureServerHostPermission(serverUrl: string): Promise<void> {
 function renderCurrentConfig(config: ExtensionConfig | null): void {
   currentAccount?.replaceChildren(config?.tradeBridgeAccountEmail || "未激活");
   currentDevice?.replaceChildren(config?.deviceName || config?.deviceId || "未创建");
+  currentDeviceId?.replaceChildren(config?.deviceId || "未创建");
 }
 
 function activationErrorMessage(code: string): string {

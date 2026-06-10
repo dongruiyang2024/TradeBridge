@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { test } from "node:test";
 import { InMemorySyncStore } from "@wangwang/database";
 import { createServer } from "../src/server.js";
@@ -52,6 +53,115 @@ test("POST /collector/v1/sync-batches accepts a valid batch", async () => {
   assert.equal(body.rejectedCount, 0);
   assert.equal(body.nextCursor, "2026-05-25T09:00:00.000Z");
   assert.equal(store.listMessages().length, 1);
+});
+
+test("POST /collector/v1/sync-batches forwards scoped batches to Trade-Mind with signed binding token payloads", async () => {
+  const store = new InMemorySyncStore();
+  const registered = await store.registerCollectorDevice({
+    sellerAccountExternalId: "self-ali-1",
+    externalDeviceId: "device-token",
+    deviceName: "Bound Device",
+    token: "bound-token",
+    tradeMindBindingToken: "tm-binding-token"
+  });
+  const forwardCalls: Array<{ body: string; headers: Record<string, string>; url: string }> = [];
+  const app = await createServer({
+    store,
+    tradeMindForwarder: {
+      fetch: async (url, init) => {
+        forwardCalls.push({
+          body: String(init?.body),
+          headers: init?.headers as Record<string, string>,
+          url: String(url)
+        });
+        return new Response(JSON.stringify({ ok: true }), { status: 201 });
+      },
+      ingestSecret: "shared-secret",
+      ingestUrl: "http://trademind.local/api/ingest/conversations",
+      nonce: () => "nonce-1",
+      now: () => new Date("2026-06-10T08:00:00.000Z")
+    }
+  });
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/collector/v1/sync-batches",
+    headers: { authorization: `Bearer ${registered.token}` },
+    payload: {
+      channel: "alibaba-im",
+      channelAccount: {
+        channel: "alibaba-im",
+        externalAccountId: "self-login-1",
+        surface: "onetalk-web"
+      },
+      sellerAccount: { externalAccountId: "forged-seller" },
+      device: { deviceId: "forged-device", deviceName: "Forged Device" },
+      conversations: [{ externalConversationId: "conv-1" }],
+      messages: [
+        {
+          externalConversationId: "conv-1",
+          externalMessageId: "msg-1",
+          direction: "received",
+          content: "hello",
+          sentAt: "2026-06-10T07:59:00.000Z"
+        }
+      ],
+      sourceMeta: { sourceBatchKey: "source-batch-1" }
+    }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(forwardCalls.length, 1);
+  assert.equal(forwardCalls[0].url, "http://trademind.local/api/ingest/conversations");
+  const forwarded = JSON.parse(forwardCalls[0].body);
+  assert.equal(forwarded.bindingToken, "tm-binding-token");
+  assert.equal(forwarded.channel, "alibaba-im");
+  assert.equal(forwarded.channelAccount.externalAccountId, "self-login-1");
+  assert.equal(forwarded.sellerAccount.externalAccountId, "self-ali-1");
+  assert.equal(forwarded.device.deviceId, "device-token");
+  assert.equal(typeof forwarded.sourceBatchId, "string");
+  assert.match(forwarded.sourceBatchId, /^tb_[a-f0-9]{48}$/);
+  assert.equal(forwardCalls[0].headers["Content-Type"], "application/json");
+  assert.equal(forwardCalls[0].headers["x-trademind-ingest-secret"], "shared-secret");
+  assert.equal(forwardCalls[0].headers["x-trademind-timestamp"], "1781078400");
+  assert.equal(forwardCalls[0].headers["x-trademind-nonce"], "nonce-1");
+  assert.equal(
+    forwardCalls[0].headers["x-trademind-signature"],
+    createHmac("sha256", "shared-secret")
+      .update(`1781078400.nonce-1.${forwardCalls[0].body}`)
+      .digest("hex")
+  );
+});
+
+test("POST /collector/v1/sync-batches skips Trade-Mind forwarding for devices without binding tokens", async () => {
+  const store = new InMemorySyncStore();
+  const token = await createCollectorToken(store);
+  let forwardCount = 0;
+  const app = await createServer({
+    store,
+    tradeMindForwarder: {
+      fetch: async () => {
+        forwardCount += 1;
+        return new Response(JSON.stringify({ ok: true }), { status: 201 });
+      },
+      ingestSecret: "shared-secret",
+      ingestUrl: "http://trademind.local/api/ingest/conversations"
+    }
+  });
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/collector/v1/sync-batches",
+    headers: { authorization: `Bearer ${token}` },
+    payload: {
+      sellerAccount: { externalAccountId: "seller-1" },
+      device: { deviceId: "device-1" },
+      conversations: [{ externalConversationId: "conv-1" }]
+    }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(forwardCount, 0);
 });
 
 test("POST /collector/v1/sync-batches uses collector device scope over uploaded seller and device ids", async () => {

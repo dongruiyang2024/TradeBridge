@@ -5,6 +5,7 @@ import { test } from "node:test";
 
 test("options markup supports release configuration without defaulting to localhost", () => {
   const markup = fs.readFileSync(path.resolve("src/options/options.html"), "utf8");
+  const optionsSource = fs.readFileSync(path.resolve("src/options/options.ts"), "utf8");
 
   assert.equal(markup.includes('value="http://127.0.0.1:5032"'), false);
   assert.equal(markup.includes('name="serverUrl"'), true);
@@ -12,5 +13,8 @@ test("options markup supports release configuration without defaulting to localh
   assert.equal(markup.includes('name="historyBackfillEnabled"'), true);
   assert.equal(markup.includes('name="historyMessagesPerConversation"'), true);
   assert.equal(markup.includes('id="current-account"'), true);
+  assert.equal(markup.includes('id="current-device-id"'), true);
+  assert.match(optionsSource, /currentDeviceId/);
+  assert.match(optionsSource, /config\?\.deviceId \|\| "未创建"/);
   assert.equal(markup.includes("不要填写 OneTalk 密码"), true);
 });

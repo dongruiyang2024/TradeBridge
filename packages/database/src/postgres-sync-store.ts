@@ -250,6 +250,7 @@ interface CollectorDeviceRow {
   id: string;
   externalDeviceId: string | null;
   sellerAccountExternalId: string | null;
+  tradeMindBindingToken: string | null;
   deviceName: string | null;
   activatedByUserId: string | null;
   activatedByUserEmail: string | null;
@@ -1662,6 +1663,7 @@ export class PostgresSyncStore {
           seller_account_id,
           external_device_id,
           device_name,
+          trade_mind_binding_token,
           device_token_hash,
           status,
           activated_by_user_id,
@@ -1669,11 +1671,15 @@ export class PostgresSyncStore {
           activated_by_user_display_name,
           activated_by_user_roles
         )
-        VALUES ((SELECT id FROM seller), $2, $3, $4, $5, $6, $7, $8, COALESCE($9::text[], '{}'::text[]))
+        VALUES ((SELECT id FROM seller), $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::text[], '{}'::text[]))
         ON CONFLICT (external_device_id)
         DO UPDATE SET
           seller_account_id = EXCLUDED.seller_account_id,
           device_name = COALESCE(EXCLUDED.device_name, collector_device.device_name),
+          trade_mind_binding_token = COALESCE(
+            EXCLUDED.trade_mind_binding_token,
+            collector_device.trade_mind_binding_token
+          ),
           device_token_hash = EXCLUDED.device_token_hash,
           status = EXCLUDED.status,
           activated_by_user_id = COALESCE(EXCLUDED.activated_by_user_id, collector_device.activated_by_user_id),
@@ -1692,6 +1698,7 @@ export class PostgresSyncStore {
           seller_account_id,
           external_device_id,
           device_name,
+          trade_mind_binding_token,
           device_token_hash,
           activated_by_user_id,
           activated_by_user_email,
@@ -1706,6 +1713,7 @@ export class PostgresSyncStore {
         d.id::text AS "id",
         d.external_device_id AS "externalDeviceId",
         COALESCE(s.external_account_id, $1) AS "sellerAccountExternalId",
+        d.trade_mind_binding_token AS "tradeMindBindingToken",
         d.device_name AS "deviceName",
         d.activated_by_user_id AS "activatedByUserId",
         d.activated_by_user_email AS "activatedByUserEmail",
@@ -1723,6 +1731,7 @@ export class PostgresSyncStore {
         input.sellerAccountExternalId || null,
         input.externalDeviceId || null,
         input.deviceName || null,
+        input.tradeMindBindingToken || null,
         tokenHash,
         input.status || "active",
         input.activatedByUserId || null,
@@ -1746,6 +1755,7 @@ export class PostgresSyncStore {
         d.id::text AS "id",
         d.external_device_id AS "externalDeviceId",
         s.external_account_id AS "sellerAccountExternalId",
+        d.trade_mind_binding_token AS "tradeMindBindingToken",
         d.device_name AS "deviceName",
         d.activated_by_user_id AS "activatedByUserId",
         d.activated_by_user_email AS "activatedByUserEmail",
@@ -1778,6 +1788,7 @@ export class PostgresSyncStore {
           seller_account_id,
           external_device_id,
           device_name,
+          trade_mind_binding_token,
           activated_by_user_id,
           activated_by_user_email,
           activated_by_user_display_name,
@@ -1791,6 +1802,7 @@ export class PostgresSyncStore {
         d.id::text AS "id",
         d.external_device_id AS "externalDeviceId",
         s.external_account_id AS "sellerAccountExternalId",
+        d.trade_mind_binding_token AS "tradeMindBindingToken",
         d.device_name AS "deviceName",
         d.activated_by_user_id AS "activatedByUserId",
         d.activated_by_user_email AS "activatedByUserEmail",
@@ -1823,6 +1835,7 @@ export class PostgresSyncStore {
           seller_account_id,
           external_device_id,
           device_name,
+          trade_mind_binding_token,
           activated_by_user_id,
           activated_by_user_email,
           activated_by_user_display_name,
@@ -1836,6 +1849,7 @@ export class PostgresSyncStore {
         d.id::text AS "id",
         d.external_device_id AS "externalDeviceId",
         s.external_account_id AS "sellerAccountExternalId",
+        d.trade_mind_binding_token AS "tradeMindBindingToken",
         d.device_name AS "deviceName",
         d.activated_by_user_id AS "activatedByUserId",
         d.activated_by_user_email AS "activatedByUserEmail",
@@ -2374,6 +2388,7 @@ function mapCollectorDevice(row: CollectorDeviceRow): CollectorDevice {
     createdAt: isoString(row.createdAt) || "",
     updatedAt: isoString(row.updatedAt) || "",
     ...optionalProps({
+      tradeMindBindingToken: row.tradeMindBindingToken,
       activatedByUserId: row.activatedByUserId,
       activatedByUserEmail: row.activatedByUserEmail,
       activatedByUserDisplayName: row.activatedByUserDisplayName,
