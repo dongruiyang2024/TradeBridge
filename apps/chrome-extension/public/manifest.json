@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TradeBridge OneTalk Collector",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Sync authorized OneTalk conversations to TradeBridge without uploading OneTalk credentials.",
   "minimum_chrome_version": "116",
   "icons": {

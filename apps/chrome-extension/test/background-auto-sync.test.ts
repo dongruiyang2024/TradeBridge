@@ -12,3 +12,16 @@ test("background schedules sync automatically after activation and OneTalk page 
   assert.match(source, /typed\.type === "config-updated"[\s\S]*autoSyncScheduler\.schedule\(\)/);
   assert.match(source, /typed\.type === "onetalk-page-ready"[\s\S]*autoSyncScheduler\.schedule\(\)/);
 });
+
+test("background applies downloaded extension updates without user clicks", () => {
+  const source = backgroundSource();
+  const chromeApiSource = fs.readFileSync(path.resolve("src/shared/chrome-api.ts"), "utf8");
+
+  assert.match(source, /UPDATE_RELOAD_ALARM/);
+  assert.match(source, /chromeApi\.runtime\.onUpdateAvailable\?\.addListener/);
+  assert.match(source, /chromeApi\.runtime\.reload\?\.\(\)/);
+  assert.match(source, /saveExtensionUpdateAvailable/);
+  assert.match(source, /chromeApi\.alarms\.create\(UPDATE_RELOAD_ALARM/);
+  assert.match(chromeApiSource, /onUpdateAvailable\?:/);
+  assert.match(chromeApiSource, /reload\?: \(\) => void/);
+});

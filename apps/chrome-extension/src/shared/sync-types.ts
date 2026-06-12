@@ -90,6 +90,7 @@ export interface ExtensionStatus {
   accountValidation?: ExtensionAccountValidationStatus;
   realtime?: ExtensionRealtimeStatus;
   lastDiagnostics?: SyncDiagnostics;
+  update?: ExtensionUpdateStatus;
   captureDiagnostics?: ExtensionCaptureDiagnostics;
   lastError?: {
     code: string;
@@ -118,6 +119,14 @@ export interface ExtensionRealtimeStatus {
   lastChangedAt: string;
   lastError?: string;
   reconnectCount?: number;
+}
+
+export interface ExtensionUpdateStatus {
+  state: "available" | "reloading";
+  version?: string;
+  checkedAt?: string;
+  reloadScheduledAt?: string;
+  strategy: "auto-reload";
 }
 
 export interface SyncDiagnostics {

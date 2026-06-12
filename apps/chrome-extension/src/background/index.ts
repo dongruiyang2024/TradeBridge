@@ -27,9 +27,11 @@ const outboundPacer = new OutboundPacer();
 const SYNC_ALARM = "tradebridge-sync";
 const OUTBOUND_ALARM = "tradebridge-outbound";
 const REALTIME_WATCHDOG_ALARM = "tradebridge-realtime-watchdog";
+const UPDATE_RELOAD_ALARM = "tradebridge-update-reload";
 const DEFAULT_SYNC_INTERVAL_MINUTES = 30;
 const MIN_SYNC_INTERVAL_MINUTES = 5;
 const MAX_SYNC_INTERVAL_MINUTES = 1440;
+const UPDATE_RELOAD_DELAY_MINUTES = 1;
 let realtimeClient: TradeBridgeWsClient | null = null;
 let realtimeConnecting: Promise<void> | null = null;
 let realtimeGeneration = 0;
@@ -64,6 +66,12 @@ chromeApi.runtime.onStartup?.addListener(() => {
   void ensureRealtimeConnection();
 });
 
+chromeApi.runtime.onUpdateAvailable?.addListener((details) => {
+  void saveExtensionUpdateAvailable(details.version).then(() => {
+    chromeApi.alarms.create(UPDATE_RELOAD_ALARM, { delayInMinutes: UPDATE_RELOAD_DELAY_MINUTES });
+  });
+});
+
 chromeApi.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === SYNC_ALARM) {
     void runDefaultSyncAndOutbound();
@@ -73,6 +81,9 @@ chromeApi.alarms.onAlarm.addListener((alarm) => {
   }
   if (alarm.name === REALTIME_WATCHDOG_ALARM) {
     void ensureRealtimeConnection();
+  }
+  if (alarm.name === UPDATE_RELOAD_ALARM) {
+    void applyDownloadedExtensionUpdate();
   }
 });
 
@@ -350,6 +361,33 @@ async function saveRealtimeError(message: string): Promise<void> {
       reconnectCount: previous.realtime?.reconnectCount || 0
     }
   });
+}
+
+async function saveExtensionUpdateAvailable(version?: string): Promise<void> {
+  const previous = await stateStore.getStatus();
+  await stateStore.saveStatus({
+    ...previous,
+    update: {
+      state: "available",
+      version,
+      checkedAt: new Date().toISOString(),
+      strategy: "auto-reload"
+    }
+  });
+}
+
+async function applyDownloadedExtensionUpdate(): Promise<void> {
+  const previous = await stateStore.getStatus();
+  await stateStore.saveStatus({
+    ...previous,
+    update: {
+      ...previous.update,
+      state: "reloading",
+      reloadScheduledAt: new Date().toISOString(),
+      strategy: "auto-reload"
+    }
+  });
+  chromeApi.runtime.reload?.();
 }
 
 function errorMessage(error: unknown): string {

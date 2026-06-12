@@ -11,6 +11,9 @@ export interface ChromeRuntimeApi {
   onInstalled: {
     addListener(callback: () => void): void;
   };
+  onUpdateAvailable?: {
+    addListener(callback: (details: { version?: string }) => void): void;
+  };
   onStartup?: {
     addListener(callback: () => void): void;
   };
@@ -26,6 +29,7 @@ export interface ChromeRuntimeApi {
   sendMessage(message: unknown): Promise<unknown>;
   getURL(path: string): string;
   openOptionsPage(): void;
+  reload?: () => void;
 }
 
 export interface ChromeAlarmsApi {

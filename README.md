@@ -183,6 +183,17 @@ curl -X POST http://127.0.0.1:5032/collector/v1/auth/login \
 5. 点击插件弹窗里的同步按钮。
 6. 回到 Web 工作台查看客户、会话和消息。
 
+### 插件自动更新策略
+
+生产环境不要让用户手动替换解压包。插件发布应走 Chrome Web Store Unlisted 或企业 ExtensionInstallForcelist/托管更新通道，让 Chrome 自动下载新版本。
+
+当前扩展内置的更新策略：
+
+- `manifest.version` 按发布递增；本次版本为 `0.1.1`。
+- Chrome 下载到新版本并触发 `runtime.onUpdateAvailable` 后，后台会记录 update 状态，并创建 `tradebridge-update-reload` alarm。
+- alarm 在 1 分钟后自动调用 `runtime.reload()` 应用新版本，不需要用户点击。
+- 开发者模式“加载已解压的扩展”不会自动拉取新包，只适合本地测试。
+
 ## 常用命令
 
 | 命令 | 说明 |
