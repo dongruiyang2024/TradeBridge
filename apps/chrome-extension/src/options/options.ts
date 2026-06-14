@@ -52,6 +52,7 @@ form?.addEventListener("submit", async (event) => {
       password: required(formData, "password"),
       sellerAccountExternalId,
       tradeMindBindingToken,
+      channelAccountExternalId,
       deviceExternalId,
       deviceName
     });

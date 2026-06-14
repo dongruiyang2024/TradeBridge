@@ -17,6 +17,7 @@ export interface CollectorActivationInput {
   password: string;
   sellerAccountExternalId?: string;
   tradeMindBindingToken?: string;
+  channelAccountExternalId?: string;
   deviceExternalId?: string;
   deviceName?: string;
 }

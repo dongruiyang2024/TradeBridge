@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { test } from "node:test";
 import { InMemorySyncStore } from "@wangwang/database";
 import { hashPassword } from "../src/auth.js";
@@ -214,6 +215,69 @@ test("POST /collector/v1/auth/login stores Trade-Mind binding tokens without exp
 
   const devices = await store.listCollectorDevices();
   assert.equal(devices[0].tradeMindBindingToken, "tm-binding-token");
+});
+
+test("POST /collector/v1/auth/login auto-confirms Trade-Mind bindings after collector activation", async () => {
+  const store = new InMemorySyncStore();
+  await store.createInternalUser({
+    email: "admin@example.com",
+    displayName: "Admin User",
+    passwordHash: await hashPassword("secret"),
+    roles: ["admin"]
+  });
+  const confirmCalls: Array<{ body: string; headers: Record<string, string>; url: string }> = [];
+  const app = await createServer({
+    store,
+    tradeMindBindingConfirmer: {
+      bridgeSecret: "bridge-secret",
+      confirmUrl: "https://pilot.sinan.yun/api/communication/binding/bridge-confirm",
+      fetch: async (url, init) => {
+        confirmCalls.push({
+          body: String(init?.body),
+          headers: init?.headers as Record<string, string>,
+          url: String(url)
+        });
+        return new Response(JSON.stringify({ binding: { id: "binding-1" } }), { status: 201 });
+      },
+      nonce: () => "confirm-nonce-1",
+      now: () => new Date("2026-06-14T08:00:00.000Z")
+    }
+  });
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/collector/v1/auth/login",
+    payload: {
+      email: "admin@example.com",
+      password: "secret",
+      sellerAccountExternalId: "self-ali-1",
+      channelAccountExternalId: "self-login-1",
+      tradeMindBindingToken: "tm-binding-token",
+      deviceExternalId: "chrome-extension-1",
+      deviceName: "Chrome Extension"
+    }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(confirmCalls.length, 1);
+  assert.equal(confirmCalls[0].url, "https://pilot.sinan.yun/api/communication/binding/bridge-confirm");
+  const body = JSON.parse(confirmCalls[0].body);
+  assert.deepEqual(body, {
+    bindingToken: "tm-binding-token",
+    deviceId: "chrome-extension-1",
+    tmAliId: "self-ali-1",
+    tmLoginId: "self-login-1"
+  });
+  assert.equal(confirmCalls[0].headers["Content-Type"], "application/json");
+  assert.equal(confirmCalls[0].headers["x-trademind-bridge-secret"], "bridge-secret");
+  assert.equal(confirmCalls[0].headers["x-trademind-timestamp"], "1781424000");
+  assert.equal(confirmCalls[0].headers["x-trademind-nonce"], "confirm-nonce-1");
+  assert.equal(
+    confirmCalls[0].headers["x-trademind-signature"],
+    createHmac("sha256", "bridge-secret")
+      .update(`1781424000.confirm-nonce-1.${confirmCalls[0].body}`)
+      .digest("hex")
+  );
 });
 
 test("GET /collector/v1/me resolves the TradeBridge account bound to a collector token", async () => {

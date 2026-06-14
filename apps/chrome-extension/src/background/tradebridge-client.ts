@@ -70,6 +70,7 @@ export async function activateCollectorDevice(input: CollectorActivationInput): 
       password: input.password,
       sellerAccountExternalId: input.sellerAccountExternalId,
       tradeMindBindingToken: input.tradeMindBindingToken,
+      channelAccountExternalId: input.channelAccountExternalId,
       deviceExternalId: input.deviceExternalId,
       deviceName: input.deviceName
     })

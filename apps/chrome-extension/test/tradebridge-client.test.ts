@@ -128,6 +128,7 @@ test("activateCollectorDevice posts the Trade-Mind binding token when present", 
     password: "secret",
     sellerAccountExternalId: "self-ali-1",
     tradeMindBindingToken: "tm-binding-token",
+    channelAccountExternalId: "self-login-1",
     deviceExternalId: "chrome-extension-demo",
     deviceName: "Chrome Extension"
   });
@@ -137,6 +138,7 @@ test("activateCollectorDevice posts the Trade-Mind binding token when present", 
     password: "secret",
     sellerAccountExternalId: "self-ali-1",
     tradeMindBindingToken: "tm-binding-token",
+    channelAccountExternalId: "self-login-1",
     deviceExternalId: "chrome-extension-demo",
     deviceName: "Chrome Extension"
   });
