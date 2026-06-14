@@ -24,13 +24,10 @@ const messageBuffer = new OneTalkMessageBuffer(chromeApi.storage.local);
 // Single pacer shared by both delivery paths (alarm + realtime claim) so the
 // per-account rate window is continuous, not reset per invocation.
 const outboundPacer = new OutboundPacer();
-const SYNC_ALARM = "tradebridge-sync";
 const OUTBOUND_ALARM = "tradebridge-outbound";
 const REALTIME_WATCHDOG_ALARM = "tradebridge-realtime-watchdog";
 const UPDATE_RELOAD_ALARM = "tradebridge-update-reload";
-const DEFAULT_SYNC_INTERVAL_MINUTES = 30;
-const MIN_SYNC_INTERVAL_MINUTES = 5;
-const MAX_SYNC_INTERVAL_MINUTES = 1440;
+const FIXED_SYNC_INTERVAL_SECONDS = 10;
 const UPDATE_RELOAD_DELAY_MINUTES = 1;
 let realtimeClient: TradeBridgeWsClient | null = null;
 let realtimeConnecting: Promise<void> | null = null;
@@ -47,22 +44,23 @@ const realtimeOrchestrator = createRealtimeOrchestrator({
 });
 
 // Coalesces inbound-triggered syncs: when the page tap observes new messages we
-// schedule() instead of uploading on every burst. The periodic alarm stays as a
-// backstop, but this is what makes captured messages reach the server within a
-// couple of seconds without a manual sync.
+// schedule() instead of uploading on every burst. A fixed local timer adds a
+// 10-second backstop while debounced page events still reach the server within
+// a couple of seconds without waiting for the next tick.
 const autoSyncScheduler = new AutoSyncScheduler({
-  runSync: runDefaultSyncAndOutbound
+  runSync: runDefaultSyncAndOutbound,
+  periodicIntervalMs: FIXED_SYNC_INTERVAL_SECONDS * 1000
 });
 
 chromeApi.runtime.onInstalled.addListener(() => {
-  void configurePeriodicSync();
+  autoSyncScheduler.startPeriodic();
   chromeApi.alarms.create(OUTBOUND_ALARM, { periodInMinutes: 1 });
   chromeApi.alarms.create(REALTIME_WATCHDOG_ALARM, { periodInMinutes: 1 });
   void ensureRealtimeConnection();
 });
 
 chromeApi.runtime.onStartup?.addListener(() => {
-  void configurePeriodicSync();
+  autoSyncScheduler.startPeriodic();
   void ensureRealtimeConnection();
 });
 
@@ -73,9 +71,6 @@ chromeApi.runtime.onUpdateAvailable?.addListener((details) => {
 });
 
 chromeApi.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === SYNC_ALARM) {
-    void runDefaultSyncAndOutbound();
-  }
   if (alarm.name === OUTBOUND_ALARM) {
     void runDefaultOutboundDelivery();
   }
@@ -135,8 +130,11 @@ chromeApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (typed.type === "config-updated") {
-    void configurePeriodicSync()
-      .then(() => startRealtimeConnection())
+    Promise.resolve()
+      .then(() => {
+        autoSyncScheduler.startPeriodic();
+        return startRealtimeConnection();
+      })
       .then((response) => {
         autoSyncScheduler.schedule();
         return response;
@@ -173,18 +171,6 @@ function runDefaultOutboundDelivery() {
     listOutboundMessages,
     markOutboundMessageDelivered
   });
-}
-
-async function configurePeriodicSync(): Promise<void> {
-  const config = await stateStore.getConfig();
-  chromeApi.alarms.create(SYNC_ALARM, {
-    periodInMinutes: boundedSyncInterval(config?.syncIntervalMinutes)
-  });
-}
-
-function boundedSyncInterval(value: number | undefined): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_SYNC_INTERVAL_MINUTES;
-  return Math.min(MAX_SYNC_INTERVAL_MINUTES, Math.max(MIN_SYNC_INTERVAL_MINUTES, Math.trunc(value)));
 }
 
 async function readDashboard() {

@@ -104,3 +104,23 @@ test("a failing sync does not kill the scheduler", async () => {
   await timer.flush();
   assert.equal(runs, 2, "scheduler keeps working after a failed sync");
 });
+
+test("runs periodic syncs at a fixed cadence", async () => {
+  const timer = createFakeTimer();
+  let runs = 0;
+  const scheduler = new AutoSyncScheduler({
+    runSync: async () => {
+      runs += 1;
+    },
+    periodicIntervalMs: 10_000,
+    setTimeout: timer.setTimeout,
+    clearTimeout: timer.clearTimeout
+  });
+
+  scheduler.startPeriodic();
+  assert.equal(timer.pending(), 1, "one periodic timer is scheduled");
+
+  await timer.flush();
+  assert.equal(runs, 1);
+  assert.equal(timer.pending(), 1, "next periodic timer is scheduled after the run");
+});

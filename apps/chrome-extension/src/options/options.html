@@ -9,15 +9,15 @@
     <main class="options-shell">
       <header>
         <h1>TradeBridge 设置</h1>
-        <p>连接 TradeBridge 服务器并激活 OneTalk 采集端</p>
+        <p>连接本地 TradeBridge 服务并激活 OneTalk 采集端</p>
       </header>
 
       <form id="options-form">
         <section class="settings-panel" aria-label="连接配置">
-          <label>
-            <span>Server URL</span>
-            <input name="serverUrl" type="url" placeholder="https://tradebridge.example.com" autocomplete="url" required />
-          </label>
+          <div class="readonly-row">
+            <span>服务地址</span>
+            <strong id="server-url">本地服务 http://localhost:3001</strong>
+          </div>
 
           <div class="field-row">
             <label>
@@ -36,21 +36,21 @@
           </label>
 
           <div class="field-row">
-            <label>
+            <div class="readonly-row">
               <span>OneTalk Login ID</span>
-              <input name="channelAccountExternalId" type="text" autocomplete="off" placeholder="selfLoginId" />
-            </label>
-            <label>
+              <strong id="detected-login-id">保存时自动检测</strong>
+            </div>
+            <div class="readonly-row">
               <span>OneTalk Ali ID</span>
-              <input name="sellerAccountExternalId" type="text" autocomplete="off" placeholder="selfAliId" />
-            </label>
+              <strong id="detected-ali-id">保存时自动检测</strong>
+            </div>
           </div>
 
           <div class="field-row">
-            <label>
-              <span>同步间隔（分钟）</span>
-              <input name="syncIntervalMinutes" type="number" min="5" max="1440" step="1" value="30" />
-            </label>
+            <div class="readonly-row">
+              <span>同步间隔</span>
+              <strong>同步间隔固定为 10 秒</strong>
+            </div>
             <label>
               <span>每会话回补条数</span>
               <input name="historyMessagesPerConversation" type="number" min="1" max="100" step="1" value="20" />
@@ -69,7 +69,7 @@
           <p><span>设备 ID</span><strong id="current-device-id">未创建</strong></p>
         </section>
 
-        <p class="security-note">只填写 TradeBridge 管理员账号；不要填写 OneTalk 密码、Cookie 或 Token。</p>
+        <p class="security-note">只填写 TradeBridge 管理员账号；不要填写 OneTalk 密码、Cookie 或 Token。保存前请先打开并登录 OneTalk 页面。</p>
         <button type="submit">保存并激活</button>
       </form>
 

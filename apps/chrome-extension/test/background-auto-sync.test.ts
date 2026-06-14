@@ -25,3 +25,13 @@ test("background applies downloaded extension updates without user clicks", () =
   assert.match(chromeApiSource, /onUpdateAvailable\?:/);
   assert.match(chromeApiSource, /reload\?: \(\) => void/);
 });
+
+test("background keeps periodic sync on a fixed ten second cadence", () => {
+  const source = backgroundSource();
+
+  assert.match(source, /FIXED_SYNC_INTERVAL_SECONDS = 10/);
+  assert.match(source, /autoSyncScheduler.startPeriodic()/);
+  assert.match(source, /typed.type === "config-updated"[\s\S]*autoSyncScheduler.startPeriodic()/);
+  assert.doesNotMatch(source, /boundedSyncInterval/);
+  assert.doesNotMatch(source, /SYNC_ALARM/);
+});

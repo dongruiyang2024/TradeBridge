@@ -2,6 +2,7 @@ import type { CollectorActivationResult, ExtensionConfig } from "../shared/sync-
 
 const DEFAULT_SELLER_ACCOUNT_EXTERNAL_ID = "default-seller";
 const DEFAULT_DEVICE_NAME = "Chrome Extension";
+const DEFAULT_SYNC_INTERVAL_SECONDS = 10;
 
 export interface CreateActivatedExtensionConfigInput {
   serverUrl: string;
@@ -11,6 +12,7 @@ export interface CreateActivatedExtensionConfigInput {
   sellerAccountDisplayName?: string;
   channelAccountExternalId?: string;
   syncIntervalMinutes?: number;
+  syncIntervalSeconds?: number;
   historyBackfillEnabled?: boolean;
   historyMessagesPerConversation?: number;
   existingDeviceId?: string;
@@ -35,6 +37,7 @@ export function createActivatedExtensionConfig(input: CreateActivatedExtensionCo
     deviceName: input.activation.device.deviceName || deviceName,
     collectorToken: input.activation.token,
     syncIntervalMinutes: input.syncIntervalMinutes,
+    syncIntervalSeconds: input.syncIntervalSeconds ?? DEFAULT_SYNC_INTERVAL_SECONDS,
     historyBackfillEnabled: input.historyBackfillEnabled,
     historyMessagesPerConversation: input.historyMessagesPerConversation
   };

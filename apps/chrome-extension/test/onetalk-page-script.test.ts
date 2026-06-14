@@ -12,6 +12,8 @@ interface PostedMessage {
   conversations?: unknown[];
   messagesByConversationId?: Record<string, unknown[]>;
   error?: string;
+  loginId?: string;
+  aliId?: string;
 }
 
 interface FakeResourceEntry {
@@ -195,6 +197,35 @@ test("OneTalk page conversation request returns sanitized SDK conversation field
   }
 });
 
+test("OneTalk page account request returns detected seller identities", async () => {
+  const posted: PostedMessage[] = [];
+  const fakeWindow = createFakeWindow({
+    resources: [],
+    request: () => undefined,
+    posted,
+    accountGlobals: {
+      selfLoginId: "seller-login",
+      aliId: "seller-ali"
+    }
+  });
+
+  Reflect.set(globalThis, "window", fakeWindow);
+  await import(`../src/channels/alibaba-im/onetalk-page-script?account-identity-${Date.now()}`);
+
+  fakeWindow.dispatchMessage({
+    source: "tradebridge-extension",
+    type: "get-onetalk-account",
+    requestId: "request-account"
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(posted[0]?.ok, true, posted[0]?.error);
+  assert.equal(posted[0]?.type, "get-onetalk-account-result");
+  assert.equal((posted[0] as PostedMessage & { loginId?: string }).loginId, "seller-login");
+  assert.equal((posted[0] as PostedMessage & { aliId?: string }).aliId, "seller-ali");
+});
+
 test("OneTalk page history message request returns sanitized SDK message fields", async () => {
   const posted: PostedMessage[] = [];
   const historyRequests: unknown[] = [];
@@ -283,9 +314,11 @@ function createFakeWindow(input: {
   conversationContactDetails?: (contacts: unknown[]) => Promise<unknown> | unknown;
   messageHistory?: (options: unknown) => Promise<unknown> | unknown;
   posted: PostedMessage[];
+  accountGlobals?: Record<string, string>;
 }) {
   const listeners: Array<(event: { source: unknown; data: unknown }) => void> = [];
   const fakeWindow = {
+    ...(input.accountGlobals || {}),
     location: { origin: "https://onetalk.alibaba.com" },
     performance: {
       getEntriesByType(type: string) {

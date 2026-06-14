@@ -15,6 +15,7 @@ export type ExtensionMessage =
   | { type: "get-onetalk-customer-profiles"; contacts: OneTalkCustomerProfileContact[] }
   | { type: "get-onetalk-conversations"; cursor: number; count: number }
   | { type: "get-onetalk-history-messages"; conversations: Record<string, unknown>[]; count: number }
+  | { type: "get-onetalk-account" }
   | { type: "sync-now" }
   | { type: "realtime-reconnect" }
   | { type: "config-updated" }

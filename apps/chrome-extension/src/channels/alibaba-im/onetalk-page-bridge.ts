@@ -43,6 +43,10 @@ function installBridge(): void {
       void requestHistoryMessagesFromPage(typed.conversations, typed.count).then(sendResponse);
       return true;
     }
+    if (typed.type === "get-onetalk-account") {
+      void requestAccountFromPage().then(sendResponse);
+      return true;
+    }
     return false;
   });
 
@@ -232,6 +236,41 @@ async function requestHistoryMessagesFromPage(conversations: Record<string, unkn
         requestId,
         conversations,
         count
+      },
+      window.location.origin
+    );
+  });
+}
+
+async function requestAccountFromPage() {
+  const requestId = `tradebridge-account-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return new Promise((resolve) => {
+    const timeout = window.setTimeout(() => {
+      window.removeEventListener("message", handleMessage);
+      resolve({ ok: false, error: "onetalk_account_timeout" });
+    }, 5_000);
+
+    function handleMessage(event: MessageEvent): void {
+      if (event.source !== window || !isRecord(event.data)) return;
+      if (event.data.source !== "tradebridge-onetalk-page") return;
+      if (event.data.type !== "get-onetalk-account-result" || event.data.requestId !== requestId) return;
+
+      window.clearTimeout(timeout);
+      window.removeEventListener("message", handleMessage);
+      resolve({
+        ok: event.data.ok === true,
+        loginId: typeof event.data.loginId === "string" ? event.data.loginId : undefined,
+        aliId: typeof event.data.aliId === "string" ? event.data.aliId : undefined,
+        error: typeof event.data.error === "string" ? event.data.error : undefined
+      });
+    }
+
+    window.addEventListener("message", handleMessage);
+    window.postMessage(
+      {
+        source: "tradebridge-extension",
+        type: "get-onetalk-account",
+        requestId
       },
       window.location.origin
     );

@@ -186,7 +186,7 @@ curl -X POST http://127.0.0.1:5032/collector/v1/auth/login \
 
 2. 在 Chrome 扩展管理页加载 `apps/chrome-extension/dist`。
 3. 打开并登录 `https://onetalk.alibaba.com/`。
-4. 在插件设置页填写 Server URL、管理员邮箱、密码、同步间隔和历史回补设置，授予服务端访问权限后完成激活。联调 Trade-Mind 时，额外填写 Trade-Mind Binding Token、OneTalk Login ID（selfLoginId）和 OneTalk Ali ID（selfAliId）。服务端配置自动确认回调后，激活成功会自动完成 Trade-Mind 绑定。
+4. 在插件设置页填写管理员邮箱、密码、Trade-Mind Binding Token 和历史回补设置。插件固定连接本地 `http://localhost:3001`，同步间隔固定为 10 秒，OneTalk Login ID / Ali ID 会从已登录的 OneTalk 页面自动检测。服务端配置自动确认回调后，激活成功会自动完成 Trade-Mind 绑定。
 5. 点击插件弹窗里的同步按钮。
 6. 回到 Web 工作台查看客户、会话和消息。
 
@@ -245,7 +245,7 @@ curl -X POST http://127.0.0.1:5032/collector/v1/auth/login \
 - Chrome 插件使用 collector token。
 - 两类 token 不能混用。
 - 服务端只保存 collector token hash。
-- Chrome 插件安装时只固定请求 OneTalk 页面权限，TradeBridge 服务端访问权限由用户在设置页按 Server URL 授权。
+- Chrome 插件安装时固定请求 OneTalk 页面权限；本地 TradeBridge 服务端访问权限固定为 `http://localhost:3001/*`。
 - 插件上传前会过滤 cookie、authorization、ctoken、`_tb_token_`、cookie2、sgcookie、chatToken、accessToken、refreshToken 等敏感字段。
 - 服务端会用 collector token 绑定的卖家和设备覆盖上传体中的 seller/device，避免伪造归属。
 - `.env.local`、真实数据库地址、Redis 地址和 collector token 不要提交。

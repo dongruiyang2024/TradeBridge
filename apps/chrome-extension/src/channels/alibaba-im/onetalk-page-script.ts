@@ -44,6 +44,10 @@ if (!pageWindow.__tradeBridgeOneTalkPageBridgeInstalled) {
     }
     if (event.data.type === "get-onetalk-history-messages") {
       void handleHistoryMessagesRequest(event.data);
+      return;
+    }
+    if (event.data.type === "get-onetalk-account") {
+      handleAccountRequest(event.data);
     }
   });
 }
@@ -129,6 +133,58 @@ async function handleHistoryMessagesRequest(data: Record<string, unknown>): Prom
       error instanceof Error ? error.message : "onetalk_history_message_fetch_failed"
     );
   }
+}
+
+function handleAccountRequest(data: Record<string, unknown>): void {
+  const requestId = typeof data.requestId === "string" ? data.requestId : "";
+  const account = detectOneTalkAccount(pageWindow as unknown as Record<string, unknown>);
+  if (!requestId || !account.loginId || !account.aliId) {
+    publishAccountResult(requestId, false, account.loginId, account.aliId, "missing_onetalk_account_identity");
+    return;
+  }
+  publishAccountResult(requestId, true, account.loginId, account.aliId);
+}
+
+function detectOneTalkAccount(source: Record<string, unknown>): { loginId?: string; aliId?: string } {
+  return {
+    loginId: firstString(source, [
+      "selfLoginId",
+      "loginId",
+      "currentLoginId",
+      "currentUserLoginId",
+      "userLoginId",
+      "account.loginId",
+      "currentUser.loginId",
+      "viewer.loginId"
+    ]),
+    aliId: firstString(source, [
+      "selfAliId",
+      "aliId",
+      "currentAliId",
+      "currentUserAliId",
+      "currentUserAccountId",
+      "account.aliId",
+      "account.accountId",
+      "currentUser.aliId",
+      "currentUser.accountId",
+      "viewer.aliId"
+    ])
+  };
+}
+
+function publishAccountResult(requestId: string, ok: boolean, loginId?: string, aliId?: string, error?: string): void {
+  window.postMessage(
+    {
+      source: "tradebridge-onetalk-page",
+      type: "get-onetalk-account-result",
+      requestId,
+      ok,
+      loginId,
+      aliId,
+      error
+    },
+    window.location.origin
+  );
 }
 
 function publishCustomerProfilesResult(
