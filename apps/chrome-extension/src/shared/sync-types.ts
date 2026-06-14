@@ -13,8 +13,9 @@ export interface SyncBatchResult {
 
 export interface CollectorActivationInput {
   serverUrl: string;
-  email: string;
-  password: string;
+  activationToken?: string;
+  email?: string;
+  password?: string;
   sellerAccountExternalId?: string;
   tradeMindBindingToken?: string;
   channelAccountExternalId?: string;
@@ -24,12 +25,16 @@ export interface CollectorActivationInput {
 
 export interface CollectorActivationResult {
   token: string;
+  account?: TradeBridgeAccount;
   device: {
     id: string;
     externalDeviceId: string;
     sellerAccountExternalId?: string;
     deviceName?: string;
     status: string;
+    lastHeartbeatAt?: string;
+    lastSyncAt?: string;
+    lastError?: string;
   };
 }
 
@@ -48,6 +53,9 @@ export interface CollectorAccountValidationResult {
     sellerAccountExternalId?: string;
     deviceName?: string;
     status: string;
+    lastHeartbeatAt?: string;
+    lastSyncAt?: string;
+    lastError?: string;
   };
 }
 

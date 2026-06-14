@@ -35,3 +35,12 @@ test("background keeps periodic sync on a fixed ten second cadence", () => {
   assert.doesNotMatch(source, /boundedSyncInterval/);
   assert.doesNotMatch(source, /SYNC_ALARM/);
 });
+
+
+test("background reports collector heartbeat after sync and sync errors", () => {
+  const source = backgroundSource();
+
+  assert.match(source, /sendCollectorHeartbeat/);
+  assert.match(source, /reportCollectorHeartbeat\(\{ lastSyncAt:/);
+  assert.match(source, /catch \(error\)[\s\S]*reportCollectorHeartbeat\(\{ lastError: errorMessage\(error\) \}\)/);
+});

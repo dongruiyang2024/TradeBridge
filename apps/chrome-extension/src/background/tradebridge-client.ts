@@ -62,22 +62,33 @@ export async function uploadSyncBatch(options: UploadSyncBatchOptions): Promise<
 }
 
 export async function activateCollectorDevice(input: CollectorActivationInput): Promise<CollectorActivationResult> {
-  const response = await fetch(collectorAuthUrl(input.serverUrl), {
+  const usingActivationToken = Boolean(input.activationToken);
+  const response = await fetch(usingActivationToken ? collectorActivationUrl(input.serverUrl) : collectorAuthUrl(input.serverUrl), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email: input.email,
-      password: input.password,
-      sellerAccountExternalId: input.sellerAccountExternalId,
-      tradeMindBindingToken: input.tradeMindBindingToken,
-      channelAccountExternalId: input.channelAccountExternalId,
-      deviceExternalId: input.deviceExternalId,
-      deviceName: input.deviceName
-    })
+    body: JSON.stringify(
+      usingActivationToken
+        ? {
+            activationToken: input.activationToken,
+            sellerAccountExternalId: input.sellerAccountExternalId,
+            channelAccountExternalId: input.channelAccountExternalId,
+            deviceExternalId: input.deviceExternalId,
+            deviceName: input.deviceName
+          }
+        : {
+            email: input.email,
+            password: input.password,
+            sellerAccountExternalId: input.sellerAccountExternalId,
+            tradeMindBindingToken: input.tradeMindBindingToken,
+            channelAccountExternalId: input.channelAccountExternalId,
+            deviceExternalId: input.deviceExternalId,
+            deviceName: input.deviceName
+          }
+    )
   });
   const body = await response.json().catch(() => null);
 
-  if (response.status === 401) throw new Error("invalid_credentials");
+  if (response.status === 401) throw new Error(responseErrorCode(body, usingActivationToken ? "activation_token_invalid" : "invalid_credentials"));
   if (response.status === 403) throw new Error("forbidden");
   if (!response.ok) throw new Error(responseErrorCode(body, `collector_activation_failed_${response.status}`));
   if (!isActivationResponse(body)) {
@@ -86,8 +97,35 @@ export async function activateCollectorDevice(input: CollectorActivationInput): 
 
   return {
     token: body.token,
+    account: body.account,
     device: body.device
   };
+}
+
+export async function sendCollectorHeartbeat(options: {
+  serverUrl: string;
+  collectorToken: string;
+  lastSyncAt?: string;
+  lastError?: string;
+}): Promise<CollectorActivationResult["device"]> {
+  const response = await fetch(collectorHeartbeatUrl(options.serverUrl), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${options.collectorToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      lastSyncAt: options.lastSyncAt,
+      lastError: options.lastError
+    })
+  });
+  const body = await response.json().catch(() => null);
+
+  if (response.status === 401) throw new Error("tradebridge_unauthorized");
+  if (!response.ok || !isRecord(body) || body.ok !== true || !isCollectorDevice(body.device)) {
+    throw new Error("collector_heartbeat_failed");
+  }
+  return body.device;
 }
 
 export async function validateTradeBridgeAccount(
@@ -177,6 +215,14 @@ function collectorAuthUrl(serverUrl: string): string {
   return new URL("/collector/v1/auth/login", serverUrl).toString();
 }
 
+function collectorActivationUrl(serverUrl: string): string {
+  return new URL("/collector/v1/auth/activate", serverUrl).toString();
+}
+
+function collectorHeartbeatUrl(serverUrl: string): string {
+  return new URL("/collector/v1/heartbeat", serverUrl).toString();
+}
+
 function collectorMeUrl(serverUrl: string): string {
   return new URL("/collector/v1/me", serverUrl).toString();
 }
@@ -207,19 +253,27 @@ function isSyncBatchResponse(value: unknown): value is SyncBatchResult & { ok: t
 }
 
 function isActivationResponse(value: unknown): value is CollectorActivationResult & { ok: true } {
-  return isRecord(value) && value.ok === true && typeof value.token === "string" && isCollectorDevice(value.device);
+  return (
+    isRecord(value) &&
+    value.ok === true &&
+    typeof value.token === "string" &&
+    isCollectorDevice(value.device) &&
+    (value.account === undefined || isTradeBridgeAccount(value.account))
+  );
 }
 
 function isAccountValidationResponse(value: unknown): value is CollectorAccountValidationResult & { ok: true } {
-  if (!isRecord(value) || value.ok !== true || !isRecord(value.account) || !isCollectorDevice(value.device)) {
-    return false;
-  }
+  return isRecord(value) && value.ok === true && isTradeBridgeAccount(value.account) && isCollectorDevice(value.device);
+}
+
+function isTradeBridgeAccount(value: unknown): value is CollectorAccountValidationResult["account"] {
+  if (!isRecord(value)) return false;
   return (
-    typeof value.account.id === "string" &&
-    typeof value.account.email === "string" &&
-    typeof value.account.displayName === "string" &&
-    Array.isArray(value.account.roles) &&
-    value.account.roles.every((role) => typeof role === "string")
+    typeof value.id === "string" &&
+    typeof value.email === "string" &&
+    typeof value.displayName === "string" &&
+    Array.isArray(value.roles) &&
+    value.roles.every((role) => typeof role === "string")
   );
 }
 
@@ -230,7 +284,10 @@ function isCollectorDevice(value: unknown): value is CollectorActivationResult["
     typeof value.externalDeviceId === "string" &&
     typeof value.status === "string" &&
     (value.sellerAccountExternalId === undefined || typeof value.sellerAccountExternalId === "string") &&
-    (value.deviceName === undefined || typeof value.deviceName === "string")
+    (value.deviceName === undefined || typeof value.deviceName === "string") &&
+    (value.lastHeartbeatAt === undefined || typeof value.lastHeartbeatAt === "string") &&
+    (value.lastSyncAt === undefined || typeof value.lastSyncAt === "string") &&
+    (value.lastError === undefined || typeof value.lastError === "string")
   );
 }
 

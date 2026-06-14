@@ -13,6 +13,11 @@ import {
   type AcceptUserInvitationResult,
   type AssignCustomerInput,
   type CollectorDevice,
+  type RecordCollectorHeartbeatInput,
+  type ProvisionedManagedTradeMindActivation,
+  type ProvisionManagedTradeMindActivationInput,
+  type ConsumedManagedTradeMindActivation,
+  type ConsumeManagedTradeMindActivationInput,
   type ConversationCustomerScope,
   type CreateAiSummaryInput,
   type CreateAuditLogInput,
@@ -68,6 +73,7 @@ import { registerCollectorWsRoutes } from "./collector-ws.js";
 
 const DEFAULT_SELLER_ACCOUNT_EXTERNAL_ID = "default-seller";
 const DEFAULT_COLLECTOR_DEVICE_NAME = "TradeBridge Collector";
+const MANAGED_ACTIVATION_TTL_MS = 15 * 60 * 1000;
 
 export interface CreateServerOptions {
   store?: SyncStore;
@@ -76,12 +82,14 @@ export interface CreateServerOptions {
   logger?: boolean;
   tradeMindForwarder?: TradeMindForwarderOptions;
   tradeMindBindingConfirmer?: TradeMindBindingConfirmerOptions;
+  tradeMindProvision?: TradeMindProvisionOptions;
   /**
    * Extra Web workbench origins allowed to call the internal API, e.g.
    * `https://workbench.example.com`. Local dev origins and Chrome extension
    * origins are always allowed regardless of this list.
    */
   allowedWebOrigins?: string[];
+  tradeMindBindingHealthReporter?: TradeMindBindingHealthReporterOptions;
 }
 
 export interface TradeMindForwarderOptions {
@@ -98,6 +106,18 @@ export interface TradeMindBindingConfirmerOptions {
   fetch?: typeof fetch;
   now?: () => Date;
   nonce?: () => string;
+}
+
+export interface TradeMindBindingHealthReporterOptions {
+  healthUrl: string;
+  bridgeSecret: string;
+  fetch?: typeof fetch;
+  now?: () => Date;
+  nonce?: () => string;
+}
+
+export interface TradeMindProvisionOptions {
+  secret: string;
 }
 
 export interface CreateServerFromEnvOptions {
@@ -145,6 +165,10 @@ export interface SyncStore {
   registerCollectorDevice(input: RegisterCollectorDeviceInput): Promise<RegisteredCollectorDevice> | RegisteredCollectorDevice;
   listCollectorDevices(): Promise<CollectorDevice[]> | CollectorDevice[];
   revokeCollectorDevice(input: RevokeCollectorDeviceInput): Promise<CollectorDevice> | CollectorDevice;
+  provisionManagedTradeMindActivation(input: ProvisionManagedTradeMindActivationInput): Promise<ProvisionedManagedTradeMindActivation> | ProvisionedManagedTradeMindActivation;
+  consumeManagedTradeMindActivation(input: ConsumeManagedTradeMindActivationInput): Promise<ConsumedManagedTradeMindActivation | null> | ConsumedManagedTradeMindActivation | null;
+  listManagedTradeMindActivations(): Promise<ProvisionedManagedTradeMindActivation[]> | ProvisionedManagedTradeMindActivation[];
+  recordCollectorHeartbeat(input: RecordCollectorHeartbeatInput): Promise<CollectorDevice> | CollectorDevice;
   authenticateCollectorDevice(token: string): Promise<CollectorDevice | null> | CollectorDevice | null;
 }
 
@@ -155,6 +179,8 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   const allowedWebOrigins = normalizeAllowedWebOrigins(options.allowedWebOrigins);
   const tradeMindForwarder = normalizeTradeMindForwarder(options.tradeMindForwarder);
   const tradeMindBindingConfirmer = normalizeTradeMindBindingConfirmer(options.tradeMindBindingConfirmer);
+  const tradeMindBindingHealthReporter = normalizeTradeMindBindingHealthReporter(options.tradeMindBindingHealthReporter);
+  const tradeMindProvision = normalizeTradeMindProvision(options.tradeMindProvision);
   const realtimeHub = createCollectorRealtimeHub();
   const internalAccessRoles: InternalRole[] = ["admin", "supervisor", "sales"];
   const adminRoles: InternalRole[] = ["admin"];
@@ -181,6 +207,129 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     service: "wangwang-internal-server",
     time: new Date().toISOString()
   }));
+
+
+  app.post("/collector/v1/trademind/provision", async (request, reply) => {
+    if (!tradeMindProvision) return reply.code(404).send({ ok: false, error: "trademind_provision_disabled" });
+    if (request.headers["x-trademind-provision-secret"] !== tradeMindProvision.secret) {
+      return reply.code(401).send({ ok: false, error: "trademind_provision_unauthorized" });
+    }
+
+    const provider = bodyStringField(request.body, "provider") || "trade-mind";
+    const workspaceId = bodyStringField(request.body, "workspaceId");
+    const userId = bodyStringField(request.body, "userId");
+    const userEmail = bodyStringField(request.body, "userEmail");
+    const userDisplayName = bodyStringField(request.body, "userDisplayName") || userEmail || "";
+    const channel = bodyStringField(request.body, "channel") || "onetalk";
+    const bindingToken = bodyStringField(request.body, "bindingToken");
+    if (!workspaceId || !userId || !userEmail || !bindingToken) {
+      return reply.code(400).send({ ok: false, error: "invalid_trademind_provision_request" });
+    }
+
+    const activation = await store.provisionManagedTradeMindActivation({
+      provider,
+      workspaceId,
+      userId,
+      userEmail,
+      userDisplayName,
+      channel,
+      bindingToken,
+      expiresAt: new Date(Date.now() + MANAGED_ACTIVATION_TTL_MS).toISOString()
+    });
+
+    return reply.code(201).send({
+      ok: true,
+      activationToken: activation.activationToken,
+      expiresAt: activation.expiresAt,
+      identity: publicManagedTradeMindIdentity(activation)
+    });
+  });
+
+  app.post("/collector/v1/auth/activate", async (request, reply) => {
+    const activationToken = bodyStringField(request.body, "activationToken");
+    const sellerAccountExternalId =
+      bodyStringField(request.body, "sellerAccountExternalId") || DEFAULT_SELLER_ACCOUNT_EXTERNAL_ID;
+    const channelAccountExternalId = bodyStringField(request.body, "channelAccountExternalId") || undefined;
+    const deviceExternalId = bodyStringField(request.body, "deviceExternalId") || defaultCollectorDeviceExternalId();
+    const deviceName = bodyStringField(request.body, "deviceName") || DEFAULT_COLLECTOR_DEVICE_NAME;
+    if (!activationToken) return reply.code(400).send({ ok: false, error: "invalid_activation_request" });
+    if (tradeMindBindingConfirmer && !channelAccountExternalId) {
+      return reply.code(400).send({ ok: false, error: "missing_trademind_channel_account" });
+    }
+
+    const consumed = await store.consumeManagedTradeMindActivation({ activationToken });
+    if (!consumed) return reply.code(401).send({ ok: false, error: "activation_token_invalid" });
+
+    const registered = await store.registerCollectorDevice({
+      sellerAccountExternalId,
+      tradeMindBindingToken: consumed.bindingToken,
+      externalDeviceId: deviceExternalId,
+      deviceName,
+      activatedByUserId: consumed.identity.identityKey,
+      activatedByUserEmail: consumed.identity.userEmail,
+      activatedByUserDisplayName: consumed.identity.userDisplayName || consumed.identity.userEmail,
+      activatedByUserRoles: []
+    });
+    await store.appendAuditLog({
+      actorUserId: consumed.identity.identityKey,
+      action: "collector_device.activated",
+      targetType: "collector_device",
+      targetId: registered.id,
+      metadata: {
+        provider: consumed.identity.provider,
+        workspaceId: consumed.identity.workspaceId,
+        userId: consumed.identity.userId,
+        channel: consumed.identity.channel,
+        sellerAccountExternalId: registered.sellerAccountExternalId,
+        externalDeviceId: registered.externalDeviceId,
+        deviceName: registered.deviceName
+      }
+    });
+
+    try {
+      await confirmTradeMindBindingForCollector({
+        bindingToken: consumed.bindingToken,
+        channelAccountExternalId,
+        confirmer: tradeMindBindingConfirmer,
+        deviceId: registered.externalDeviceId || deviceExternalId,
+        sellerAccountExternalId: registered.sellerAccountExternalId
+      });
+    } catch (error) {
+      request.log.error({ err: error }, "trademind_binding_confirm_failed");
+      return reply.code(502).send({ ok: false, error: "trademind_binding_confirm_failed" });
+    }
+
+    return {
+      ok: true,
+      token: registered.token,
+      account: publicCollectorAccount(registered),
+      device: publicCollectorDevice(registered)
+    };
+  });
+
+  app.post("/collector/v1/heartbeat", async (request, reply) => {
+    const collectorDevice = await collectorDeviceFromAuthorization(request.headers.authorization || "", store);
+    if (!collectorDevice) return reply.code(401).send({ ok: false, error: "unauthorized" });
+
+    const device = await store.recordCollectorHeartbeat({
+      deviceId: collectorDevice.id,
+      lastSyncAt: bodyStringField(request.body, "lastSyncAt") || undefined,
+      lastError: bodyStringField(request.body, "lastError") || null
+    });
+    try {
+      await reportTradeMindBindingHealth({
+        bindingToken: device.tradeMindBindingToken,
+        deviceId: device.externalDeviceId || device.id,
+        lastError: device.lastError || null,
+        lastSyncAt: device.lastSyncAt,
+        reporter: tradeMindBindingHealthReporter
+      });
+    } catch (error) {
+      request.log.error({ err: error }, "trademind_binding_health_report_failed");
+      return reply.code(502).send({ ok: false, error: "trademind_binding_health_report_failed" });
+    }
+    return { ok: true, device: publicCollectorDevice(device) };
+  });
 
   app.post("/collector/v1/auth/login", async (request, reply) => {
     const email = bodyStringField(request.body, "email");
@@ -1061,7 +1210,9 @@ export async function createServerFromEnv(options: CreateServerFromEnvOptions = 
     logger: options.logger,
     allowedWebOrigins: parseEnvWebOrigins(env),
     tradeMindForwarder: createTradeMindForwarderFromEnv(env),
-    tradeMindBindingConfirmer: createTradeMindBindingConfirmerFromEnv(env)
+    tradeMindBindingConfirmer: createTradeMindBindingConfirmerFromEnv(env),
+    tradeMindBindingHealthReporter: createTradeMindBindingHealthReporterFromEnv(env),
+    tradeMindProvision: createTradeMindProvisionFromEnv(env)
   });
 }
 
@@ -1077,6 +1228,19 @@ function createTradeMindBindingConfirmerFromEnv(env: Record<string, string | und
   const bridgeSecret = env.TRADEMIND_BRIDGE_SECRET?.trim();
   if (!confirmUrl || !bridgeSecret) return undefined;
   return { bridgeSecret, confirmUrl };
+}
+
+function createTradeMindBindingHealthReporterFromEnv(env: Record<string, string | undefined>): TradeMindBindingHealthReporterOptions | undefined {
+  const healthUrl = env.TRADEMIND_BINDING_HEALTH_URL?.trim();
+  const bridgeSecret = env.TRADEMIND_BRIDGE_SECRET?.trim();
+  if (!healthUrl || !bridgeSecret) return undefined;
+  return { bridgeSecret, healthUrl };
+}
+
+function createTradeMindProvisionFromEnv(env: Record<string, string | undefined>): TradeMindProvisionOptions | undefined {
+  const secret = env.TRADEMIND_PROVISION_SECRET?.trim() || env.TRADEMIND_BRIDGE_SECRET?.trim();
+  if (!secret) return undefined;
+  return { secret };
 }
 
 function parseEnvWebOrigins(env: Record<string, string | undefined>): string[] {
@@ -1146,12 +1310,30 @@ interface NormalizedTradeMindBindingConfirmer {
   nonce: () => string;
 }
 
+interface NormalizedTradeMindBindingHealthReporter {
+  healthUrl: string;
+  bridgeSecret: string;
+  fetch: typeof fetch;
+  now: () => Date;
+  nonce: () => string;
+}
+
+interface NormalizedTradeMindProvision {
+  secret: string;
+}
+
 interface TradeMindSignedRequestOptions {
   rawBody: string;
   secret: string;
   secretHeaderName: string;
   now: () => Date;
   nonce: () => string;
+}
+
+function normalizeTradeMindProvision(options?: TradeMindProvisionOptions): NormalizedTradeMindProvision | undefined {
+  const secret = options?.secret.trim();
+  if (!secret) return undefined;
+  return { secret };
 }
 
 function normalizeTradeMindForwarder(options?: TradeMindForwarderOptions): NormalizedTradeMindForwarder | undefined {
@@ -1188,6 +1370,24 @@ function normalizeTradeMindBindingConfirmer(
   };
 }
 
+function normalizeTradeMindBindingHealthReporter(
+  options?: TradeMindBindingHealthReporterOptions
+): NormalizedTradeMindBindingHealthReporter | undefined {
+  const healthUrl = options?.healthUrl.trim();
+  const bridgeSecret = options?.bridgeSecret.trim();
+  const fetchImpl = options?.fetch || fetch;
+  const now = options?.now || (() => new Date());
+  const nonce = options?.nonce || (() => crypto.randomBytes(16).toString("hex"));
+  if (!healthUrl || !bridgeSecret) return undefined;
+  return {
+    healthUrl,
+    bridgeSecret,
+    fetch: fetchImpl,
+    now,
+    nonce
+  };
+}
+
 async function forwardSyncBatchToTradeMind(
   batch: SyncBatch,
   device: CollectorDevice,
@@ -1214,6 +1414,39 @@ async function forwardSyncBatchToTradeMind(
   });
   if (!response.ok) {
     throw new Error(`trademind_forward_failed_${response.status}`);
+  }
+}
+
+async function reportTradeMindBindingHealth(input: {
+  bindingToken?: string;
+  deviceId: string;
+  lastError?: string | null;
+  lastSyncAt?: string | null;
+  reporter: NormalizedTradeMindBindingHealthReporter | undefined;
+}): Promise<void> {
+  if (!input.reporter || !input.bindingToken) return;
+  const heartbeatAt = input.reporter.now();
+  const body = {
+    bindingToken: input.bindingToken,
+    deviceId: input.deviceId,
+    lastError: input.lastError || null,
+    lastHeartbeatAt: heartbeatAt.toISOString(),
+    lastSyncAt: input.lastSyncAt || null
+  };
+  const rawBody = JSON.stringify(body);
+  const response = await input.reporter.fetch(input.reporter.healthUrl, {
+    method: "POST",
+    headers: tradeMindSignedHeaders({
+      rawBody,
+      secret: input.reporter.bridgeSecret,
+      secretHeaderName: "x-trademind-bridge-secret",
+      now: () => heartbeatAt,
+      nonce: input.reporter.nonce
+    }),
+    body: rawBody
+  });
+  if (!response.ok) {
+    throw new Error(`trademind_binding_health_report_failed_${response.status}`);
   }
 }
 
@@ -1421,6 +1654,18 @@ function publicUserFromSession(session: InternalSession): PublicInternalUser {
   };
 }
 
+function publicManagedTradeMindIdentity(activation: ProvisionedManagedTradeMindActivation) {
+  return {
+    identityKey: activation.identityKey,
+    provider: activation.provider,
+    workspaceId: activation.workspaceId,
+    userId: activation.userId,
+    userEmail: activation.userEmail,
+    userDisplayName: activation.userDisplayName,
+    channel: activation.channel
+  };
+}
+
 function publicCollectorDevice(device: CollectorDevice | RegisteredCollectorDevice): CollectorDevice {
   return {
     id: device.id,
@@ -1429,6 +1674,8 @@ function publicCollectorDevice(device: CollectorDevice | RegisteredCollectorDevi
     deviceName: device.deviceName,
     status: device.status,
     lastHeartbeatAt: device.lastHeartbeatAt,
+    lastSyncAt: device.lastSyncAt,
+    lastError: device.lastError,
     createdAt: device.createdAt,
     updatedAt: device.updatedAt
   };

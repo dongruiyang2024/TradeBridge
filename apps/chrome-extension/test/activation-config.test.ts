@@ -2,10 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createActivatedExtensionConfig } from "../src/options/activation-config.js";
 
-test("createActivatedExtensionConfig stores the activating TradeBridge account email", () => {
+test("createActivatedExtensionConfig uses the managed Trade-Mind account label by default", () => {
   const config = createActivatedExtensionConfig({
     serverUrl: "http://127.0.0.1:5032",
-    email: "admin@example.com",
     historyBackfillEnabled: true,
     historyMessagesPerConversation: 50,
     existingDeviceId: undefined,
@@ -23,7 +22,7 @@ test("createActivatedExtensionConfig stores the activating TradeBridge account e
     }
   });
 
-  assert.equal(config.tradeBridgeAccountEmail, "admin@example.com");
+  assert.equal(config.tradeBridgeAccountEmail, "Trade-Mind");
   assert.equal(config.serverUrl, "http://127.0.0.1:5032");
   assert.equal(config.collectorToken, "collector-token");
   assert.equal(config.syncIntervalSeconds, 10);
@@ -34,7 +33,7 @@ test("createActivatedExtensionConfig stores the activating TradeBridge account e
 test("createActivatedExtensionConfig preserves Trade-Mind binding token and real account identities", () => {
   const config = createActivatedExtensionConfig({
     serverUrl: "http://127.0.0.1:5032",
-    email: "admin@example.com",
+    accountEmail: "admin@example.com",
     tradeMindBindingToken: "tm-binding-token",
     sellerAccountExternalId: "self-ali-1",
     sellerAccountDisplayName: "Self Ali",
@@ -54,6 +53,7 @@ test("createActivatedExtensionConfig preserves Trade-Mind binding token and real
     }
   });
 
+  assert.equal(config.tradeBridgeAccountEmail, "admin@example.com");
   assert.equal(config.tradeMindBindingToken, "tm-binding-token");
   assert.equal(config.sellerAccountExternalId, "self-ali-1");
   assert.equal(config.sellerAccountDisplayName, "Self Ali");

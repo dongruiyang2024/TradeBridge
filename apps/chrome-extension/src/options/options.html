@@ -8,31 +8,20 @@
   <body>
     <main class="options-shell">
       <header>
-        <h1>TradeBridge 设置</h1>
-        <p>连接本地 TradeBridge 服务并激活 OneTalk 采集端</p>
+        <h1>Trade-Mind 插件设置</h1>
+        <p>连接 Trade-Mind 并激活 OneTalk 采集端</p>
       </header>
 
       <form id="options-form">
         <section class="settings-panel" aria-label="连接配置">
           <div class="readonly-row">
-            <span>服务地址</span>
-            <strong id="server-url">本地服务 http://localhost:3001</strong>
-          </div>
-
-          <div class="field-row">
-            <label>
-              <span>邮箱</span>
-              <input name="email" type="email" autocomplete="username" required />
-            </label>
-            <label>
-              <span>密码</span>
-              <input name="password" type="password" autocomplete="current-password" required />
-            </label>
+            <span>服务连接</span>
+            <strong id="server-url">自动连接本地采集服务</strong>
           </div>
 
           <label>
-            <span>Trade-Mind Binding Token</span>
-            <input name="tradeMindBindingToken" type="text" autocomplete="off" placeholder="从 Trade-Mind 沟通助手复制" />
+            <span>Trade-Mind 激活码</span>
+            <input name="activationToken" type="text" autocomplete="one-time-code" placeholder="从 Trade-Mind 沟通页复制" required />
           </label>
 
           <div class="field-row">
@@ -69,7 +58,7 @@
           <p><span>设备 ID</span><strong id="current-device-id">未创建</strong></p>
         </section>
 
-        <p class="security-note">只填写 TradeBridge 管理员账号；不要填写 OneTalk 密码、Cookie 或 Token。保存前请先打开并登录 OneTalk 页面。</p>
+        <p class="security-note">只填写 Trade-Mind 激活码；不要填写 OneTalk 密码、Cookie 或 Token。保存前请先打开并登录 OneTalk 页面。</p>
         <button type="submit">保存并激活</button>
       </form>
 

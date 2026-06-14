@@ -217,6 +217,234 @@ test("POST /collector/v1/auth/login stores Trade-Mind binding tokens without exp
   assert.equal(devices[0].tradeMindBindingToken, "tm-binding-token");
 });
 
+
+test("POST /collector/v1/trademind/provision is idempotent for a Trade-Mind workspace member", async () => {
+  const store = new InMemorySyncStore();
+  const app = await createServer({ store, tradeMindProvision: { secret: "provision-secret" } });
+  const payload = {
+    provider: "trade-mind",
+    workspaceId: "workspace-1",
+    userId: "user-1",
+    userEmail: "owner@example.com",
+    userDisplayName: "Owner One",
+    channel: "onetalk",
+    bindingToken: "tm-binding-token"
+  };
+
+  const first = await app.inject({
+    method: "POST",
+    url: "/collector/v1/trademind/provision",
+    headers: { "x-trademind-provision-secret": "provision-secret" },
+    payload
+  });
+  const second = await app.inject({
+    method: "POST",
+    url: "/collector/v1/trademind/provision",
+    headers: { "x-trademind-provision-secret": "provision-secret" },
+    payload
+  });
+
+  assert.equal(first.statusCode, 201);
+  assert.equal(second.statusCode, 201);
+  const firstBody = first.json();
+  const secondBody = second.json();
+  assert.equal(firstBody.ok, true);
+  assert.equal(firstBody.identity.provider, "trade-mind");
+  assert.equal(firstBody.identity.workspaceId, "workspace-1");
+  assert.equal(firstBody.identity.userId, "user-1");
+  assert.equal(firstBody.identity.channel, "onetalk");
+  assert.equal(firstBody.identity.userEmail, "owner@example.com");
+  assert.equal(typeof firstBody.activationToken, "string");
+  assert.notEqual(firstBody.activationToken, secondBody.activationToken);
+  assert.equal((await store.listManagedTradeMindActivations()).length, 1);
+});
+
+test("POST /collector/v1/auth/activate consumes a Trade-Mind activation token without Bridge credentials", async () => {
+  const store = new InMemorySyncStore();
+  const confirmCalls = [];
+  const app = await createServer({
+    store,
+    tradeMindProvision: { secret: "provision-secret" },
+    tradeMindBindingConfirmer: {
+      bridgeSecret: "bridge-secret",
+      confirmUrl: "https://pilot.sinan.yun/api/communication/binding/bridge-confirm",
+      fetch: async (url, init) => {
+        confirmCalls.push({ body: String(init?.body), headers: init?.headers, url: String(url) });
+        return new Response(JSON.stringify({ binding: { id: "binding-1" } }), { status: 201 });
+      },
+      nonce: () => "confirm-nonce-1",
+      now: () => new Date("2026-06-14T08:00:00.000Z")
+    }
+  });
+  const provision = await app.inject({
+    method: "POST",
+    url: "/collector/v1/trademind/provision",
+    headers: { "x-trademind-provision-secret": "provision-secret" },
+    payload: {
+      provider: "trade-mind",
+      workspaceId: "workspace-1",
+      userId: "user-1",
+      userEmail: "owner@example.com",
+      userDisplayName: "Owner One",
+      channel: "onetalk",
+      bindingToken: "tm-binding-token"
+    }
+  });
+  assert.equal(provision.statusCode, 201);
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/collector/v1/auth/activate",
+    payload: {
+      activationToken: provision.json().activationToken,
+      sellerAccountExternalId: "self-ali-1",
+      channelAccountExternalId: "self-login-1",
+      deviceExternalId: "chrome-extension-1",
+      deviceName: "Chrome Extension"
+    }
+  });
+
+  assert.equal(response.statusCode, 200);
+  const body = response.json();
+  assert.equal(body.ok, true);
+  assert.equal(typeof body.token, "string");
+  assert.equal(body.device.externalDeviceId, "chrome-extension-1");
+  assert.equal(body.device.sellerAccountExternalId, "self-ali-1");
+  assert.equal(body.account.email, "owner@example.com");
+  assert.equal(body.account.id, "trade-mind:workspace-1:user-1:onetalk");
+  assert.equal(confirmCalls.length, 1);
+  assert.match(confirmCalls[0].body, /tm-binding-token/);
+  assert.match(confirmCalls[0].body, /self-login-1/);
+
+  const replay = await app.inject({
+    method: "POST",
+    url: "/collector/v1/auth/activate",
+    payload: {
+      activationToken: provision.json().activationToken,
+      sellerAccountExternalId: "self-ali-1",
+      channelAccountExternalId: "self-login-1",
+      deviceExternalId: "chrome-extension-1",
+      deviceName: "Chrome Extension"
+    }
+  });
+  assert.equal(replay.statusCode, 401);
+  assert.deepEqual(replay.json(), { ok: false, error: "activation_token_invalid" });
+});
+
+test("POST /collector/v1/heartbeat records collector health without expiring the collector token", async () => {
+ const { app, store } = await createAuthApp();
+  const activation = await app.inject({
+    method: "POST",
+    url: "/collector/v1/auth/login",
+    payload: {
+      email: "admin@example.com",
+      password: "secret",
+      sellerAccountExternalId: "seller-1",
+      deviceExternalId: "chrome-extension-1",
+      deviceName: "Chrome Extension"
+    }
+  });
+  assert.equal(activation.statusCode, 200);
+  const token = activation.json().token;
+
+  const heartbeat = await app.inject({
+    method: "POST",
+    url: "/collector/v1/heartbeat",
+    headers: { authorization: "Bearer " + token },
+    payload: {
+      lastSyncAt: "2026-06-14T08:01:00.000Z",
+      lastError: "onetalk_tab_required"
+    }
+  });
+
+  assert.equal(heartbeat.statusCode, 200);
+  assert.equal(heartbeat.json().device.lastSyncAt, "2026-06-14T08:01:00.000Z");
+  assert.equal(heartbeat.json().device.lastError, "onetalk_tab_required");
+
+  const me = await app.inject({
+    method: "GET",
+    url: "/collector/v1/me",
+    headers: { authorization: "Bearer " + token }
+  });
+  assert.equal(me.statusCode, 200);
+  assert.equal(me.json().device.lastSyncAt, "2026-06-14T08:01:00.000Z");
+  assert.equal(me.json().device.lastError, "onetalk_tab_required");
+  assert.equal((await store.authenticateCollectorDevice(token))?.status, "active");
+});
+
+test("POST /collector/v1/heartbeat forwards Trade-Mind binding health with signed headers", async () => {
+  const store = new InMemorySyncStore();
+  await store.createInternalUser({
+    email: "admin@example.com",
+    displayName: "Admin User",
+    passwordHash: await hashPassword("secret"),
+    roles: ["admin"]
+  });
+  const healthCalls: Array<{ body: string; headers: Record<string, string>; url: string }> = [];
+  const app = await createServer({
+    store,
+    tradeMindBindingHealthReporter: {
+      healthUrl: "https://pilot.sinan.yun/api/communication/binding/bridge-health",
+      bridgeSecret: "bridge-secret",
+      fetch: async (url, init) => {
+        healthCalls.push({
+          body: String(init?.body),
+          headers: init?.headers as Record<string, string>,
+          url: String(url)
+        });
+        return new Response(JSON.stringify({ health: { id: "binding-1" } }), { status: 200 });
+      },
+      nonce: () => "health-nonce-1",
+      now: () => new Date("2026-06-14T08:02:00.000Z")
+    }
+  });
+  const activation = await app.inject({
+    method: "POST",
+    url: "/collector/v1/auth/login",
+    payload: {
+      email: "admin@example.com",
+      password: "secret",
+      sellerAccountExternalId: "self-ali-1",
+      channelAccountExternalId: "self-login-1",
+      tradeMindBindingToken: "tm-binding-token",
+      deviceExternalId: "chrome-extension-1",
+      deviceName: "Chrome Extension"
+    }
+  });
+  assert.equal(activation.statusCode, 200);
+
+  const heartbeat = await app.inject({
+    method: "POST",
+    url: "/collector/v1/heartbeat",
+    headers: { authorization: "Bearer " + activation.json().token },
+    payload: {
+      lastSyncAt: "2026-06-14T08:01:00.000Z",
+      lastError: "onetalk_tab_required"
+    }
+  });
+
+  assert.equal(heartbeat.statusCode, 200);
+  assert.equal(healthCalls.length, 1);
+  assert.equal(healthCalls[0].url, "https://pilot.sinan.yun/api/communication/binding/bridge-health");
+  assert.deepEqual(JSON.parse(healthCalls[0].body), {
+    bindingToken: "tm-binding-token",
+    deviceId: "chrome-extension-1",
+    lastError: "onetalk_tab_required",
+    lastHeartbeatAt: "2026-06-14T08:02:00.000Z",
+    lastSyncAt: "2026-06-14T08:01:00.000Z"
+  });
+  assert.equal(healthCalls[0].headers["Content-Type"], "application/json");
+  assert.equal(healthCalls[0].headers["x-trademind-bridge-secret"], "bridge-secret");
+  assert.equal(healthCalls[0].headers["x-trademind-timestamp"], "1781424120");
+  assert.equal(healthCalls[0].headers["x-trademind-nonce"], "health-nonce-1");
+  assert.equal(
+    healthCalls[0].headers["x-trademind-signature"],
+    createHmac("sha256", "bridge-secret")
+      .update(`1781424120.health-nonce-1.${healthCalls[0].body}`)
+      .digest("hex")
+  );
+});
+
 test("POST /collector/v1/auth/login auto-confirms Trade-Mind bindings after collector activation", async () => {
   const store = new InMemorySyncStore();
   await store.createInternalUser({

@@ -10,6 +10,7 @@ import { runSyncOnce } from "./sync-orchestrator.js";
 import {
   listOutboundMessages,
   markOutboundMessageDelivered,
+  sendCollectorHeartbeat,
   uploadSyncBatch,
   validateTradeBridgeAccount
 } from "./tradebridge-client.js";
@@ -158,9 +159,26 @@ async function runDefaultSync() {
 }
 
 async function runDefaultSyncAndOutbound() {
-  const sync = await runDefaultSync();
-  await runDefaultOutboundDelivery();
-  return sync;
+  try {
+    const sync = await runDefaultSync();
+    await runDefaultOutboundDelivery();
+    await reportCollectorHeartbeat({ lastSyncAt: new Date().toISOString() });
+    return sync;
+  } catch (error) {
+    await reportCollectorHeartbeat({ lastError: errorMessage(error) }).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function reportCollectorHeartbeat(input: { lastSyncAt?: string; lastError?: string }): Promise<void> {
+  const config = await stateStore.getConfig();
+  if (!config) return;
+  await sendCollectorHeartbeat({
+    serverUrl: config.serverUrl,
+    collectorToken: config.collectorToken,
+    lastSyncAt: input.lastSyncAt,
+    lastError: input.lastError
+  });
 }
 
 function runDefaultOutboundDelivery() {

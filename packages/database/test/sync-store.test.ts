@@ -566,6 +566,66 @@ test("internal users can be listed, updated, disabled, reset, and resolved for c
   assert.equal(await store.getInternalSession("session-token"), null);
 });
 
+
+test("managed Trade-Mind activation provisioning is idempotent and rotates short-lived tokens", async () => {
+  const store = new InMemorySyncStore();
+  const first = await store.provisionManagedTradeMindActivation({
+    provider: "trade-mind",
+    workspaceId: "workspace-1",
+    userId: "user-1",
+    userEmail: "owner@example.com",
+    userDisplayName: "Owner One",
+    channel: "onetalk",
+    bindingToken: "tm-binding-token",
+    activationToken: "activation-token-1",
+    expiresAt: "2026-06-14T08:15:00.000Z"
+  });
+  const second = await store.provisionManagedTradeMindActivation({
+    provider: "trade-mind",
+    workspaceId: "workspace-1",
+    userId: "user-1",
+    userEmail: "owner@example.com",
+    userDisplayName: "Owner One",
+    channel: "onetalk",
+    bindingToken: "tm-binding-token",
+    activationToken: "activation-token-2",
+    expiresAt: "2026-06-14T08:16:00.000Z"
+  });
+
+  assert.equal(first.identityKey, "trade-mind:workspace-1:user-1:onetalk");
+  assert.equal(second.identityKey, first.identityKey);
+  assert.equal(first.activationToken, "activation-token-1");
+  assert.equal(second.activationToken, "activation-token-2");
+  assert.equal((await store.listManagedTradeMindActivations()).length, 1);
+});
+
+test("managed Trade-Mind activation tokens are one-time credentials", async () => {
+  const store = new InMemorySyncStore();
+  await store.provisionManagedTradeMindActivation({
+    provider: "trade-mind",
+    workspaceId: "workspace-1",
+    userId: "user-1",
+    userEmail: "owner@example.com",
+    channel: "onetalk",
+    bindingToken: "tm-binding-token",
+    activationToken: "activation-token-1",
+    expiresAt: "2026-06-14T08:15:00.000Z"
+  });
+
+  const consumed = await store.consumeManagedTradeMindActivation({
+    activationToken: "activation-token-1",
+    consumedAt: "2026-06-14T08:01:00.000Z"
+  });
+  const replay = await store.consumeManagedTradeMindActivation({
+    activationToken: "activation-token-1",
+    consumedAt: "2026-06-14T08:02:00.000Z"
+  });
+
+  assert.equal(consumed?.bindingToken, "tm-binding-token");
+  assert.equal(consumed?.identity.userEmail, "owner@example.com");
+  assert.equal(replay, null);
+});
+
 test("collector devices authenticate by one-time tokens and can be revoked", async () => {
   const store = new InMemorySyncStore();
   const registered = await store.registerCollectorDevice({

@@ -16,7 +16,7 @@ const currentDeviceId = document.querySelector<HTMLElement>("#current-device-id"
 const detectedLoginId = document.querySelector<HTMLElement>("#detected-login-id");
 const detectedAliId = document.querySelector<HTMLElement>("#detected-ali-id");
 const serverUrlDisplay = document.querySelector<HTMLElement>("#server-url");
-const DEFAULT_SERVER_URL = "http://localhost:3001";
+const DEFAULT_SERVER_URL = "http://127.0.0.1:5032";
 const DEFAULT_DEVICE_NAME = "Chrome Extension";
 const DEFAULT_SYNC_INTERVAL_SECONDS = 10;
 const DEFAULT_HISTORY_MESSAGES_PER_CONVERSATION = 20;
@@ -30,7 +30,7 @@ form?.addEventListener("submit", async (event) => {
 
   try {
     const serverUrl = normalizeServerUrl(DEFAULT_SERVER_URL);
-    const email = required(formData, "email");
+    const activationToken = required(formData, "activationToken");
     const historyBackfillEnabled = formData.get("historyBackfillEnabled") === "on";
     const historyMessagesPerConversation = boundedInteger(formData.get("historyMessagesPerConversation"), {
       fallback: currentConfig?.historyMessagesPerConversation || DEFAULT_HISTORY_MESSAGES_PER_CONVERSATION,
@@ -39,29 +39,24 @@ form?.addEventListener("submit", async (event) => {
     });
     const deviceExternalId = currentConfig?.deviceId || createDeviceExternalId();
     const deviceName = currentConfig?.deviceName || DEFAULT_DEVICE_NAME;
-    const tradeMindBindingToken = optional(formData, "tradeMindBindingToken");
-
     status?.replaceChildren("检测 OneTalk 账号...");
     const oneTalkAccount = await detectOneTalkAccount(chromeApi);
     renderDetectedOneTalkAccount(oneTalkAccount.loginId, oneTalkAccount.aliId);
 
-    status?.replaceChildren("申请本地服务权限...");
+    status?.replaceChildren("申请本地采集服务权限...");
     await ensureServerHostPermission(serverUrl);
     status?.replaceChildren("激活中...");
     const activation = await activateCollectorDevice({
       serverUrl,
-      email,
-      password: required(formData, "password"),
+      activationToken,
       sellerAccountExternalId: oneTalkAccount.aliId,
-      tradeMindBindingToken,
       channelAccountExternalId: oneTalkAccount.loginId,
       deviceExternalId,
       deviceName
     });
     const config = createActivatedExtensionConfig({
       serverUrl,
-      email,
-      tradeMindBindingToken,
+      accountEmail: activation.account?.email,
       sellerAccountExternalId: oneTalkAccount.aliId,
       channelAccountExternalId: oneTalkAccount.loginId,
       syncIntervalSeconds: DEFAULT_SYNC_INTERVAL_SECONDS,
@@ -86,7 +81,7 @@ form?.addEventListener("submit", async (event) => {
 async function hydrate(): Promise<void> {
   const config = await store.getConfig();
   currentConfig = config;
-  serverUrlDisplay?.replaceChildren("本地服务 " + DEFAULT_SERVER_URL);
+  serverUrlDisplay?.replaceChildren("自动连接本地采集服务");
   setInput(
     "historyMessagesPerConversation",
     String(config?.historyMessagesPerConversation || DEFAULT_HISTORY_MESSAGES_PER_CONVERSATION)
@@ -95,8 +90,6 @@ async function hydrate(): Promise<void> {
   renderCurrentConfig(config);
   renderDetectedOneTalkAccount(config?.channelAccountExternalId, config?.sellerAccountExternalId);
   if (!form || !config) return;
-  setInput("email", config.tradeBridgeAccountEmail);
-  setInput("tradeMindBindingToken", config.tradeMindBindingToken);
 }
 
 function setInput(name: string, value?: string): void {
@@ -140,16 +133,14 @@ function renderDetectedOneTalkAccount(loginId?: string, aliId?: string): void {
 
 function activationErrorMessage(code: string): string {
   const messages: Record<string, string> = {
-    missing_email: "请填写管理员邮箱",
-    missing_password: "请填写管理员密码",
+    missing_activationToken: "请从 Trade-Mind 沟通页复制激活码",
     invalid_server_url: "本地 TradeBridge 服务地址无效",
     server_host_permission_denied: "未授予本地服务访问权限，插件无法连接 TradeBridge 服务端",
     onetalk_tab_required: "请先打开并登录 OneTalk 页面，再回到这里保存",
     chrome_tabs_unavailable: "浏览器标签页权限不可用，无法检测 OneTalk 账号",
     missing_onetalk_account_identity: "未检测到 OneTalk Login ID 或 Ali ID，请确认 OneTalk 已登录后重试",
     invalid_collector_login_request: "激活请求格式不匹配，请确认服务端已重启到最新版本",
-    invalid_credentials: "管理员邮箱或密码不正确",
-    forbidden: "当前账号不是管理员，不能激活采集端",
+    activation_token_invalid: "激活码无效或已过期，请回到 Trade-Mind 重新生成",
     missing_trademind_channel_account: "未检测到 OneTalk Login ID，无法完成 Trade-Mind 绑定",
     collector_activation_failed: "采集端激活请求失败",
     collector_activation_response_invalid: "采集端激活响应格式不正确，请确认本地 TradeBridge 服务已启动"

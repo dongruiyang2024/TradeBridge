@@ -7,6 +7,12 @@ import type {
   AssignCustomerInput,
   ClaimPendingOutboundMessagesInput,
   CollectorDevice,
+  RecordCollectorHeartbeatInput,
+  ProvisionedManagedTradeMindActivation,
+  ProvisionManagedTradeMindActivationInput,
+  ManagedTradeMindIdentity,
+  ConsumedManagedTradeMindActivation,
+  ConsumeManagedTradeMindActivationInput,
   ConversationCustomerScope,
   CreateAiSummaryInput,
   CreateAuditLogInput,
@@ -246,6 +252,22 @@ interface AcceptUserInvitationRow extends UserInvitationRow {
   userUpdatedAt: string | Date;
 }
 
+interface ManagedTradeMindActivationRow {
+  identityKey: string;
+  provider: string;
+  workspaceId: string;
+  userId: string;
+  userEmail: string;
+  userDisplayName: string | null;
+  channel: string;
+  bindingToken: string;
+  activationTokenHash: string;
+  expiresAt: string | Date;
+  consumedAt: string | Date | null;
+  createdAt: string | Date;
+  updatedAt: string | Date;
+}
+
 interface CollectorDeviceRow {
   id: string;
   externalDeviceId: string | null;
@@ -259,6 +281,8 @@ interface CollectorDeviceRow {
   status: string;
   tokenHash?: string | null;
   lastHeartbeatAt: string | Date | null;
+  lastSyncAt: string | Date | null;
+  lastError: string | null;
   createdAt: string | Date;
   updatedAt: string | Date;
 }
@@ -1644,6 +1668,196 @@ export class PostgresSyncStore {
     return row ? mapInternalSession(row, token) : null;
   }
 
+
+  async provisionManagedTradeMindActivation(
+    input: ProvisionManagedTradeMindActivationInput
+  ): Promise<ProvisionedManagedTradeMindActivation> {
+    const activationToken = input.activationToken || crypto.randomBytes(32).toString("hex");
+    const tokenHash = hashContent(activationToken);
+    const identityKey = managedTradeMindIdentityKey(input);
+    const result = await this.client.query<ManagedTradeMindActivationRow>(
+      `
+      /* provision_managed_trademind_activation */
+      INSERT INTO managed_trademind_activation (
+        identity_key,
+        provider,
+        workspace_id,
+        user_id,
+        user_email,
+        user_display_name,
+        channel,
+        binding_token,
+        activation_token_hash,
+        expires_at,
+        consumed_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::timestamptz, now() + interval '15 minutes'), NULL)
+      ON CONFLICT (provider, workspace_id, user_id, channel)
+      DO UPDATE SET
+        identity_key = EXCLUDED.identity_key,
+        user_email = EXCLUDED.user_email,
+        user_display_name = EXCLUDED.user_display_name,
+        binding_token = EXCLUDED.binding_token,
+        activation_token_hash = EXCLUDED.activation_token_hash,
+        expires_at = EXCLUDED.expires_at,
+        consumed_at = NULL,
+        updated_at = now()
+      RETURNING
+        identity_key AS "identityKey",
+        provider,
+        workspace_id AS "workspaceId",
+        user_id AS "userId",
+        user_email AS "userEmail",
+        user_display_name AS "userDisplayName",
+        channel,
+        binding_token AS "bindingToken",
+        activation_token_hash AS "activationTokenHash",
+        expires_at AS "expiresAt",
+        consumed_at AS "consumedAt",
+        created_at AS "createdAt",
+        updated_at AS "updatedAt"
+      `,
+      [
+        identityKey,
+        input.provider,
+        input.workspaceId,
+        input.userId,
+        input.userEmail.trim().toLowerCase(),
+        input.userDisplayName || null,
+        input.channel,
+        input.bindingToken,
+        tokenHash,
+        input.expiresAt || null
+      ]
+    );
+    return {
+      ...mapManagedTradeMindActivation(requiredRow(result.rows[0], "managed_trademind_activation")),
+      activationToken
+    };
+  }
+
+  async consumeManagedTradeMindActivation(
+    input: ConsumeManagedTradeMindActivationInput
+  ): Promise<ConsumedManagedTradeMindActivation | null> {
+    const consumedAt = input.consumedAt || new Date().toISOString();
+    const result = await this.client.query<ManagedTradeMindActivationRow>(
+      `
+      /* consume_managed_trademind_activation */
+      UPDATE managed_trademind_activation
+      SET consumed_at = $2::timestamptz,
+        updated_at = $2::timestamptz
+      WHERE activation_token_hash = $1
+        AND consumed_at IS NULL
+        AND expires_at > $2::timestamptz
+      RETURNING
+        identity_key AS "identityKey",
+        provider,
+        workspace_id AS "workspaceId",
+        user_id AS "userId",
+        user_email AS "userEmail",
+        user_display_name AS "userDisplayName",
+        channel,
+        binding_token AS "bindingToken",
+        activation_token_hash AS "activationTokenHash",
+        expires_at AS "expiresAt",
+        consumed_at AS "consumedAt",
+        created_at AS "createdAt",
+        updated_at AS "updatedAt"
+      `,
+      [hashContent(input.activationToken), consumedAt]
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    const activation = mapManagedTradeMindActivation(row);
+    return {
+      bindingToken: activation.bindingToken,
+      consumedAt: activation.consumedAt || consumedAt,
+      expiresAt: activation.expiresAt,
+      identity: managedTradeMindIdentityFromActivation(activation)
+    };
+  }
+
+  async listManagedTradeMindActivations(): Promise<ProvisionedManagedTradeMindActivation[]> {
+    const result = await this.client.query<ManagedTradeMindActivationRow>(
+      `
+      /* list_managed_trademind_activations */
+      SELECT
+        identity_key AS "identityKey",
+        provider,
+        workspace_id AS "workspaceId",
+        user_id AS "userId",
+        user_email AS "userEmail",
+        user_display_name AS "userDisplayName",
+        channel,
+        binding_token AS "bindingToken",
+        activation_token_hash AS "activationTokenHash",
+        expires_at AS "expiresAt",
+        consumed_at AS "consumedAt",
+        created_at AS "createdAt",
+        updated_at AS "updatedAt"
+      FROM managed_trademind_activation
+      ORDER BY updated_at DESC
+      `
+    );
+    return result.rows.map(mapManagedTradeMindActivation);
+  }
+
+  async recordCollectorHeartbeat(input: RecordCollectorHeartbeatInput): Promise<CollectorDevice> {
+    const result = await this.client.query<CollectorDeviceRow>(
+      `
+      /* record_collector_heartbeat */
+      WITH updated_device AS (
+        UPDATE collector_device
+        SET last_heartbeat_at = COALESCE($2::timestamptz, now()),
+          last_sync_at = COALESCE($3::timestamptz, last_sync_at),
+          last_error = $4,
+          updated_at = COALESCE($2::timestamptz, now())
+        WHERE id = $1::uuid
+        RETURNING
+          id,
+          seller_account_id,
+          external_device_id,
+          device_name,
+          trade_mind_binding_token,
+          activated_by_user_id,
+          activated_by_user_email,
+          activated_by_user_display_name,
+          activated_by_user_roles,
+          status,
+          last_heartbeat_at,
+          last_sync_at,
+          last_error,
+          last_sync_at,
+          last_error,
+          created_at,
+          updated_at
+      )
+      SELECT
+        d.id::text AS "id",
+        d.external_device_id AS "externalDeviceId",
+        s.external_account_id AS "sellerAccountExternalId",
+        d.trade_mind_binding_token AS "tradeMindBindingToken",
+        d.device_name AS "deviceName",
+        d.activated_by_user_id AS "activatedByUserId",
+        d.activated_by_user_email AS "activatedByUserEmail",
+        d.activated_by_user_display_name AS "activatedByUserDisplayName",
+        d.activated_by_user_roles AS "activatedByUserRoles",
+        d.status AS "status",
+        d.last_heartbeat_at AS "lastHeartbeatAt",
+        d.last_sync_at AS "lastSyncAt",
+        d.last_error AS "lastError",
+        d.last_sync_at AS "lastSyncAt",
+        d.last_error AS "lastError",
+        d.created_at AS "createdAt",
+        d.updated_at AS "updatedAt"
+      FROM updated_device d
+      LEFT JOIN seller_account s ON s.id = d.seller_account_id
+      `,
+      [input.deviceId, input.heartbeatAt || null, input.lastSyncAt || null, input.lastError ?? null]
+    );
+    return mapCollectorDevice(requiredRow(result.rows[0], "collector_device"));
+  }
+
   async registerCollectorDevice(input: RegisterCollectorDeviceInput): Promise<RegisteredCollectorDevice> {
     const token = input.token || crypto.randomBytes(32).toString("hex");
     const tokenHash = hashContent(token);
@@ -1706,6 +1920,8 @@ export class PostgresSyncStore {
           activated_by_user_roles,
           status,
           last_heartbeat_at,
+          last_sync_at,
+          last_error,
           created_at,
           updated_at
       )
@@ -1722,6 +1938,8 @@ export class PostgresSyncStore {
         d.status AS "status",
         d.device_token_hash AS "tokenHash",
         d.last_heartbeat_at AS "lastHeartbeatAt",
+        d.last_sync_at AS "lastSyncAt",
+        d.last_error AS "lastError",
         d.created_at AS "createdAt",
         d.updated_at AS "updatedAt"
       FROM upsert_device d
@@ -1763,6 +1981,8 @@ export class PostgresSyncStore {
         d.activated_by_user_roles AS "activatedByUserRoles",
         d.status AS "status",
         d.last_heartbeat_at AS "lastHeartbeatAt",
+        d.last_sync_at AS "lastSyncAt",
+        d.last_error AS "lastError",
         d.created_at AS "createdAt",
         d.updated_at AS "updatedAt"
       FROM collector_device d
@@ -1795,6 +2015,8 @@ export class PostgresSyncStore {
           activated_by_user_roles,
           status,
           last_heartbeat_at,
+          last_sync_at,
+          last_error,
           created_at,
           updated_at
       )
@@ -1810,6 +2032,8 @@ export class PostgresSyncStore {
         d.activated_by_user_roles AS "activatedByUserRoles",
         d.status AS "status",
         d.last_heartbeat_at AS "lastHeartbeatAt",
+        d.last_sync_at AS "lastSyncAt",
+        d.last_error AS "lastError",
         d.created_at AS "createdAt",
         d.updated_at AS "updatedAt"
       FROM revoked_device d
@@ -1842,6 +2066,8 @@ export class PostgresSyncStore {
           activated_by_user_roles,
           status,
           last_heartbeat_at,
+          last_sync_at,
+          last_error,
           created_at,
           updated_at
       )
@@ -1857,6 +2083,8 @@ export class PostgresSyncStore {
         d.activated_by_user_roles AS "activatedByUserRoles",
         d.status AS "status",
         d.last_heartbeat_at AS "lastHeartbeatAt",
+        d.last_sync_at AS "lastSyncAt",
+        d.last_error AS "lastError",
         d.created_at AS "createdAt",
         d.updated_at AS "updatedAt"
       FROM authenticated_device d
@@ -2376,6 +2604,50 @@ function mapOutboundMessage(row: OutboundMessageRow): StoredOutboundMessage {
   };
 }
 
+function mapManagedTradeMindActivation(row: ManagedTradeMindActivationRow): ProvisionedManagedTradeMindActivation {
+  return {
+    identityKey: row.identityKey,
+    provider: row.provider,
+    workspaceId: row.workspaceId,
+    userId: row.userId,
+    userEmail: row.userEmail,
+    userDisplayName: row.userDisplayName ?? undefined,
+    channel: row.channel,
+    bindingToken: row.bindingToken,
+    activationToken: "",
+    activationTokenHash: row.activationTokenHash,
+    expiresAt: isoString(row.expiresAt) || "",
+    consumedAt: isoString(row.consumedAt),
+    createdAt: isoString(row.createdAt) || "",
+    updatedAt: isoString(row.updatedAt) || ""
+  };
+}
+
+function managedTradeMindIdentityKey(input: {
+  provider: string;
+  workspaceId: string;
+  userId: string;
+  channel: string;
+}): string {
+  return [input.provider, input.workspaceId, input.userId, input.channel].map((value) => value.trim()).join(":");
+}
+
+function managedTradeMindIdentityFromActivation(
+  activation: ProvisionedManagedTradeMindActivation
+): ManagedTradeMindIdentity {
+  return {
+    identityKey: activation.identityKey,
+    provider: activation.provider,
+    workspaceId: activation.workspaceId,
+    userId: activation.userId,
+    userEmail: activation.userEmail,
+    userDisplayName: activation.userDisplayName,
+    channel: activation.channel,
+    createdAt: activation.createdAt,
+    updatedAt: activation.updatedAt
+  };
+}
+
 function mapCollectorDevice(row: CollectorDeviceRow): CollectorDevice {
   const activatedByUserRoles = normalizeRoles(row.activatedByUserRoles ?? []);
   return {
@@ -2385,6 +2657,8 @@ function mapCollectorDevice(row: CollectorDeviceRow): CollectorDevice {
     deviceName: row.deviceName ?? undefined,
     status: row.status,
     lastHeartbeatAt: isoString(row.lastHeartbeatAt),
+    lastSyncAt: isoString(row.lastSyncAt),
+    lastError: row.lastError ?? undefined,
     createdAt: isoString(row.createdAt) || "",
     updatedAt: isoString(row.updatedAt) || "",
     ...optionalProps({

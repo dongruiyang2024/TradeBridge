@@ -6,6 +6,12 @@ import type {
   AssignCustomerInput,
   ClaimPendingOutboundMessagesInput,
   CollectorDevice,
+  RecordCollectorHeartbeatInput,
+  ProvisionedManagedTradeMindActivation,
+  ProvisionManagedTradeMindActivationInput,
+  ManagedTradeMindIdentity,
+  ConsumedManagedTradeMindActivation,
+  ConsumeManagedTradeMindActivationInput,
   ConversationCustomerScope,
   CreateAiSummaryInput,
   CreateAuditLogInput,
@@ -68,6 +74,7 @@ export class InMemorySyncStore {
   private readonly internalSessions = new Map<string, InternalSession>();
   private readonly userInvitations = new Map<string, StoredUserInvitation & { tokenHash: string }>();
   private readonly collectorDevices = new Map<string, CollectorDevice & { tokenHash: string }>();
+  private readonly managedTradeMindActivations = new Map<string, ProvisionedManagedTradeMindActivation>();
   private collaborationSequence = 0;
   private internalUserSequence = 0;
   private collectorDeviceSequence = 0;
@@ -540,6 +547,9 @@ export class InMemorySyncStore {
       activatedByUserDisplayName: input.activatedByUserDisplayName ?? existing?.activatedByUserDisplayName,
       activatedByUserRoles: input.activatedByUserRoles ?? existing?.activatedByUserRoles,
       status: input.status || "active",
+      lastHeartbeatAt: existing?.lastHeartbeatAt,
+      lastSyncAt: existing?.lastSyncAt,
+      lastError: existing?.lastError,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
       tokenHash
@@ -550,6 +560,73 @@ export class InMemorySyncStore {
       token,
       tokenHash
     };
+  }
+
+
+  async provisionManagedTradeMindActivation(
+    input: ProvisionManagedTradeMindActivationInput
+  ): Promise<ProvisionedManagedTradeMindActivation> {
+    const now = new Date().toISOString();
+    const existing = this.managedTradeMindActivations.get(managedTradeMindIdentityKey(input));
+    const activationToken = input.activationToken || crypto.randomBytes(32).toString("hex");
+    const activation: ProvisionedManagedTradeMindActivation = {
+      identityKey: managedTradeMindIdentityKey(input),
+      provider: input.provider,
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      userEmail: input.userEmail.trim().toLowerCase(),
+      userDisplayName: input.userDisplayName,
+      channel: input.channel,
+      bindingToken: input.bindingToken,
+      activationToken,
+      activationTokenHash: hashContent(activationToken),
+      expiresAt: input.expiresAt || new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      createdAt: existing?.createdAt || now,
+      updatedAt: now
+    };
+    this.managedTradeMindActivations.set(activation.identityKey, activation);
+    return activation;
+  }
+
+  async consumeManagedTradeMindActivation(
+    input: ConsumeManagedTradeMindActivationInput
+  ): Promise<ConsumedManagedTradeMindActivation | null> {
+    const consumedAt = input.consumedAt || new Date().toISOString();
+    const activation = Array.from(this.managedTradeMindActivations.values()).find(
+      (item) => item.activationTokenHash === hashContent(input.activationToken) && !item.consumedAt
+    );
+    if (!activation || Date.parse(activation.expiresAt) <= Date.parse(consumedAt)) return null;
+    const consumed: ProvisionedManagedTradeMindActivation = {
+      ...activation,
+      consumedAt,
+      updatedAt: consumedAt
+    };
+    this.managedTradeMindActivations.set(consumed.identityKey, consumed);
+    return {
+      bindingToken: consumed.bindingToken,
+      consumedAt,
+      expiresAt: consumed.expiresAt,
+      identity: managedTradeMindIdentityFromActivation(consumed)
+    };
+  }
+
+  listManagedTradeMindActivations(): ProvisionedManagedTradeMindActivation[] {
+    return Array.from(this.managedTradeMindActivations.values());
+  }
+
+  async recordCollectorHeartbeat(input: RecordCollectorHeartbeatInput): Promise<CollectorDevice> {
+    const existing = this.collectorDevices.get(input.deviceId);
+    if (!existing) throw new Error("collector_device_not_found");
+    const heartbeatAt = input.heartbeatAt || new Date().toISOString();
+    const updated: CollectorDevice & { tokenHash: string } = {
+      ...existing,
+      lastHeartbeatAt: heartbeatAt,
+      lastSyncAt: input.lastSyncAt ?? existing.lastSyncAt,
+      lastError: input.lastError === undefined ? existing.lastError : input.lastError || undefined,
+      updatedAt: heartbeatAt
+    };
+    this.collectorDevices.set(updated.id, updated);
+    return toPublicCollectorDevice(updated);
   }
 
   listCollectorDevices(): CollectorDevice[] {
@@ -745,10 +822,38 @@ function toPublicCollectorDevice(device: CollectorDevice & { tokenHash: string }
     lastHeartbeatAt: device.lastHeartbeatAt,
     createdAt: device.createdAt,
     updatedAt: device.updatedAt,
+    ...(device.lastSyncAt ? { lastSyncAt: device.lastSyncAt } : {}),
+    ...(device.lastError ? { lastError: device.lastError } : {}),
     ...(device.activatedByUserId ? { activatedByUserId: device.activatedByUserId } : {}),
     ...(device.tradeMindBindingToken ? { tradeMindBindingToken: device.tradeMindBindingToken } : {}),
     ...(device.activatedByUserEmail ? { activatedByUserEmail: device.activatedByUserEmail } : {}),
     ...(device.activatedByUserDisplayName ? { activatedByUserDisplayName: device.activatedByUserDisplayName } : {}),
     ...(device.activatedByUserRoles?.length ? { activatedByUserRoles: device.activatedByUserRoles } : {})
+  };
+}
+
+
+function managedTradeMindIdentityKey(input: {
+  provider: string;
+  workspaceId: string;
+  userId: string;
+  channel: string;
+}): string {
+  return [input.provider, input.workspaceId, input.userId, input.channel].map((value) => value.trim()).join(":");
+}
+
+function managedTradeMindIdentityFromActivation(
+  activation: ProvisionedManagedTradeMindActivation
+): ManagedTradeMindIdentity {
+  return {
+    identityKey: activation.identityKey,
+    provider: activation.provider,
+    workspaceId: activation.workspaceId,
+    userId: activation.userId,
+    userEmail: activation.userEmail,
+    userDisplayName: activation.userDisplayName,
+    channel: activation.channel,
+    createdAt: activation.createdAt,
+    updatedAt: activation.updatedAt
   };
 }

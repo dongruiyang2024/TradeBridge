@@ -64,6 +64,52 @@ test("uploadSyncBatch maps 401 to tradebridge_unauthorized", async () => {
   );
 });
 
+
+test("activateCollectorDevice posts a Trade-Mind activation token without Bridge credentials", async () => {
+  const requests: Request[] = [];
+  globalThis.fetch = async (input, init) => {
+    requests.push(new Request(input, init));
+    return Response.json({
+      ok: true,
+      token: "collector-token",
+      account: {
+        id: "trade-mind:workspace-1:user-1:onetalk",
+        email: "owner@example.com",
+        displayName: "Owner One",
+        roles: []
+      },
+      device: {
+        id: "collector-device-1",
+        externalDeviceId: "chrome-extension-demo",
+        sellerAccountExternalId: "self-ali-1",
+        deviceName: "Chrome Extension",
+        status: "active"
+      }
+    });
+  };
+
+  const result = await activateCollectorDevice({
+    serverUrl: "http://127.0.0.1:5032",
+    activationToken: "tm-activation-token",
+    sellerAccountExternalId: "self-ali-1",
+    channelAccountExternalId: "self-login-1",
+    deviceExternalId: "chrome-extension-demo",
+    deviceName: "Chrome Extension"
+  });
+  const requestBody = await requests[0].json();
+
+  assert.equal(result.token, "collector-token");
+  assert.equal(result.account?.email, "owner@example.com");
+  assert.equal(requests[0].url, "http://127.0.0.1:5032/collector/v1/auth/activate");
+  assert.deepEqual(requestBody, {
+    activationToken: "tm-activation-token",
+    sellerAccountExternalId: "self-ali-1",
+    channelAccountExternalId: "self-login-1",
+    deviceExternalId: "chrome-extension-demo",
+    deviceName: "Chrome Extension"
+  });
+});
+
 test("activateCollectorDevice posts credentials and device metadata", async () => {
   const requests: Request[] = [];
   globalThis.fetch = async (input, init) => {

@@ -371,6 +371,8 @@ export interface CollectorDevice {
   activatedByUserRoles?: InternalRole[];
   status: string;
   lastHeartbeatAt?: string;
+  lastSyncAt?: string;
+  lastError?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -395,4 +397,55 @@ export interface RegisterCollectorDeviceInput {
 
 export interface RevokeCollectorDeviceInput {
   deviceId: string;
+}
+
+export interface ManagedTradeMindIdentity {
+  identityKey: string;
+  provider: string;
+  workspaceId: string;
+  userId: string;
+  userEmail: string;
+  userDisplayName?: string;
+  channel: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProvisionManagedTradeMindActivationInput {
+  provider: string;
+  workspaceId: string;
+  userId: string;
+  userEmail: string;
+  userDisplayName?: string;
+  channel: string;
+  bindingToken: string;
+  activationToken?: string;
+  expiresAt?: string;
+}
+
+export interface ProvisionedManagedTradeMindActivation extends ManagedTradeMindIdentity {
+  activationToken: string;
+  activationTokenHash: string;
+  bindingToken: string;
+  expiresAt: string;
+  consumedAt?: string;
+}
+
+export interface ConsumeManagedTradeMindActivationInput {
+  activationToken: string;
+  consumedAt?: string;
+}
+
+export interface ConsumedManagedTradeMindActivation {
+  identity: ManagedTradeMindIdentity;
+  bindingToken: string;
+  expiresAt: string;
+  consumedAt: string;
+}
+
+export interface RecordCollectorHeartbeatInput {
+  deviceId: string;
+  heartbeatAt?: string;
+  lastSyncAt?: string;
+  lastError?: string | null;
 }

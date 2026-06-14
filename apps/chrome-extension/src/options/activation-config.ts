@@ -6,7 +6,7 @@ const DEFAULT_SYNC_INTERVAL_SECONDS = 10;
 
 export interface CreateActivatedExtensionConfigInput {
   serverUrl: string;
-  email: string;
+  accountEmail?: string;
   tradeMindBindingToken?: string;
   sellerAccountExternalId?: string;
   sellerAccountDisplayName?: string;
@@ -25,7 +25,7 @@ export function createActivatedExtensionConfig(input: CreateActivatedExtensionCo
   const deviceName = input.existingDeviceName || DEFAULT_DEVICE_NAME;
   return {
     serverUrl: input.serverUrl,
-    tradeBridgeAccountEmail: input.email.trim(),
+    tradeBridgeAccountEmail: (input.accountEmail || input.activation.account?.email || "Trade-Mind").trim(),
     sellerAccountExternalId:
       input.activation.device.sellerAccountExternalId ||
       input.sellerAccountExternalId ||
