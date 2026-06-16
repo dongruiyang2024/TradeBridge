@@ -31,6 +31,8 @@ test("background keeps periodic sync on a fixed ten second cadence", () => {
 
   assert.match(source, /FIXED_SYNC_INTERVAL_SECONDS = 10/);
   assert.match(source, /autoSyncScheduler.startPeriodic()/);
+  assert.match(source, /autoSyncScheduler\.startPeriodic\(\);\s*void ensureRealtimeConnection\(\);/);
+  assert.match(source, /async function readDashboard\(\)[\s\S]*autoSyncScheduler\.startPeriodic\(\);[\s\S]*await ensureRealtimeConnection\(\);/);
   assert.match(source, /typed.type === "config-updated"[\s\S]*autoSyncScheduler.startPeriodic()/);
   assert.doesNotMatch(source, /boundedSyncInterval/);
   assert.doesNotMatch(source, /SYNC_ALARM/);

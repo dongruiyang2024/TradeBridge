@@ -65,6 +65,7 @@ test("POST /collector/v1/sync-batches forwards scoped batches to Trade-Mind with
     tradeMindBindingToken: "tm-binding-token"
   });
   const forwardCalls: Array<{ body: string; headers: Record<string, string>; url: string }> = [];
+  const healthCalls: Array<{ body: string; headers: Record<string, string>; url: string }> = [];
   const app = await createServer({
     store,
     tradeMindForwarder: {
@@ -79,6 +80,20 @@ test("POST /collector/v1/sync-batches forwards scoped batches to Trade-Mind with
       ingestSecret: "shared-secret",
       ingestUrl: "http://trademind.local/api/ingest/conversations",
       nonce: () => "nonce-1",
+      now: () => new Date("2026-06-10T08:00:00.000Z")
+    },
+    tradeMindBindingHealthReporter: {
+      healthUrl: "http://trademind.local/api/communication/binding/bridge-health",
+      bridgeSecret: "bridge-secret",
+      fetch: async (url, init) => {
+        healthCalls.push({
+          body: String(init?.body),
+          headers: init?.headers as Record<string, string>,
+          url: String(url)
+        });
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      },
+      nonce: () => "health-nonce-1",
       now: () => new Date("2026-06-10T08:00:00.000Z")
     }
   });
@@ -129,6 +144,26 @@ test("POST /collector/v1/sync-batches forwards scoped batches to Trade-Mind with
     forwardCalls[0].headers["x-trademind-signature"],
     createHmac("sha256", "shared-secret")
       .update(`1781078400.nonce-1.${forwardCalls[0].body}`)
+      .digest("hex")
+  );
+
+  assert.equal(healthCalls.length, 1);
+  assert.equal(healthCalls[0].url, "http://trademind.local/api/communication/binding/bridge-health");
+  assert.deepEqual(JSON.parse(healthCalls[0].body), {
+    bindingToken: "tm-binding-token",
+    deviceId: "device-token",
+    lastError: null,
+    lastHeartbeatAt: "2026-06-10T08:00:00.000Z",
+    lastSyncAt: "2026-06-10T08:00:00.000Z"
+  });
+  assert.equal(healthCalls[0].headers["Content-Type"], "application/json");
+  assert.equal(healthCalls[0].headers["x-trademind-bridge-secret"], "bridge-secret");
+  assert.equal(healthCalls[0].headers["x-trademind-timestamp"], "1781078400");
+  assert.equal(healthCalls[0].headers["x-trademind-nonce"], "health-nonce-1");
+  assert.equal(
+    healthCalls[0].headers["x-trademind-signature"],
+    createHmac("sha256", "bridge-secret")
+      .update(`1781078400.health-nonce-1.${healthCalls[0].body}`)
       .digest("hex")
   );
 });

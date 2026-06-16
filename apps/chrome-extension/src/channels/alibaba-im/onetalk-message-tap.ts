@@ -170,6 +170,7 @@ function extractMessage(payload: Record<string, unknown>, direction: "sent" | "r
             content,
             direction,
             contentType: contentTypeOf(model.content),
+            richContent: richContentOf(model.content),
             sendTime: numericValue(model.createAt) ?? numericValue(model.sendTime),
             sender: senderId(model.sender),
             receivers: model.receivers
@@ -194,6 +195,7 @@ function extractMessage(payload: Record<string, unknown>, direction: "sent" | "r
           content,
           direction,
           contentType: contentTypeOf(payload.content),
+          richContent: richContentOf(payload.content) ?? richContentOf(payload),
           messageType: firstString(payload, ["messageType", "msgType"]),
           sendTime: numericValue(payload.sendTime) ?? numericValue(payload.createAt),
           sender: senderId(payload.sender)
@@ -223,6 +225,291 @@ function contentTypeOf(content: unknown): string | undefined {
   return firstString(content, ["contentType"]);
 }
 
+function richContentOf(value: unknown): Record<string, unknown>[] | undefined {
+  const existing = normalizeRichContent(firstValue(value, ["richContent", "richContents", "contentBlocks"]));
+  const product = productContentOf(value);
+  if (existing?.length) return product ? mergeRichContent(existing, product) : existing;
+  return product ? [product] : undefined;
+}
+
+function normalizeRichContent(value: unknown): Record<string, unknown>[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const normalized = value.map(productContentOf).filter(isRecord);
+  return normalized.length ? normalized : undefined;
+}
+
+function productContentOf(value: unknown): Record<string, unknown> | null {
+  const records = productCandidateRecords(value);
+  if (!records.length) return null;
+  const url = firstUrlString(records, PRODUCT_URL_KEYS);
+  if (!url) return null;
+  return compact({
+    type: "product",
+    url,
+    title: firstStringFromRecords(records, PRODUCT_TITLE_KEYS),
+    imageUrl: firstUrlString(records, PRODUCT_IMAGE_KEYS),
+    priceText: firstStringFromRecords(records, PRODUCT_PRICE_KEYS),
+    moqText: moqTextFromRecords(records),
+    productId: firstStringFromRecords(records, PRODUCT_ID_KEYS) || productIdFromUrl(url)
+  });
+}
+
+const PRODUCT_URL_KEYS = [
+  "url",
+  "href",
+  "link",
+  "linkUrl",
+  "cardUrl",
+  "redirectUrl",
+  "actionUrl",
+  "detailUrl",
+  "productUrl",
+  "offerUrl",
+  "itemUrl",
+  "targetUrl",
+  "jumpUrl",
+  "landingUrl",
+  "action.url",
+  "action.href",
+  "jump.url",
+  "link.url",
+  "target.url",
+  "router.url",
+  "text.content"
+];
+const PRODUCT_TITLE_KEYS = ["title", "name", "productName", "subject", "productTitle", "offerTitle", "itemTitle"];
+const PRODUCT_IMAGE_KEYS = [
+  "imageUrl",
+  "mainImageUrl",
+  "mainImage",
+  "image",
+  "picUrl",
+  "pictureUrl",
+  "thumbnailUrl",
+  "imgUrl",
+  "coverUrl",
+  "mainImage.url",
+  "mainImage.src",
+  "image.url",
+  "image.src",
+  "pic.url",
+  "picture.url",
+  "thumbnail.url",
+  "cover.url"
+];
+const PRODUCT_PRICE_KEYS = [
+  "priceText",
+  "priceRangeText",
+  "displayPrice",
+  "formattedPrice",
+  "price",
+  "priceRange",
+  "priceInfo.priceText",
+  "priceInfo.displayPrice",
+  "priceInfo.formattedPrice",
+  "priceInfo.price",
+  "priceInfo.priceRange",
+  "price.text",
+  "price.displayText",
+  "price.display",
+  "text"
+];
+const PRODUCT_MOQ_TEXT_KEYS = [
+  "moqText",
+  "moq",
+  "minOrderText",
+  "minimumOrderText",
+  "minOrderQuantityText",
+  "moq.text",
+  "moq.displayText",
+  "minOrder.text",
+  "minOrder.displayText",
+  "minimumOrder.text",
+  "minimumOrder.displayText",
+  "minOrderInfo.text",
+  "minOrderInfo.displayText"
+];
+const PRODUCT_MOQ_QUANTITY_KEYS = [
+  "minOrderQuantity",
+  "minimumOrderQuantity",
+  "minOrderQty",
+  "moqQuantity",
+  "moq.value",
+  "moq.quantity",
+  "moq.qty",
+  "minOrder.value",
+  "minOrder.quantity",
+  "minOrder.qty",
+  "minimumOrder.value",
+  "minimumOrder.quantity",
+  "minimumOrder.qty",
+  "minOrderInfo.value",
+  "minOrderInfo.quantity",
+  "quantity",
+  "qty"
+];
+const PRODUCT_MOQ_UNIT_KEYS = [
+  "minOrderUnit",
+  "minimumOrderUnit",
+  "moqUnit",
+  "moq.unit",
+  "moq.unitName",
+  "minOrder.unit",
+  "minOrder.unitName",
+  "minimumOrder.unit",
+  "minimumOrder.unitName",
+  "minOrderInfo.unit",
+  "minOrderInfo.unitName",
+  "unit",
+  "unitName"
+];
+const PRODUCT_ID_KEYS = [
+  "productId",
+  "offerId",
+  "itemId",
+  "id",
+  "ids",
+  "productID",
+  "offerID",
+  "itemID",
+  "product.id",
+  "product.productId",
+  "offer.id",
+  "offer.offerId",
+  "item.id",
+  "item.itemId"
+];
+const PRODUCT_NESTED_KEYS = [
+  "productCard",
+  "offerCard",
+  "product",
+  "offer",
+  "item",
+  "card",
+  "cardData",
+  "cardInfo",
+  "data",
+  "bizData",
+  "payload",
+  "content",
+  "productInfo",
+  "offerInfo",
+  "itemInfo",
+  "detail",
+  "details",
+  "action",
+  "jump",
+  "link",
+  "target",
+  "router",
+  "mainImage",
+  "image",
+  "pic",
+  "picture",
+  "thumbnail",
+  "cover",
+  "priceInfo",
+  "price",
+  "priceRange",
+  "moq",
+  "minOrder",
+  "minimumOrder",
+  "minOrderInfo",
+  "minimumOrderInfo"
+];
+
+function productCandidateRecords(value: unknown, depth = 0, seen: unknown[] = []): Record<string, unknown>[] {
+  const structured = structuredValue(value);
+  if (Array.isArray(structured)) {
+    return structured.flatMap((item) => productCandidateRecords(item, depth, seen));
+  }
+  if (!isRecord(structured) || seen.includes(structured)) return [];
+  seen.push(structured);
+
+  const records = [structured];
+  if (depth >= 4) return records;
+
+  for (const key of PRODUCT_NESTED_KEYS) {
+    const nested = structured[key];
+    if (nested !== undefined) records.push(...productCandidateRecords(nested, depth + 1, seen));
+  }
+  for (const key of ["richContent", "richContents", "contentBlocks", "cards", "items", "products", "offers"]) {
+    const nested = structured[key];
+    if (Array.isArray(nested)) records.push(...nested.flatMap((item) => productCandidateRecords(item, depth + 1, seen)));
+  }
+
+  return records;
+}
+
+function mergeRichContent(existing: Record<string, unknown>[], product: Record<string, unknown>): Record<string, unknown>[] {
+  let merged = false;
+  const output = existing.map((item) => {
+    if (merged || item.type !== "product") return item;
+    merged = true;
+    return compact({ ...product, ...item });
+  });
+  return merged ? output : [...existing, product];
+}
+
+function firstStringFromRecords(records: Record<string, unknown>[], keys: string[]): string | undefined {
+  for (const record of records) {
+    const value = firstString(record, keys);
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function firstUrlString(records: Record<string, unknown>[], keys: string[]): string | undefined {
+  for (const record of records) {
+    for (const key of keys) {
+      const value = firstString(record, [key]);
+      if (value && isUrlLike(value)) return value;
+    }
+  }
+  return undefined;
+}
+
+function moqTextFromRecords(records: Record<string, unknown>[]): string | undefined {
+  const text = firstStringFromRecords(records, PRODUCT_MOQ_TEXT_KEYS);
+  if (text && !isRecord(structuredValue(text))) return text;
+  const quantity = firstStringFromRecords(records, PRODUCT_MOQ_QUANTITY_KEYS);
+  if (!quantity) return undefined;
+  const unit = firstStringFromRecords(records, PRODUCT_MOQ_UNIT_KEYS);
+  return unit ? `${quantity} ${unit}` : quantity;
+}
+
+function productIdFromUrl(url: string): string | undefined {
+  try {
+    const normalized = url.startsWith("//") ? `https:${url}` : url.startsWith("/") ? `https://workspace.alibaba.com${url}` : url;
+    const parsed = new URL(normalized);
+    for (const key of ["ids", "productId", "offerId", "itemId", "id"]) {
+      const value = parsed.searchParams.get(key);
+      if (value?.trim()) return value.trim();
+    }
+  } catch {
+    // Fall back to a query-string regex for non-standard card links.
+  }
+  const match = /(?:[?&]|^)(?:ids|productId|offerId|itemId|id)=([^&#]+)/.exec(url);
+  return match ? decodeURIComponent(match[1]).trim() || undefined : undefined;
+}
+
+function structuredValue(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed || (trimmed[0] !== "{" && trimmed[0] !== "[")) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+
+function isUrlLike(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) return false;
+  return /^(https?:)?\/\//i.test(trimmed) || trimmed.startsWith("/") || /(?:[?&]|^)type=2000(?:&|$)/.test(trimmed);
+}
+
 function senderId(sender: unknown): string | undefined {
   if (typeof sender === "string" && sender.trim()) return sender.trim();
   if (isRecord(sender)) return firstString(sender, ["uid", "targetId", "id"]);
@@ -231,11 +518,30 @@ function senderId(sender: unknown): string | undefined {
 
 function firstString(source: Record<string, unknown>, keys: string[]): string | undefined {
   for (const key of keys) {
-    const value = source[key];
+    const value = key.includes(".") ? valueAtPath(source, key.split(".")) : source[key];
     if (typeof value === "string" && value.trim()) return value.trim();
     if (typeof value === "number" && Number.isFinite(value)) return String(value);
   }
   return undefined;
+}
+
+function firstValue(source: unknown, keys: string[]): unknown {
+  const structured = structuredValue(source);
+  if (!isRecord(structured)) return undefined;
+  for (const key of keys) {
+    const value = key.includes(".") ? valueAtPath(structured, key.split(".")) : structured[key];
+    if (value != null && value !== "") return value;
+  }
+  return undefined;
+}
+
+function valueAtPath(source: unknown, path: string[]): unknown {
+  let current = source;
+  for (const key of path) {
+    if (!isRecord(current)) return undefined;
+    current = current[key];
+  }
+  return current;
 }
 
 function numericValue(value: unknown): number | undefined {
@@ -251,4 +557,3 @@ function compact<T extends Record<string, unknown>>(source: T): T {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
-

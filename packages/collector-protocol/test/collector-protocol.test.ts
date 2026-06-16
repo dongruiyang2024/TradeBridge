@@ -101,7 +101,18 @@ test("collector protocol owns channel sync batch semantics", () => {
           externalConversationId: "conv-trial",
           externalMessageId: "msg-1",
           direction: "received",
-          content: "hello"
+          content: "hello",
+          richContent: [
+            {
+              type: "product",
+              url: "https://workspace.alibaba.com/card?type=2000&ids=1601793092954",
+              title: "Outdoor Travel Essential Pet Foldable Bowl",
+              imageUrl: "https://img.example.com/product.jpg",
+              priceText: "CN¥5.72-6.73",
+              moqText: "最小订购量：100 Pieces",
+              productId: "1601793092954"
+            }
+          ]
         }
       ]
     }),

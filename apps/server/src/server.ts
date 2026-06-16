@@ -271,11 +271,13 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       activatedByUserRoles: []
     });
     await store.appendAuditLog({
-      actorUserId: consumed.identity.identityKey,
       action: "collector_device.activated",
       targetType: "collector_device",
       targetId: registered.id,
       metadata: {
+        tradeMindIdentityKey: consumed.identity.identityKey,
+        tradeMindUserEmail: consumed.identity.userEmail,
+        tradeMindUserDisplayName: consumed.identity.userDisplayName || consumed.identity.userEmail,
         provider: consumed.identity.provider,
         workspaceId: consumed.identity.workspaceId,
         userId: consumed.identity.userId,
@@ -438,14 +440,30 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
 
     try {
       await forwardSyncBatchToTradeMind(scopedBatch, collectorDevice, tradeMindForwarder);
-      return {
-        ok: true,
-        ...result
-      };
     } catch (error) {
       request.log.error({ err: error }, "trademind_forward_failed");
       return reply.code(502).send({ ok: false, error: "trademind_forward_failed" });
     }
+
+    try {
+      await reportTradeMindBindingHealth({
+        bindingToken: collectorDevice.tradeMindBindingToken,
+        deviceId: scopedBatch.device.deviceId,
+        lastError: null,
+        lastSyncAt: tradeMindBindingHealthReporter
+          ? tradeMindBindingHealthReporter.now().toISOString()
+          : new Date().toISOString(),
+        reporter: tradeMindBindingHealthReporter
+      });
+    } catch (error) {
+      request.log.error({ err: error }, "trademind_binding_health_report_failed");
+      return reply.code(502).send({ ok: false, error: "trademind_binding_health_report_failed" });
+    }
+
+    return {
+      ok: true,
+      ...result
+    };
   });
 
   app.get("/collector/v1/outbound-messages", async (request, reply) => {

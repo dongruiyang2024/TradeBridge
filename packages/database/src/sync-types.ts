@@ -56,8 +56,21 @@ export interface SyncMessageInput {
   direction: MessageDirection;
   messageType?: string | number;
   content?: string;
+  richContent?: SyncRichContent[];
   sentAt?: string;
   rawSanitized?: Record<string, unknown>;
+}
+
+export type SyncRichContent = SyncProductContent;
+
+export interface SyncProductContent {
+  type: "product";
+  url: string;
+  title?: string;
+  imageUrl?: string;
+  priceText?: string;
+  moqText?: string;
+  productId?: string;
 }
 
 export interface SyncBatch {

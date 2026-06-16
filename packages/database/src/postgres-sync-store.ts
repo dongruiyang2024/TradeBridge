@@ -1809,7 +1809,7 @@ export class PostgresSyncStore {
       WITH updated_device AS (
         UPDATE collector_device
         SET last_heartbeat_at = COALESCE($2::timestamptz, now()),
-          last_sync_at = COALESCE($3::timestamptz, last_sync_at),
+          last_sync_at = COALESCE($3::timestamptz, collector_device.last_sync_at),
           last_error = $4,
           updated_at = COALESCE($2::timestamptz, now())
         WHERE id = $1::uuid
@@ -1827,8 +1827,6 @@ export class PostgresSyncStore {
           last_heartbeat_at,
           last_sync_at,
           last_error,
-          last_sync_at,
-          last_error,
           created_at,
           updated_at
       )
@@ -1844,8 +1842,6 @@ export class PostgresSyncStore {
         d.activated_by_user_roles AS "activatedByUserRoles",
         d.status AS "status",
         d.last_heartbeat_at AS "lastHeartbeatAt",
-        d.last_sync_at AS "lastSyncAt",
-        d.last_error AS "lastError",
         d.last_sync_at AS "lastSyncAt",
         d.last_error AS "lastError",
         d.created_at AS "createdAt",
@@ -2212,7 +2208,7 @@ export class PostgresSyncStore {
         ali_id_encrypt,
         stage
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       ON CONFLICT (seller_account_id, channel, external_customer_id)
       DO UPDATE SET
         login_id = COALESCE(EXCLUDED.login_id, customer.login_id),

@@ -136,6 +136,103 @@ test("mapWebliteToSyncBatch maps alternate OneTalk customer and message fields",
   assert.equal(batch.messages?.[0].direction, "received");
 });
 
+test("mapWebliteToSyncBatch preserves rich product card metadata from OneTalk messages", () => {
+  const productUrl = "https://workspace.alibaba.com/card?type=2000&ids=1601793092954";
+  const batch = mapWebliteToSyncBatch({
+    sellerAccount: { externalAccountId: "seller-demo" },
+    device: { deviceId: "chrome-extension-demo" },
+    collectedAt: "2026-06-15T10:45:00.000Z",
+    source: "chrome-extension",
+    previousCursor: null,
+    weblite: {
+      html: "",
+      bootstrap: { aliId: "seller-ali" },
+      conversations: [{ cid: "conv-product", contactAccountId: "buyer-product" }]
+    },
+    messagesByConversationId: {
+      "conv-product": [
+        {
+          messageId: "msg-product",
+          senderAliId: "buyer-ali",
+          content: productUrl,
+          productCard: {
+            url: productUrl,
+            title: "Outdoor Travel Essential Pet Foldable Bowl",
+            imageUrl: "https://img.example.com/product.jpg",
+            priceText: "CN¥5.72-6.73",
+            moqText: "最小订购量：100 Pieces",
+            productId: "1601793092954"
+          },
+          sendTime: 1781520300000
+        }
+      ]
+    }
+  });
+
+  assert.deepEqual(batch.messages?.[0].richContent, [
+    {
+      type: "product",
+      url: productUrl,
+      title: "Outdoor Travel Essential Pet Foldable Bowl",
+      imageUrl: "https://img.example.com/product.jpg",
+      priceText: "CN¥5.72-6.73",
+      moqText: "最小订购量：100 Pieces",
+      productId: "1601793092954"
+    }
+  ]);
+});
+
+test("mapWebliteToSyncBatch extracts product card metadata from serialized OneTalk content", () => {
+  const productUrl = "https://workspace.alibaba.com/card?type=2000&ids=1601793092954";
+  const batch = mapWebliteToSyncBatch({
+    sellerAccount: { externalAccountId: "seller-demo" },
+    device: { deviceId: "chrome-extension-demo" },
+    collectedAt: "2026-06-16T02:23:00.000Z",
+    source: "chrome-extension",
+    previousCursor: null,
+    weblite: {
+      html: "",
+      bootstrap: { aliId: "seller-ali" },
+      conversations: [{ cid: "conv-product-json", contactAccountId: "buyer-product" }]
+    },
+    messagesByConversationId: {
+      "conv-product-json": [
+        {
+          messageId: "msg-product-json",
+          senderAliId: "buyer-ali",
+          content: JSON.stringify({
+            contentType: "card",
+            text: { content: productUrl },
+            card: {
+              actionUrl: productUrl,
+              productInfo: {
+                subject: "High-Quality Newly Design Kitchen Bowl Plate Tableware",
+                image: { url: "https://img.example.com/kitchen-rack.jpg" },
+                price: { text: "CN¥46.11-55.31" },
+                moq: { value: 500, unit: "Pieces" },
+                offerId: "1601793092954"
+              }
+            }
+          }),
+          sendTime: 1781598180000
+        }
+      ]
+    }
+  });
+
+  assert.deepEqual(batch.messages?.[0].richContent, [
+    {
+      type: "product",
+      url: productUrl,
+      title: "High-Quality Newly Design Kitchen Bowl Plate Tableware",
+      imageUrl: "https://img.example.com/kitchen-rack.jpg",
+      priceText: "CN¥46.11-55.31",
+      moqText: "500 Pieces",
+      productId: "1601793092954"
+    }
+  ]);
+});
+
 test("mapWebliteToSyncBatch maps LWP conversation and message models from OneTalk WebSocket", () => {
   const lastMessageAt = Date.parse("2026-05-27T04:33:20.000Z");
   const inboundAt = Date.parse("2026-05-27T04:32:30.000Z");

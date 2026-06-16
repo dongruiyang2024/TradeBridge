@@ -146,6 +146,7 @@ chromeApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return false;
 });
 
+autoSyncScheduler.startPeriodic();
 void ensureRealtimeConnection();
 
 async function runDefaultSync() {
@@ -192,6 +193,8 @@ function runDefaultOutboundDelivery() {
 }
 
 async function readDashboard() {
+  autoSyncScheduler.startPeriodic();
+  await ensureRealtimeConnection();
   const [config, status] = await Promise.all([stateStore.getConfig(), stateStore.getStatus()]);
   const validatedStatus = config ? await validateStoredTradeBridgeAccount(config, status) : status;
   return {

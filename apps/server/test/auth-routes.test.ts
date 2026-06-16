@@ -315,6 +315,12 @@ test("POST /collector/v1/auth/activate consumes a Trade-Mind activation token wi
   assert.equal(confirmCalls.length, 1);
   assert.match(confirmCalls[0].body, /tm-binding-token/);
   assert.match(confirmCalls[0].body, /self-login-1/);
+  const auditLogs = await store.listAuditLogs();
+  const activationAuditLog = auditLogs.find((log) => log.action === "collector_device.activated");
+  assert.ok(activationAuditLog);
+  assert.equal(activationAuditLog.actorUserId, undefined);
+  assert.equal(activationAuditLog.metadata?.tradeMindIdentityKey, "trade-mind:workspace-1:user-1:onetalk");
+  assert.equal(activationAuditLog.metadata?.tradeMindUserEmail, "owner@example.com");
 
   const replay = await app.inject({
     method: "POST",

@@ -61,8 +61,21 @@ export interface ChannelSyncMessage {
   direction: MessageDirection;
   messageType?: string | number;
   content?: string;
+  richContent?: ChannelSyncRichContent[];
   sentAt?: string;
   rawSanitized?: Record<string, unknown>;
+}
+
+export type ChannelSyncRichContent = ChannelSyncProductContent;
+
+export interface ChannelSyncProductContent {
+  type: "product";
+  url: string;
+  title?: string;
+  imageUrl?: string;
+  priceText?: string;
+  moqText?: string;
+  productId?: string;
 }
 
 export interface ChannelSyncSourceMeta extends Record<string, unknown> {
@@ -434,8 +447,22 @@ function isChannelSyncMessage(value: unknown): value is ChannelSyncMessage {
     (value.direction === "received" || value.direction === "sent" || value.direction === "unknown") &&
     (value.messageType === undefined || typeof value.messageType === "string" || typeof value.messageType === "number") &&
     isOptionalString(value.content) &&
+    isOptionalArray(value.richContent, isChannelSyncRichContent) &&
     isOptionalString(value.sentAt) &&
     isOptionalRecord(value.rawSanitized)
+  );
+}
+
+function isChannelSyncRichContent(value: unknown): value is ChannelSyncRichContent {
+  return (
+    isRecord(value) &&
+    value.type === "product" &&
+    typeof value.url === "string" &&
+    isOptionalString(value.title) &&
+    isOptionalString(value.imageUrl) &&
+    isOptionalString(value.priceText) &&
+    isOptionalString(value.moqText) &&
+    isOptionalString(value.productId)
   );
 }
 

@@ -251,6 +251,26 @@ class FakePostgresClient implements SqlClient {
         rowCount: 1
       };
     }
+    if (/record_collector_heartbeat/i.test(sql)) {
+      return {
+        rows: [
+          {
+            id: "device-db-id",
+            externalDeviceId: "chrome-extension-demo",
+            sellerAccountExternalId: "seller-1",
+            deviceName: "MacBook",
+            status: "active",
+            tokenHash: "device-token-hash",
+            lastHeartbeatAt: "2026-05-25T10:06:00.000Z",
+            lastSyncAt: "2026-05-25T10:05:00.000Z",
+            lastError: null,
+            createdAt: "2026-05-25T10:00:00.000Z",
+            updatedAt: "2026-05-25T10:06:00.000Z"
+          }
+        ] as T[],
+        rowCount: 1
+      };
+    }
     if (/list_collector_devices/i.test(sql)) {
       return {
         rows: [
@@ -584,6 +604,23 @@ class FakePostgresClient implements SqlClient {
   }
 }
 
+function maxParameterIndex(sql: string): number {
+  return Math.max(0, ...Array.from(sql.matchAll(/\$(\d+)/g), (match) => Number(match[1])));
+}
+
+function countInsertColumns(sql: string, tableName: string): number {
+  const pattern = new RegExp(`insert\\s+into\\s+${tableName}\\s*\\(([^)]+)\\)`, "i");
+  const match = sql.match(pattern);
+  assert.ok(match, `missing INSERT for ${tableName}`);
+  return match[1].split(",").filter((part) => part.trim()).length;
+}
+
+function countValues(sql: string): number {
+  const match = sql.match(/values\s*\(([^)]+)\)/i);
+  assert.ok(match, "missing VALUES list");
+  return match[1].split(",").filter((part) => part.trim()).length;
+}
+
 class AcceptedInvitationClient extends FakePostgresClient {
   override async query<T>(sql: string, params: readonly unknown[] = []): Promise<{ rows: T[]; rowCount: number }> {
     if (/accept_user_invitation/i.test(sql)) {
@@ -754,6 +791,8 @@ test("PostgresSyncStore writes channel-aware sync entities", async () => {
   assert.match(upsertCustomer.sql, /company_name/i);
   assert.match(upsertCustomer.sql, /avatar_url/i);
   assert.match(upsertCustomer.sql, /current_time_zone/i);
+  assert.equal(countInsertColumns(upsertCustomer.sql, "customer"), countValues(upsertCustomer.sql));
+  assert.equal(maxParameterIndex(upsertCustomer.sql), upsertCustomer.params.length);
   assert.deepEqual(upsertCustomer.params.slice(4, 15), [
     "buyer-login",
     "buyer-login-encrypted",
@@ -783,6 +822,25 @@ test("PostgresSyncStore writes channel-aware sync entities", async () => {
     "alibaba-im",
     "conversation-db-id"
   ]);
+});
+
+test("PostgresSyncStore heartbeat SQL uses an unambiguous last sync column", async () => {
+  const client = new FakePostgresClient();
+  const store = new PostgresSyncStore(client);
+
+  const device = await store.recordCollectorHeartbeat({
+    deviceId: "device-db-id",
+    lastSyncAt: "2026-05-25T10:05:00.000Z",
+    lastError: null
+  });
+
+  assert.equal(device.lastSyncAt, "2026-05-25T10:05:00.000Z");
+  const heartbeatQuery = client.queries.find((query) => /record_collector_heartbeat/i.test(query.sql));
+  assert.ok(heartbeatQuery);
+  assert.match(heartbeatQuery.sql, /COALESCE\(\$3::timestamptz,\s*collector_device\.last_sync_at\)/i);
+  assert.doesNotMatch(heartbeatQuery.sql, /COALESCE\(\$3::timestamptz,\s*last_sync_at\)/i);
+  assert.doesNotMatch(heartbeatQuery.sql, /last_sync_at,\s*last_error,\s*last_sync_at,\s*last_error/i);
+  assert.doesNotMatch(heartbeatQuery.sql, /d\.last_sync_at AS "lastSyncAt",\s*d\.last_error AS "lastError",\s*d\.last_sync_at AS "lastSyncAt"/i);
 });
 
 test("PostgresSyncStore persists sync batch result statistics", async () => {
@@ -1272,7 +1330,9 @@ test("PostgresSyncStore manages collector devices without storing raw tokens", a
       sellerAccountExternalId: undefined,
       deviceName: "MacBook",
       status: "active",
+      lastError: undefined,
       lastHeartbeatAt: undefined,
+      lastSyncAt: undefined,
       createdAt: "2026-05-25T10:00:00.000Z",
       updatedAt: "2026-05-25T10:00:00.000Z"
     }

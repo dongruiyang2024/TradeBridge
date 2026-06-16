@@ -16,7 +16,7 @@ const currentDeviceId = document.querySelector<HTMLElement>("#current-device-id"
 const detectedLoginId = document.querySelector<HTMLElement>("#detected-login-id");
 const detectedAliId = document.querySelector<HTMLElement>("#detected-ali-id");
 const serverUrlDisplay = document.querySelector<HTMLElement>("#server-url");
-const DEFAULT_SERVER_URL = "http://127.0.0.1:5032";
+const DEFAULT_SERVER_URL = "http://112.124.53.207";
 const DEFAULT_DEVICE_NAME = "Chrome Extension";
 const DEFAULT_SYNC_INTERVAL_SECONDS = 10;
 const DEFAULT_HISTORY_MESSAGES_PER_CONVERSATION = 20;
@@ -43,7 +43,7 @@ form?.addEventListener("submit", async (event) => {
     const oneTalkAccount = await detectOneTalkAccount(chromeApi);
     renderDetectedOneTalkAccount(oneTalkAccount.loginId, oneTalkAccount.aliId);
 
-    status?.replaceChildren("申请本地采集服务权限...");
+    status?.replaceChildren("申请 TradeBridge 服务权限...");
     await ensureServerHostPermission(serverUrl);
     status?.replaceChildren("激活中...");
     const activation = await activateCollectorDevice({
@@ -81,7 +81,7 @@ form?.addEventListener("submit", async (event) => {
 async function hydrate(): Promise<void> {
   const config = await store.getConfig();
   currentConfig = config;
-  serverUrlDisplay?.replaceChildren("自动连接本地采集服务");
+  serverUrlDisplay?.replaceChildren(DEFAULT_SERVER_URL);
   setInput(
     "historyMessagesPerConversation",
     String(config?.historyMessagesPerConversation || DEFAULT_HISTORY_MESSAGES_PER_CONVERSATION)
@@ -134,8 +134,8 @@ function renderDetectedOneTalkAccount(loginId?: string, aliId?: string): void {
 function activationErrorMessage(code: string): string {
   const messages: Record<string, string> = {
     missing_activationToken: "请从 Trade-Mind 沟通页复制激活码",
-    invalid_server_url: "本地 TradeBridge 服务地址无效",
-    server_host_permission_denied: "未授予本地服务访问权限，插件无法连接 TradeBridge 服务端",
+    invalid_server_url: "TradeBridge 服务地址无效",
+    server_host_permission_denied: "未授予服务访问权限，插件无法连接 TradeBridge 服务端",
     onetalk_tab_required: "请先打开并登录 OneTalk 页面，再回到这里保存",
     chrome_tabs_unavailable: "浏览器标签页权限不可用，无法检测 OneTalk 账号",
     missing_onetalk_account_identity: "未检测到 OneTalk Login ID 或 Ali ID，请确认 OneTalk 已登录后重试",
@@ -143,10 +143,10 @@ function activationErrorMessage(code: string): string {
     activation_token_invalid: "激活码无效或已过期，请回到 Trade-Mind 重新生成",
     missing_trademind_channel_account: "未检测到 OneTalk Login ID，无法完成 Trade-Mind 绑定",
     collector_activation_failed: "采集端激活请求失败",
-    collector_activation_response_invalid: "采集端激活响应格式不正确，请确认本地 TradeBridge 服务已启动"
+    collector_activation_response_invalid: "采集端激活响应格式不正确，请确认 TradeBridge 服务端可访问"
   };
   if (code.startsWith("collector_activation_failed_")) {
-    return "采集端激活请求失败（HTTP " + code.slice("collector_activation_failed_".length) + "），请确认本地 TradeBridge 服务已启动";
+    return "采集端激活请求失败（HTTP " + code.slice("collector_activation_failed_".length) + "），请确认 TradeBridge 服务端可访问";
   }
   return messages[code] || code;
 }

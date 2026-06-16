@@ -69,6 +69,94 @@ test("tap extracts a received message (BaaSMessageNew) with direction", () => {
   assert.equal(message.direction, "received");
 });
 
+test("tap preserves product card metadata when OneTalk emits it with the message", () => {
+  const emitter = new FakeEmitter();
+  const { fakeWindow, posted } = createFakeWindow(emitter);
+  installOneTalkMessageTap(fakeWindow as unknown as Window);
+  const productUrl = "https://workspace.alibaba.com/card?type=2000&ids=1601793092954";
+
+  emitter.emit("BaaSMessageNew", {
+    messageModel: {
+      cid: "conv-product",
+      messageId: "msg-product",
+      content: {
+        contentType: "card",
+        text: { content: productUrl },
+        productCard: {
+          url: productUrl,
+          title: "Outdoor Travel Essential Pet Foldable Bowl",
+          imageUrl: "https://img.example.com/product.jpg",
+          priceText: "CN¥5.72-6.73",
+          moqText: "最小订购量：100 Pieces",
+          productId: "1601793092954"
+        }
+      },
+      createAt: 1781520300000,
+      sender: { uid: "buyer-ali" }
+    }
+  });
+
+  const observed = observedOf(posted);
+  assert.equal(observed.length, 1);
+  const message = observed[0].messages[0].message as Record<string, unknown>;
+  assert.deepEqual(message.richContent, [
+    {
+      type: "product",
+      url: productUrl,
+      title: "Outdoor Travel Essential Pet Foldable Bowl",
+      imageUrl: "https://img.example.com/product.jpg",
+      priceText: "CN¥5.72-6.73",
+      moqText: "最小订购量：100 Pieces",
+      productId: "1601793092954"
+    }
+  ]);
+});
+
+test("tap extracts nested rich fields from OneTalk product card payloads", () => {
+  const emitter = new FakeEmitter();
+  const { fakeWindow, posted } = createFakeWindow(emitter);
+  installOneTalkMessageTap(fakeWindow as unknown as Window);
+  const productUrl = "https://workspace.alibaba.com/card?type=2000&ids=1601793092954";
+
+  emitter.emit("BaaSMessageNew", {
+    messageModel: {
+      cid: "conv-product-nested",
+      messageId: "msg-product-nested",
+      content: {
+        contentType: "card",
+        text: { content: productUrl },
+        productCard: {
+          action: { url: productUrl },
+          productInfo: {
+            subject: "High-Quality Newly Design Kitchen Bowl Plate Tableware",
+            mainImage: { url: "https://img.example.com/kitchen-rack.jpg" },
+            priceInfo: { displayPrice: "CN¥46.11-55.31" },
+            minOrder: { quantity: 500, unit: "Pieces" },
+            offerId: 1601793092954
+          }
+        }
+      },
+      createAt: 1781598180000,
+      sender: { uid: "buyer-ali" }
+    }
+  });
+
+  const observed = observedOf(posted);
+  assert.equal(observed.length, 1);
+  const message = observed[0].messages[0].message as Record<string, unknown>;
+  assert.deepEqual(message.richContent, [
+    {
+      type: "product",
+      url: productUrl,
+      title: "High-Quality Newly Design Kitchen Bowl Plate Tableware",
+      imageUrl: "https://img.example.com/kitchen-rack.jpg",
+      priceText: "CN¥46.11-55.31",
+      moqText: "500 Pieces",
+      productId: "1601793092954"
+    }
+  ]);
+});
+
 test("tap extracts a sent message (BaaSMessageSendCallback) with direction and contact", () => {
   const emitter = new FakeEmitter();
   const { fakeWindow, posted } = createFakeWindow(emitter);
