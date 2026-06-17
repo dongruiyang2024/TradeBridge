@@ -135,7 +135,12 @@ chromeApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (typed.type === "realtime-reconnect") {
-    void startRealtimeConnection().then(sendResponse);
+    void startRealtimeConnection()
+      .then(async (response) => {
+        await refreshTradeMindBindingValidation({ force: true }).catch(() => undefined);
+        return response;
+      })
+      .then(sendResponse);
     return true;
   }
   if (typed.type === "config-updated") {
@@ -174,6 +179,7 @@ async function runDefaultSyncAndOutbound() {
     const sync = await runDefaultSync();
     await runDefaultOutboundDelivery();
     await reportCollectorHeartbeat({ lastSyncAt: new Date().toISOString() });
+    await refreshTradeMindBindingValidation().catch(() => undefined);
     return sync;
   } catch (error) {
     await reportCollectorHeartbeat({ lastError: errorMessage(error) }).catch(() => undefined);
@@ -214,9 +220,10 @@ async function readDashboard() {
   };
 }
 
-async function refreshTradeMindBindingValidation(): Promise<void> {
+async function refreshTradeMindBindingValidation(options: { force?: boolean } = {}): Promise<void> {
   const [config, status] = await Promise.all([stateStore.getConfig(), stateStore.getStatus()]);
   if (!config) return;
+  if (!options.force && status.tradeMindBinding?.valid && status.tradeMindBinding.runtimeStatus === "online") return;
   await validateStoredTradeMindBinding(config, status);
 }
 

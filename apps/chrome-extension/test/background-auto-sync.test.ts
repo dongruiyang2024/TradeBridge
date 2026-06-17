@@ -46,6 +46,8 @@ test("background refreshes TradeMind binding validation on startup and dashboard
   assert.match(source, /chromeApi\.runtime\.onStartup\?\.addListener[\s\S]*refreshTradeMindBindingValidation/);
   assert.match(source, /async function readDashboard\(\)[\s\S]*validateStoredTradeMindBinding/);
   assert.match(source, /typed\.type === "config-updated"[\s\S]*refreshTradeMindBindingValidation/);
+  assert.match(source, /typed\.type === "realtime-reconnect"[\s\S]*refreshTradeMindBindingValidation\(\{ force: true \}\)/);
+  assert.match(source, /reportCollectorHeartbeat\(\{ lastSyncAt:[\s\S]*refreshTradeMindBindingValidation\(\)\.catch/);
 });
 
 test("background reports collector heartbeat after sync and sync errors", () => {

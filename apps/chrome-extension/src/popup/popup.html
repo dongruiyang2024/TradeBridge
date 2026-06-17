@@ -12,7 +12,10 @@
           <h1>TradeBridge</h1>
           <p id="account" class="account">未激活</p>
         </div>
-        <span id="headline" class="status-pill">未启动</span>
+        <div class="headline-actions">
+          <span id="headline" class="status-pill">未启动</span>
+          <button id="reconnect" class="status-refresh" type="button" hidden aria-label="重新检测连接" title="重新检测连接">↻</button>
+        </div>
       </header>
 
       <section class="status-panel" aria-label="采集状态">
@@ -25,7 +28,6 @@
       </section>
 
       <nav class="actions" aria-label="快捷操作">
-        <button id="reconnect" class="primary" type="button" hidden>重新连接</button>
         <button id="open-options" type="button">设置</button>
       </nav>
     </main>

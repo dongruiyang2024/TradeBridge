@@ -34,7 +34,7 @@ export function createPopupViewModel(input: PopupViewInput): PopupViewModel {
     historyLabel: historySummary(input.status),
     errorLabel: input.status.lastError ? `最近错误：${input.status.lastError.code}` : "最近错误：无",
     headlineLabel: realtimeLabel.replace(/^实时(?:连接|同步)：/, ""),
-    reconnectActionLabel: "重新连接",
+    reconnectActionLabel: "重新检测连接",
     reconnectActionHidden: reconnectActionHidden(input)
   };
 }
@@ -82,8 +82,8 @@ function reconnectActionHidden(input: PopupViewInput): boolean {
   if (!input.tradeBridgeAccountEmail) return true;
   const binding = input.status.tradeMindBinding;
   if (binding) {
-    if (needsTradeMindRebind(binding)) return true;
     if (binding.runtimeStatus === "online") return true;
+    return false;
   }
   const realtime = input.status.realtime;
   if (!realtime) return false;

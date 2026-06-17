@@ -42,6 +42,13 @@ body {
   min-width: 0;
 }
 
+.headline-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
 h1 {
   margin: 0;
   font-size: 18px;
@@ -74,6 +81,23 @@ p {
   line-height: 1;
   text-align: center;
   white-space: nowrap;
+}
+
+.status-refresh {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  min-height: 28px;
+  height: 28px;
+  border-radius: 999px;
+  padding: 0;
+  color: #24446f;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.status-refresh:hover {
+  background: #eef4ff;
 }
 
 .status-panel {

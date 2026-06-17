@@ -37,7 +37,7 @@ test("createPopupViewModel shows TradeBridge account and operational status", ()
   assert.match(view.syncLabel, /^最近同步：2026-06-01 \d{2}:32$/);
   assert.equal(view.syncLabel.includes("T"), false);
   assert.equal(view.historyLabel, "历史回补：本轮 12 条 / 实时 4 条 / 会话 3 个");
-  assert.equal(view.reconnectActionLabel, "重新连接");
+  assert.equal(view.reconnectActionLabel, "重新检测连接");
   assert.equal(view.reconnectActionHidden, true);
 });
 
@@ -75,6 +75,7 @@ test("createPopupViewModel shows platform binding status when TradeMind validati
   assert.equal(view.accountValidationLabel, "平台绑定：已绑定");
   assert.equal(view.realtimeLabel, "实时同步：等待插件上线");
   assert.equal(view.headlineLabel, "等待插件上线");
+  assert.equal(view.reconnectActionLabel, "重新检测连接");
   assert.equal(view.reconnectActionHidden, false);
 });
 
@@ -97,7 +98,8 @@ test("createPopupViewModel asks for rebind when TradeMind marks the token invali
 
   assert.equal(view.accountValidationLabel, "平台绑定：需要重新绑定（token_revoked）");
   assert.equal(view.realtimeLabel, "实时同步：未连接");
-  assert.equal(view.reconnectActionHidden, true);
+  assert.equal(view.reconnectActionLabel, "重新检测连接");
+  assert.equal(view.reconnectActionHidden, false);
 });
 
 test("createPopupViewModel shows reconnect action only when realtime is recoverable", () => {
@@ -112,7 +114,7 @@ test("createPopupViewModel shows reconnect action only when realtime is recovera
     }
   });
 
-  assert.equal(view.reconnectActionLabel, "重新连接");
+  assert.equal(view.reconnectActionLabel, "重新检测连接");
   assert.equal(view.reconnectActionHidden, false);
 });
 
@@ -157,6 +159,7 @@ test("popup markup exposes reconnect without showing technical details", () => {
   const markup = fs.readFileSync(path.resolve("src/popup/popup.html"), "utf8");
 
   assert.equal(markup.includes('id="reconnect"'), true);
+  assert.equal(markup.includes("status-refresh"), true);
   assert.equal(markup.includes('id="sync-now"'), false);
   assert.equal(markup.includes('id="account-validation"'), true);
   assert.equal(markup.includes('id="history"'), true);
@@ -173,6 +176,7 @@ test("popup css keeps the extension popup width stable while constraining long s
   assert.equal(css.includes("max-width: 100vw"), false);
   assert.equal(css.includes("overflow-x: hidden"), true);
   assert.equal(css.includes("overflow-wrap: anywhere"), true);
+  assert.equal(css.includes(".status-refresh"), true);
   assert.equal(css.includes("#sync-now"), false);
   assert.equal(css.includes("button[hidden]"), true);
 });

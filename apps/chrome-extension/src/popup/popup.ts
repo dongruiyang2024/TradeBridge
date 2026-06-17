@@ -16,7 +16,8 @@ const reconnectButton = document.querySelector<HTMLButtonElement>("#reconnect");
 void renderStatus();
 
 reconnectButton?.addEventListener("click", async () => {
-  realtime?.replaceChildren("实时连接：重新连接中...");
+  headline?.replaceChildren("检测中");
+  realtime?.replaceChildren("实时同步：重新检测中...");
   const result = (await chromeApi.runtime.sendMessage({ type: "realtime-reconnect" })) as {
     ok: boolean;
     error?: string;
@@ -45,6 +46,7 @@ async function renderStatus(): Promise<void> {
   error?.replaceChildren(view.errorLabel);
   if (reconnectButton) {
     reconnectButton.hidden = view.reconnectActionHidden;
-    reconnectButton.replaceChildren(view.reconnectActionLabel);
+    reconnectButton.title = view.reconnectActionLabel;
+    reconnectButton.setAttribute("aria-label", view.reconnectActionLabel);
   }
 }
