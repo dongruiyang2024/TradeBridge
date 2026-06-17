@@ -297,24 +297,6 @@ async function validateStoredTradeMindBinding(
   previousStatus: ExtensionStatus
 ): Promise<ExtensionStatus> {
   const checkedAt = new Date().toISOString();
-  if (!config.tradeMindBindingToken) {
-    const nextStatus: ExtensionStatus = {
-      ...previousStatus,
-      tradeMindBinding: {
-        valid: false,
-        status: "disconnected",
-        bindingStatus: "unbound",
-        tokenStatus: "unknown",
-        runtimeStatus: "offline",
-        recommendedAction: "rebind",
-        tmAliId: config.sellerAccountExternalId,
-        tmLoginId: config.channelAccountExternalId,
-        checkedAt
-      }
-    };
-    await stateStore.saveStatus(nextStatus);
-    return nextStatus;
-  }
 
   try {
     const result = await validateTradeMindBinding({
