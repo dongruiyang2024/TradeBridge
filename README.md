@@ -100,10 +100,12 @@ TRADEMIND_INGEST_URL=http://127.0.0.1:3001/api/ingest/conversations
 TRADEMIND_INGEST_SECRET=和 Trade-Mind 的 TRADEMIND_INGEST_SECRET 保持一致
 ```
 
-需要在插件激活时自动确认 Trade-Mind 绑定时，再配置：
+需要在插件激活、心跳和打开面板时自动同步 Trade-Mind 绑定状态，再配置：
 
 ```bash
 TRADEMIND_BINDING_CONFIRM_URL=http://127.0.0.1:3001/api/communication/binding/bridge-confirm
+TRADEMIND_BINDING_HEALTH_URL=http://127.0.0.1:3001/api/communication/binding/bridge-health
+TRADEMIND_BINDING_VALIDATE_URL=http://127.0.0.1:3001/api/communication/binding/validate
 TRADEMIND_BRIDGE_SECRET=和 Trade-Mind 的 TRADEMIND_BRIDGE_SECRET 保持一致
 ```
 

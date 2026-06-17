@@ -90,6 +90,7 @@ export interface CreateServerOptions {
    */
   allowedWebOrigins?: string[];
   tradeMindBindingHealthReporter?: TradeMindBindingHealthReporterOptions;
+  tradeMindBindingValidator?: TradeMindBindingValidatorOptions;
 }
 
 export interface TradeMindForwarderOptions {
@@ -110,6 +111,14 @@ export interface TradeMindBindingConfirmerOptions {
 
 export interface TradeMindBindingHealthReporterOptions {
   healthUrl: string;
+  bridgeSecret: string;
+  fetch?: typeof fetch;
+  now?: () => Date;
+  nonce?: () => string;
+}
+
+export interface TradeMindBindingValidatorOptions {
+  validateUrl: string;
   bridgeSecret: string;
   fetch?: typeof fetch;
   now?: () => Date;
@@ -180,6 +189,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   const tradeMindForwarder = normalizeTradeMindForwarder(options.tradeMindForwarder);
   const tradeMindBindingConfirmer = normalizeTradeMindBindingConfirmer(options.tradeMindBindingConfirmer);
   const tradeMindBindingHealthReporter = normalizeTradeMindBindingHealthReporter(options.tradeMindBindingHealthReporter);
+  const tradeMindBindingValidator = normalizeTradeMindBindingValidator(options.tradeMindBindingValidator);
   const tradeMindProvision = normalizeTradeMindProvision(options.tradeMindProvision);
   const realtimeHub = createCollectorRealtimeHub();
   const internalAccessRoles: InternalRole[] = ["admin", "supervisor", "sales"];
@@ -331,6 +341,36 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       return reply.code(502).send({ ok: false, error: "trademind_binding_health_report_failed" });
     }
     return { ok: true, device: publicCollectorDevice(device) };
+  });
+
+  app.post("/collector/v1/trademind/validate", async (request, reply) => {
+    const collectorDevice = await collectorDeviceFromAuthorization(request.headers.authorization || "", store);
+    if (!collectorDevice) return reply.code(401).send({ ok: false, error: "unauthorized" });
+
+    if (!collectorDevice.tradeMindBindingToken) {
+      return {
+        ok: true,
+        validation: unboundTradeMindBindingValidation()
+      };
+    }
+
+    try {
+      const validation = await validateTradeMindBindingForCollector({
+        bindingToken: collectorDevice.tradeMindBindingToken,
+        deviceId: collectorDevice.externalDeviceId || collectorDevice.id,
+        tmAliId: bodyStringField(request.body, "tmAliId") || collectorDevice.sellerAccountExternalId || null,
+        tmLoginId: bodyStringField(request.body, "tmLoginId") || bodyStringField(request.body, "channelAccountExternalId") || undefined,
+        validator: tradeMindBindingValidator
+      });
+      return { ok: true, validation };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "trademind_binding_validator_disabled") {
+        return reply.code(404).send({ ok: false, error: message });
+      }
+      request.log.error({ err: error }, "trademind_binding_validate_failed");
+      return reply.code(502).send({ ok: false, error: "trademind_binding_validate_failed" });
+    }
   });
 
   app.post("/collector/v1/auth/login", async (request, reply) => {
@@ -1230,6 +1270,7 @@ export async function createServerFromEnv(options: CreateServerFromEnvOptions = 
     tradeMindForwarder: createTradeMindForwarderFromEnv(env),
     tradeMindBindingConfirmer: createTradeMindBindingConfirmerFromEnv(env),
     tradeMindBindingHealthReporter: createTradeMindBindingHealthReporterFromEnv(env),
+    tradeMindBindingValidator: createTradeMindBindingValidatorFromEnv(env),
     tradeMindProvision: createTradeMindProvisionFromEnv(env)
   });
 }
@@ -1253,6 +1294,13 @@ function createTradeMindBindingHealthReporterFromEnv(env: Record<string, string 
   const bridgeSecret = env.TRADEMIND_BRIDGE_SECRET?.trim();
   if (!healthUrl || !bridgeSecret) return undefined;
   return { bridgeSecret, healthUrl };
+}
+
+function createTradeMindBindingValidatorFromEnv(env: Record<string, string | undefined>): TradeMindBindingValidatorOptions | undefined {
+  const validateUrl = env.TRADEMIND_BINDING_VALIDATE_URL?.trim();
+  const bridgeSecret = env.TRADEMIND_BRIDGE_SECRET?.trim();
+  if (!validateUrl || !bridgeSecret) return undefined;
+  return { bridgeSecret, validateUrl };
 }
 
 function createTradeMindProvisionFromEnv(env: Record<string, string | undefined>): TradeMindProvisionOptions | undefined {
@@ -1336,6 +1384,14 @@ interface NormalizedTradeMindBindingHealthReporter {
   nonce: () => string;
 }
 
+interface NormalizedTradeMindBindingValidator {
+  validateUrl: string;
+  bridgeSecret: string;
+  fetch: typeof fetch;
+  now: () => Date;
+  nonce: () => string;
+}
+
 interface NormalizedTradeMindProvision {
   secret: string;
 }
@@ -1346,6 +1402,29 @@ interface TradeMindSignedRequestOptions {
   secretHeaderName: string;
   now: () => Date;
   nonce: () => string;
+}
+
+type TradeMindBindingStatus = "unbound" | "bound" | "revoked";
+type TradeMindTokenStatus = "valid" | "invalid" | "unknown";
+type TradeMindRuntimeStatus = "online" | "offline" | "stale" | "error";
+type TradeMindRecommendedAction = "none" | "open_plugin" | "open_onetalk" | "rebind" | "retry";
+type TradeMindConnectionStatus = "connected" | "disconnected" | "error" | "stale";
+
+interface TradeMindBindingValidationResult {
+  valid: boolean;
+  status: TradeMindConnectionStatus;
+  bindingStatus: TradeMindBindingStatus;
+  tokenStatus: TradeMindTokenStatus;
+  runtimeStatus: TradeMindRuntimeStatus;
+  recommendedAction: TradeMindRecommendedAction;
+  reason?: string;
+  tmAliId?: string | null;
+  tmLoginId?: string;
+  userId?: string;
+  workspaceId?: string;
+  lastError?: string | null;
+  lastHeartbeatAt?: string | null;
+  lastSyncAt?: string | null;
 }
 
 function normalizeTradeMindProvision(options?: TradeMindProvisionOptions): NormalizedTradeMindProvision | undefined {
@@ -1399,6 +1478,24 @@ function normalizeTradeMindBindingHealthReporter(
   if (!healthUrl || !bridgeSecret) return undefined;
   return {
     healthUrl,
+    bridgeSecret,
+    fetch: fetchImpl,
+    now,
+    nonce
+  };
+}
+
+function normalizeTradeMindBindingValidator(
+  options?: TradeMindBindingValidatorOptions
+): NormalizedTradeMindBindingValidator | undefined {
+  const validateUrl = options?.validateUrl.trim();
+  const bridgeSecret = options?.bridgeSecret.trim();
+  const fetchImpl = options?.fetch || fetch;
+  const now = options?.now || (() => new Date());
+  const nonce = options?.nonce || (() => crypto.randomBytes(16).toString("hex"));
+  if (!validateUrl || !bridgeSecret) return undefined;
+  return {
+    validateUrl,
     bridgeSecret,
     fetch: fetchImpl,
     now,
@@ -1468,6 +1565,44 @@ async function reportTradeMindBindingHealth(input: {
   }
 }
 
+async function validateTradeMindBindingForCollector(input: {
+  bindingToken?: string;
+  deviceId: string;
+  tmAliId?: string | null;
+  tmLoginId?: string;
+  validator: NormalizedTradeMindBindingValidator | undefined;
+}): Promise<TradeMindBindingValidationResult> {
+  if (!input.bindingToken) return unboundTradeMindBindingValidation();
+  if (!input.validator) throw new Error("trademind_binding_validator_disabled");
+
+  const body = compactRecord({
+    bindingToken: input.bindingToken,
+    deviceId: input.deviceId,
+    tmAliId: input.tmAliId || undefined,
+    tmLoginId: input.tmLoginId
+  });
+  const rawBody = JSON.stringify(body);
+  const response = await input.validator.fetch(input.validator.validateUrl, {
+    method: "POST",
+    headers: tradeMindSignedHeaders({
+      rawBody,
+      secret: input.validator.bridgeSecret,
+      secretHeaderName: "x-trademind-bridge-secret",
+      now: input.validator.now,
+      nonce: input.validator.nonce
+    }),
+    body: rawBody
+  });
+  const responseBody = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(`trademind_binding_validate_failed_${response.status}`);
+  }
+  if (!isTradeMindBindingValidationResponse(responseBody)) {
+    throw new Error("trademind_binding_validate_response_invalid");
+  }
+  return responseBody.validation;
+}
+
 async function confirmTradeMindBindingForCollector(input: {
   bindingToken?: string;
   channelAccountExternalId?: string;
@@ -1500,6 +1635,65 @@ async function confirmTradeMindBindingForCollector(input: {
   if (!response.ok) {
     throw new Error(`trademind_binding_confirm_failed_${response.status}`);
   }
+}
+
+function unboundTradeMindBindingValidation(): TradeMindBindingValidationResult {
+  return {
+    valid: false,
+    status: "disconnected",
+    bindingStatus: "unbound",
+    tokenStatus: "unknown",
+    runtimeStatus: "offline",
+    recommendedAction: "rebind"
+  };
+}
+
+function isTradeMindBindingValidationResponse(value: unknown): value is { validation: TradeMindBindingValidationResult } {
+  return isObjectRecord(value) && isTradeMindBindingValidation(value.validation);
+}
+
+function isTradeMindBindingValidation(value: unknown): value is TradeMindBindingValidationResult {
+  return (
+    isObjectRecord(value) &&
+    typeof value.valid === "boolean" &&
+    isTradeMindConnectionStatus(value.status) &&
+    isTradeMindBindingStatus(value.bindingStatus) &&
+    isTradeMindTokenStatus(value.tokenStatus) &&
+    isTradeMindRuntimeStatus(value.runtimeStatus) &&
+    isTradeMindRecommendedAction(value.recommendedAction) &&
+    (value.reason === undefined || typeof value.reason === "string") &&
+    (value.tmAliId === undefined || value.tmAliId === null || typeof value.tmAliId === "string") &&
+    (value.tmLoginId === undefined || typeof value.tmLoginId === "string") &&
+    (value.userId === undefined || typeof value.userId === "string") &&
+    (value.workspaceId === undefined || typeof value.workspaceId === "string") &&
+    (value.lastError === undefined || value.lastError === null || typeof value.lastError === "string") &&
+    (value.lastHeartbeatAt === undefined || value.lastHeartbeatAt === null || typeof value.lastHeartbeatAt === "string") &&
+    (value.lastSyncAt === undefined || value.lastSyncAt === null || typeof value.lastSyncAt === "string")
+  );
+}
+
+function isTradeMindBindingStatus(value: unknown): value is TradeMindBindingStatus {
+  return value === "unbound" || value === "bound" || value === "revoked";
+}
+
+function isTradeMindTokenStatus(value: unknown): value is TradeMindTokenStatus {
+  return value === "valid" || value === "invalid" || value === "unknown";
+}
+
+function isTradeMindRuntimeStatus(value: unknown): value is TradeMindRuntimeStatus {
+  return value === "online" || value === "offline" || value === "stale" || value === "error";
+}
+
+function isTradeMindRecommendedAction(value: unknown): value is TradeMindRecommendedAction {
+  return value === "none" || value === "open_plugin" || value === "open_onetalk" || value === "rebind" || value === "retry";
+}
+
+function isTradeMindConnectionStatus(value: unknown): value is TradeMindConnectionStatus {
+  return value === "connected" || value === "disconnected" || value === "error" || value === "stale";
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
 function tradeMindSignedHeaders(options: TradeMindSignedRequestOptions): Record<string, string> {

@@ -5,7 +5,8 @@ import {
   listOutboundMessages,
   markOutboundMessageDelivered,
   uploadSyncBatch,
-  validateTradeBridgeAccount
+  validateTradeBridgeAccount,
+  validateTradeMindBinding
 } from "../src/background/tradebridge-client.js";
 
 const originalFetch = globalThis.fetch;
@@ -350,6 +351,44 @@ test("validateTradeBridgeAccount reads the account behind a collector token", as
   assert.equal(requests[0].url, "http://127.0.0.1:5032/collector/v1/me");
   assert.equal(requests[0].method, "GET");
   assert.equal(requests[0].headers.get("authorization"), "Bearer collector-token");
+});
+
+test("validateTradeMindBinding posts account hints and reads platform binding state", async () => {
+  const requests: Request[] = [];
+  globalThis.fetch = async (input, init) => {
+    requests.push(new Request(input, init));
+    return Response.json({
+      ok: true,
+      validation: {
+        valid: true,
+        status: "connected",
+        bindingStatus: "bound",
+        tokenStatus: "valid",
+        runtimeStatus: "online",
+        recommendedAction: "none",
+        tmAliId: "self-ali-1",
+        tmLoginId: "self-login-1"
+      }
+    });
+  };
+
+  const result = await validateTradeMindBinding({
+    serverUrl: "http://127.0.0.1:5032",
+    collectorToken: "collector-token",
+    tmAliId: "self-ali-1",
+    tmLoginId: "self-login-1"
+  });
+
+  assert.equal(result.valid, true);
+  assert.equal(result.bindingStatus, "bound");
+  assert.equal(requests[0].url, "http://127.0.0.1:5032/collector/v1/trademind/validate");
+  assert.equal(requests[0].method, "POST");
+  assert.equal(requests[0].headers.get("authorization"), "Bearer collector-token");
+  assert.equal(requests[0].headers.get("content-type"), "application/json");
+  assert.deepEqual(await requests[0].json(), {
+    tmAliId: "self-ali-1",
+    tmLoginId: "self-login-1"
+  });
 });
 
 test("validateTradeBridgeAccount maps 401 to tradebridge_unauthorized", async () => {

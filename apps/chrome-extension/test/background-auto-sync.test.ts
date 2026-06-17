@@ -39,6 +39,15 @@ test("background keeps periodic sync on a fixed ten second cadence", () => {
 });
 
 
+test("background refreshes TradeMind binding validation on startup and dashboard reads", () => {
+  const source = backgroundSource();
+
+  assert.match(source, /validateTradeMindBinding/);
+  assert.match(source, /chromeApi\.runtime\.onStartup\?\.addListener[\s\S]*refreshTradeMindBindingValidation/);
+  assert.match(source, /async function readDashboard\(\)[\s\S]*validateStoredTradeMindBinding/);
+  assert.match(source, /typed\.type === "config-updated"[\s\S]*refreshTradeMindBindingValidation/);
+});
+
 test("background reports collector heartbeat after sync and sync errors", () => {
   const source = backgroundSource();
 

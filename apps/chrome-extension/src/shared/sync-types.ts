@@ -94,10 +94,39 @@ export interface ExtensionConfig {
   historyMessagesPerConversation?: number;
 }
 
+export type ExtensionTradeMindConnectionStatus = "connected" | "disconnected" | "error" | "stale";
+export type ExtensionTradeMindBindingState = "unbound" | "bound" | "revoked";
+export type ExtensionTradeMindTokenStatus = "valid" | "invalid" | "unknown";
+export type ExtensionTradeMindRuntimeStatus = "online" | "offline" | "stale" | "error";
+export type ExtensionTradeMindRecommendedAction = "none" | "open_plugin" | "open_onetalk" | "rebind" | "retry";
+
+export interface TradeMindBindingValidationResult {
+  valid: boolean;
+  status: ExtensionTradeMindConnectionStatus;
+  bindingStatus: ExtensionTradeMindBindingState;
+  tokenStatus: ExtensionTradeMindTokenStatus;
+  runtimeStatus: ExtensionTradeMindRuntimeStatus;
+  recommendedAction: ExtensionTradeMindRecommendedAction;
+  reason?: string;
+  tmAliId?: string | null;
+  tmLoginId?: string;
+  userId?: string;
+  workspaceId?: string;
+  lastError?: string | null;
+  lastHeartbeatAt?: string | null;
+  lastSyncAt?: string | null;
+  checkedAt?: string;
+}
+
+export interface ExtensionTradeMindBindingStatus extends TradeMindBindingValidationResult {
+  checkedAt: string;
+}
+
 export interface ExtensionStatus {
   lastSyncedAt?: string;
   nextCursor?: string | null;
   accountValidation?: ExtensionAccountValidationStatus;
+  tradeMindBinding?: ExtensionTradeMindBindingStatus;
   realtime?: ExtensionRealtimeStatus;
   lastDiagnostics?: SyncDiagnostics;
   update?: ExtensionUpdateStatus;

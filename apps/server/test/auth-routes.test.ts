@@ -451,6 +451,90 @@ test("POST /collector/v1/heartbeat forwards Trade-Mind binding health with signe
   );
 });
 
+test("POST /collector/v1/trademind/validate forwards signed Trade-Mind binding validation", async () => {
+  const store = new InMemorySyncStore();
+  await store.createInternalUser({
+    email: "admin@example.com",
+    displayName: "Admin User",
+    passwordHash: await hashPassword("secret"),
+    roles: ["admin"]
+  });
+  const validateCalls: Array<{ body: string; headers: Record<string, string>; url: string }> = [];
+  const app = await createServer({
+    store,
+    tradeMindBindingValidator: {
+      bridgeSecret: "bridge-secret",
+      validateUrl: "https://pilot.sinan.yun/api/communication/binding/validate",
+      fetch: async (url, init) => {
+        validateCalls.push({
+          body: String(init?.body),
+          headers: init?.headers as Record<string, string>,
+          url: String(url)
+        });
+        return Response.json({
+          validation: {
+            valid: true,
+            status: "connected",
+            bindingStatus: "bound",
+            tokenStatus: "valid",
+            runtimeStatus: "online",
+            recommendedAction: "none",
+            tmAliId: "self-ali-1",
+            tmLoginId: "self-login-1"
+          }
+        });
+      },
+      nonce: () => "validate-nonce-1",
+      now: () => new Date("2026-06-14T08:03:00.000Z")
+    }
+  });
+  const activation = await app.inject({
+    method: "POST",
+    url: "/collector/v1/auth/login",
+    payload: {
+      email: "admin@example.com",
+      password: "secret",
+      sellerAccountExternalId: "self-ali-1",
+      channelAccountExternalId: "self-login-1",
+      tradeMindBindingToken: "tm-binding-token",
+      deviceExternalId: "chrome-extension-1",
+      deviceName: "Chrome Extension"
+    }
+  });
+  assert.equal(activation.statusCode, 200);
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/collector/v1/trademind/validate",
+    headers: { authorization: "Bearer " + activation.json().token },
+    payload: {
+      tmLoginId: "self-login-1"
+    }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().ok, true);
+  assert.equal(response.json().validation.valid, true);
+  assert.equal(validateCalls.length, 1);
+  assert.equal(validateCalls[0].url, "https://pilot.sinan.yun/api/communication/binding/validate");
+  assert.deepEqual(JSON.parse(validateCalls[0].body), {
+    bindingToken: "tm-binding-token",
+    deviceId: "chrome-extension-1",
+    tmAliId: "self-ali-1",
+    tmLoginId: "self-login-1"
+  });
+  assert.equal(validateCalls[0].headers["Content-Type"], "application/json");
+  assert.equal(validateCalls[0].headers["x-trademind-bridge-secret"], "bridge-secret");
+  assert.equal(validateCalls[0].headers["x-trademind-timestamp"], "1781424180");
+  assert.equal(validateCalls[0].headers["x-trademind-nonce"], "validate-nonce-1");
+  assert.equal(
+    validateCalls[0].headers["x-trademind-signature"],
+    createHmac("sha256", "bridge-secret")
+      .update(`1781424180.validate-nonce-1.${validateCalls[0].body}`)
+      .digest("hex")
+  );
+});
+
 test("POST /collector/v1/auth/login auto-confirms Trade-Mind bindings after collector activation", async () => {
   const store = new InMemorySyncStore();
   await store.createInternalUser({

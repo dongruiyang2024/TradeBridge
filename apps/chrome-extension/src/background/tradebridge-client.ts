@@ -4,7 +4,8 @@ import type {
   CollectorActivationResult,
   OutboundMessage,
   SyncBatch,
-  SyncBatchResult
+  SyncBatchResult,
+  TradeMindBindingValidationResult
 } from "../shared/sync-types.js";
 
 export interface UploadSyncBatchOptions {
@@ -32,6 +33,14 @@ export interface MarkOutboundMessageDeliveredOptions {
 export interface ValidateTradeBridgeAccountOptions {
   serverUrl: string;
   collectorToken: string;
+  timeoutMs?: number;
+}
+
+export interface ValidateTradeMindBindingOptions {
+  serverUrl: string;
+  collectorToken: string;
+  tmAliId?: string;
+  tmLoginId?: string;
   timeoutMs?: number;
 }
 
@@ -162,6 +171,46 @@ export async function validateTradeBridgeAccount(
   };
 }
 
+export async function validateTradeMindBinding(
+  options: ValidateTradeMindBindingOptions
+): Promise<TradeMindBindingValidationResult> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 5000);
+  let response: Response;
+  try {
+    response = await fetch(tradeMindBindingValidateUrl(options.serverUrl), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${options.collectorToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(
+        stripUndefined({
+          tmAliId: options.tmAliId,
+          tmLoginId: options.tmLoginId
+        })
+      ),
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("trademind_binding_validation_timeout");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+  const body = await response.json().catch(() => null);
+
+  if (response.status === 401) throw new Error("tradebridge_unauthorized");
+  if (!response.ok) throw new Error(responseErrorCode(body, "trademind_binding_validation_failed"));
+  if (!isTradeMindBindingValidationResponse(body)) {
+    throw new Error("trademind_binding_validation_response_invalid");
+  }
+
+  return body.validation;
+}
+
 export async function listOutboundMessages(options: ListOutboundMessagesOptions): Promise<OutboundMessage[]> {
   const response = await fetch(outboundMessagesUrl(options.serverUrl), {
     headers: {
@@ -227,6 +276,10 @@ function collectorMeUrl(serverUrl: string): string {
   return new URL("/collector/v1/me", serverUrl).toString();
 }
 
+function tradeMindBindingValidateUrl(serverUrl: string): string {
+  return new URL("/collector/v1/trademind/validate", serverUrl).toString();
+}
+
 function outboundMessagesUrl(serverUrl: string): string {
   return new URL("/collector/v1/outbound-messages", serverUrl).toString();
 }
@@ -264,6 +317,51 @@ function isActivationResponse(value: unknown): value is CollectorActivationResul
 
 function isAccountValidationResponse(value: unknown): value is CollectorAccountValidationResult & { ok: true } {
   return isRecord(value) && value.ok === true && isTradeBridgeAccount(value.account) && isCollectorDevice(value.device);
+}
+
+function isTradeMindBindingValidationResponse(value: unknown): value is { ok: true; validation: TradeMindBindingValidationResult } {
+  return isRecord(value) && value.ok === true && isTradeMindBindingValidation(value.validation);
+}
+
+function isTradeMindBindingValidation(value: unknown): value is TradeMindBindingValidationResult {
+  return (
+    isRecord(value) &&
+    typeof value.valid === "boolean" &&
+    isTradeMindConnectionStatus(value.status) &&
+    isTradeMindBindingStatus(value.bindingStatus) &&
+    isTradeMindTokenStatus(value.tokenStatus) &&
+    isTradeMindRuntimeStatus(value.runtimeStatus) &&
+    isTradeMindRecommendedAction(value.recommendedAction) &&
+    (value.reason === undefined || typeof value.reason === "string") &&
+    (value.tmAliId === undefined || value.tmAliId === null || typeof value.tmAliId === "string") &&
+    (value.tmLoginId === undefined || typeof value.tmLoginId === "string") &&
+    (value.userId === undefined || typeof value.userId === "string") &&
+    (value.workspaceId === undefined || typeof value.workspaceId === "string") &&
+    (value.lastError === undefined || value.lastError === null || typeof value.lastError === "string") &&
+    (value.lastHeartbeatAt === undefined || value.lastHeartbeatAt === null || typeof value.lastHeartbeatAt === "string") &&
+    (value.lastSyncAt === undefined || value.lastSyncAt === null || typeof value.lastSyncAt === "string") &&
+    (value.checkedAt === undefined || typeof value.checkedAt === "string")
+  );
+}
+
+function isTradeMindBindingStatus(value: unknown): value is TradeMindBindingValidationResult["bindingStatus"] {
+  return value === "unbound" || value === "bound" || value === "revoked";
+}
+
+function isTradeMindTokenStatus(value: unknown): value is TradeMindBindingValidationResult["tokenStatus"] {
+  return value === "valid" || value === "invalid" || value === "unknown";
+}
+
+function isTradeMindRuntimeStatus(value: unknown): value is TradeMindBindingValidationResult["runtimeStatus"] {
+  return value === "online" || value === "offline" || value === "stale" || value === "error";
+}
+
+function isTradeMindRecommendedAction(value: unknown): value is TradeMindBindingValidationResult["recommendedAction"] {
+  return value === "none" || value === "open_plugin" || value === "open_onetalk" || value === "rebind" || value === "retry";
+}
+
+function isTradeMindConnectionStatus(value: unknown): value is TradeMindBindingValidationResult["status"] {
+  return value === "connected" || value === "disconnected" || value === "error" || value === "stale";
 }
 
 function isTradeBridgeAccount(value: unknown): value is CollectorAccountValidationResult["account"] {

@@ -12,12 +12,18 @@ import {
   markOutboundMessageDelivered,
   sendCollectorHeartbeat,
   uploadSyncBatch,
-  validateTradeBridgeAccount
+  validateTradeBridgeAccount,
+  validateTradeMindBinding
 } from "./tradebridge-client.js";
 import { TradeBridgeWsClient, type TradeBridgeWsState } from "./tradebridge-ws-client.js";
 import { getChrome } from "../shared/chrome-api.js";
 import type { ExtensionMessage } from "../shared/extension-messages.js";
-import type { ExtensionConfig, ExtensionRealtimeStatus, ExtensionStatus } from "../shared/sync-types.js";
+import type {
+  ExtensionConfig,
+  ExtensionRealtimeStatus,
+  ExtensionStatus,
+  ExtensionTradeMindBindingStatus
+} from "../shared/sync-types.js";
 
 const chromeApi = getChrome();
 const stateStore = new ExtensionStateStore(chromeApi.storage.local);
@@ -58,11 +64,13 @@ chromeApi.runtime.onInstalled.addListener(() => {
   chromeApi.alarms.create(OUTBOUND_ALARM, { periodInMinutes: 1 });
   chromeApi.alarms.create(REALTIME_WATCHDOG_ALARM, { periodInMinutes: 1 });
   void ensureRealtimeConnection();
+  void refreshTradeMindBindingValidation();
 });
 
 chromeApi.runtime.onStartup?.addListener(() => {
   autoSyncScheduler.startPeriodic();
   void ensureRealtimeConnection();
+  void refreshTradeMindBindingValidation();
 });
 
 chromeApi.runtime.onUpdateAvailable?.addListener((details) => {
@@ -136,7 +144,8 @@ chromeApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         autoSyncScheduler.startPeriodic();
         return startRealtimeConnection();
       })
-      .then((response) => {
+      .then(async (response) => {
+        await refreshTradeMindBindingValidation();
         autoSyncScheduler.schedule();
         return response;
       })
@@ -148,6 +157,7 @@ chromeApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 autoSyncScheduler.startPeriodic();
 void ensureRealtimeConnection();
+void refreshTradeMindBindingValidation();
 
 async function runDefaultSync() {
   return runSyncOnce({
@@ -196,11 +206,18 @@ async function readDashboard() {
   autoSyncScheduler.startPeriodic();
   await ensureRealtimeConnection();
   const [config, status] = await Promise.all([stateStore.getConfig(), stateStore.getStatus()]);
-  const validatedStatus = config ? await validateStoredTradeBridgeAccount(config, status) : status;
+  const statusWithAccount = config ? await validateStoredTradeBridgeAccount(config, status) : status;
+  const validatedStatus = config ? await validateStoredTradeMindBinding(config, statusWithAccount) : statusWithAccount;
   return {
     tradeBridgeAccountEmail: validatedStatus.accountValidation?.email || config?.tradeBridgeAccountEmail,
     status: validatedStatus
   };
+}
+
+async function refreshTradeMindBindingValidation(): Promise<void> {
+  const [config, status] = await Promise.all([stateStore.getConfig(), stateStore.getStatus()]);
+  if (!config) return;
+  await validateStoredTradeMindBinding(config, status);
 }
 
 async function recordObservedMessages(count: number): Promise<void> {
@@ -261,6 +278,69 @@ async function validateStoredTradeBridgeAccount(
         email: config.tradeBridgeAccountEmail,
         checkedAt: new Date().toISOString(),
         error: errorMessage(error)
+      }
+    };
+    await stateStore.saveStatus(nextStatus);
+    return nextStatus;
+  }
+}
+
+async function validateStoredTradeMindBinding(
+  config: ExtensionConfig,
+  previousStatus: ExtensionStatus
+): Promise<ExtensionStatus> {
+  const checkedAt = new Date().toISOString();
+  if (!config.tradeMindBindingToken) {
+    const nextStatus: ExtensionStatus = {
+      ...previousStatus,
+      tradeMindBinding: {
+        valid: false,
+        status: "disconnected",
+        bindingStatus: "unbound",
+        tokenStatus: "unknown",
+        runtimeStatus: "offline",
+        recommendedAction: "rebind",
+        tmAliId: config.sellerAccountExternalId,
+        tmLoginId: config.channelAccountExternalId,
+        checkedAt
+      }
+    };
+    await stateStore.saveStatus(nextStatus);
+    return nextStatus;
+  }
+
+  try {
+    const result = await validateTradeMindBinding({
+      serverUrl: config.serverUrl,
+      collectorToken: config.collectorToken,
+      tmAliId: config.sellerAccountExternalId,
+      tmLoginId: config.channelAccountExternalId,
+      timeoutMs: 3000
+    });
+    const tradeMindBinding: ExtensionTradeMindBindingStatus = {
+      ...result,
+      checkedAt: result.checkedAt || checkedAt
+    };
+    const nextStatus: ExtensionStatus = {
+      ...previousStatus,
+      tradeMindBinding
+    };
+    await stateStore.saveStatus(nextStatus);
+    return nextStatus;
+  } catch (error) {
+    const nextStatus: ExtensionStatus = {
+      ...previousStatus,
+      tradeMindBinding: {
+        valid: false,
+        status: "error",
+        bindingStatus: "bound",
+        tokenStatus: "unknown",
+        runtimeStatus: "error",
+        recommendedAction: "retry",
+        reason: errorMessage(error),
+        tmAliId: config.sellerAccountExternalId,
+        tmLoginId: config.channelAccountExternalId,
+        checkedAt
       }
     };
     await stateStore.saveStatus(nextStatus);

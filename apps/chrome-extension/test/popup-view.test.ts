@@ -56,6 +56,50 @@ test("createPopupViewModel warns when the TradeBridge account token is invalid",
   assert.equal(view.accountValidationLabel, "账号校验：失效（tradebridge_unauthorized）");
 });
 
+test("createPopupViewModel shows platform binding status when TradeMind validation is available", () => {
+  const view = createPopupViewModel({
+    tradeBridgeAccountEmail: "admin@example.com",
+    status: {
+      tradeMindBinding: {
+        valid: true,
+        status: "disconnected",
+        bindingStatus: "bound",
+        tokenStatus: "valid",
+        runtimeStatus: "offline",
+        recommendedAction: "open_plugin",
+        checkedAt: "2026-06-01T06:31:00.000Z"
+      }
+    }
+  });
+
+  assert.equal(view.accountValidationLabel, "平台绑定：已绑定");
+  assert.equal(view.realtimeLabel, "实时同步：等待插件上线");
+  assert.equal(view.headlineLabel, "等待插件上线");
+  assert.equal(view.reconnectActionHidden, false);
+});
+
+test("createPopupViewModel asks for rebind when TradeMind marks the token invalid", () => {
+  const view = createPopupViewModel({
+    tradeBridgeAccountEmail: "admin@example.com",
+    status: {
+      tradeMindBinding: {
+        valid: false,
+        status: "disconnected",
+        bindingStatus: "revoked",
+        tokenStatus: "invalid",
+        runtimeStatus: "offline",
+        recommendedAction: "rebind",
+        reason: "token_revoked",
+        checkedAt: "2026-06-01T06:31:00.000Z"
+      }
+    }
+  });
+
+  assert.equal(view.accountValidationLabel, "平台绑定：需要重新绑定（token_revoked）");
+  assert.equal(view.realtimeLabel, "实时同步：未连接");
+  assert.equal(view.reconnectActionHidden, true);
+});
+
 test("createPopupViewModel shows reconnect action only when realtime is recoverable", () => {
   const view = createPopupViewModel({
     tradeBridgeAccountEmail: "admin@example.com",
