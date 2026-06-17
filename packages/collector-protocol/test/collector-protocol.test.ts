@@ -102,6 +102,15 @@ test("collector protocol owns channel sync batch semantics", () => {
           externalMessageId: "msg-1",
           direction: "received",
           content: "hello",
+          attachments: [
+            {
+              type: "image",
+              fileName: "sample.jpg",
+              url: "https://img.example.com/sample.jpg",
+              thumbnailUrl: "https://img.example.com/sample-thumb.jpg",
+              mimeType: "image/jpeg"
+            }
+          ],
           richContent: [
             {
               type: "product",

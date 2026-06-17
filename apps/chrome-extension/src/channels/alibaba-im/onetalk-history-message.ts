@@ -133,7 +133,10 @@ function sanitizedContent(content: unknown): unknown {
   const sanitizedText = typeof text === "string" ? text.trim() : isRecord(text) ? compact({ content: firstString(text, ["content"]) }) : undefined;
   return compact({
     contentType: firstString(content, ["contentType"]),
-    text: sanitizedText && (!isRecord(sanitizedText) || Object.keys(sanitizedText).length) ? sanitizedText : undefined
+    text: sanitizedText && (!isRecord(sanitizedText) || Object.keys(sanitizedText).length) ? sanitizedText : undefined,
+    imageUrl: firstString(content, ["imageUrl", "imgUrl", "picUrl", "pictureUrl", "photoUrl", "url", "image.url", "pic.url"]),
+    thumbnailUrl: firstString(content, ["thumbnailUrl", "thumbUrl", "thumbnail.url", "thumb.url"]),
+    mimeType: firstString(content, ["mimeType", "mediaType"])
   });
 }
 

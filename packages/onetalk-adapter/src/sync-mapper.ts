@@ -247,6 +247,7 @@ function mapMessage(
   const message = lwpMessage(raw) || raw;
   const sentAt = isoTime(firstValue(message, ["sendTime", "sentAt", "time", "gmtCreate", "createdAt", "createAt"]));
   const richContent = richContentOf(message);
+  const attachments = richContent?.some((item) => item.type === "product") ? undefined : imageAttachmentsOf(message);
   return compact({
     externalConversationId,
     externalMessageId: firstString(message, ["messageId", "msgId", "messageID", "msgIdStr", "id"]),
@@ -264,9 +265,10 @@ function mapMessage(
       "content.text.content",
       "searchableContent.summary"
     ]),
+    attachments,
     richContent,
     sentAt,
-    rawSanitized: richContent?.length ? { ...raw, richContent } : raw
+    rawSanitized: richContent?.length || attachments?.length ? { ...raw, attachments, richContent } : raw
   });
 }
 
@@ -298,6 +300,104 @@ function productContentOf(value: unknown): NonNullable<ChannelSyncMessage["richC
     productId: firstStringFromRecords(records, PRODUCT_ID_KEYS) || productIdFromUrl(url)
   }) as NonNullable<ChannelSyncMessage["richContent"]>[number];
 }
+
+function imageAttachmentsOf(value: unknown): ChannelSyncMessage["attachments"] | undefined {
+  const records = imageCandidateRecords(value);
+  const output: NonNullable<ChannelSyncMessage["attachments"]> = [];
+  const seen = new Set<string>();
+  for (const record of records) {
+    const url = firstImageUrlString([record], IMAGE_URL_KEYS);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    output.push(
+      compact({
+        type: "image" as const,
+        fileName: firstString(record, IMAGE_NAME_KEYS) || "图片",
+        mimeType: firstString(record, IMAGE_MIME_KEYS),
+        thumbnailUrl: firstImageUrlString([record], IMAGE_THUMBNAIL_KEYS),
+        url
+      })
+    );
+    if (output.length >= 8) break;
+  }
+  return output.length ? output : undefined;
+}
+
+function imageCandidateRecords(value: unknown, depth = 0, seen: unknown[] = []): Record<string, unknown>[] {
+  const structured = structuredValue(value);
+  if (Array.isArray(structured)) {
+    return structured.flatMap((item) => imageCandidateRecords(item, depth, seen));
+  }
+  if (!isRecord(structured) || seen.includes(structured)) return [];
+  seen.push(structured);
+
+  const records = recordLooksImageLike(structured) ? [structured] : [];
+  if (depth >= 4) return records;
+
+  for (const key of IMAGE_NESTED_KEYS) {
+    const nested = structured[key];
+    if (nested !== undefined) records.push(...imageCandidateRecords(nested, depth + 1, seen));
+  }
+  for (const key of ["attachments", "attachmentList", "files", "fileList", "images", "imageList", "pics", "pictures", "items"]) {
+    const nested = structured[key];
+    if (Array.isArray(nested)) records.push(...nested.flatMap((item) => imageCandidateRecords(item, depth + 1, seen)));
+  }
+
+  return records;
+}
+
+function recordLooksImageLike(record: Record<string, unknown>): boolean {
+  const hint = firstString(record, ["type", "messageType", "msgType", "contentType", "displayStyle", "mimeType", "fileType"]);
+  if (hint && /image|img|pic|picture|photo/i.test(hint)) return true;
+  return Object.keys(record).some((key) => /image|img|pic|picture|photo|thumbnail|media|file/i.test(key));
+}
+
+const IMAGE_URL_KEYS = [
+  "url",
+  "src",
+  "href",
+  "imageUrl",
+  "imgUrl",
+  "picUrl",
+  "pictureUrl",
+  "photoUrl",
+  "thumbnailUrl",
+  "thumbUrl",
+  "originUrl",
+  "originalUrl",
+  "downloadUrl",
+  "fileUrl",
+  "mediaUrl",
+  "resourceUrl",
+  "image.url",
+  "image.src",
+  "img.url",
+  "pic.url",
+  "picture.url",
+  "thumbnail.url",
+  "file.url",
+  "resource.url"
+];
+const IMAGE_THUMBNAIL_KEYS = ["thumbnailUrl", "thumbUrl", "image.thumbnailUrl", "image.thumbUrl", "thumbnail.url", "thumb.url"];
+const IMAGE_NAME_KEYS = ["fileName", "filename", "name", "title", "displayName"];
+const IMAGE_MIME_KEYS = ["mimeType", "mediaType", "image.mimeType", "image.mediaType", "contentType"];
+const IMAGE_NESTED_KEYS = [
+  "content",
+  "image",
+  "img",
+  "pic",
+  "picture",
+  "photo",
+  "thumbnail",
+  "thumb",
+  "file",
+  "attachment",
+  "media",
+  "resource",
+  "data",
+  "payload",
+  "body"
+];
 
 const PRODUCT_URL_KEYS = [
   "url",
@@ -518,6 +618,16 @@ function firstUrlString(records: Record<string, unknown>[], keys: string[]): str
   return undefined;
 }
 
+function firstImageUrlString(records: Record<string, unknown>[], keys: string[]): string | undefined {
+  for (const record of records) {
+    for (const key of keys) {
+      const value = firstString(record, [key]);
+      if (value && isImageUrlLike(value)) return value;
+    }
+  }
+  return undefined;
+}
+
 function moqTextFromRecords(records: Record<string, unknown>[]): string | undefined {
   const text = firstStringFromRecords(records, PRODUCT_MOQ_TEXT_KEYS);
   if (text && !isRecord(structuredValue(text))) return text;
@@ -557,6 +667,17 @@ function isUrlLike(value: string): boolean {
   const trimmed = value.trim();
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) return false;
   return /^(https?:)?\/\//i.test(trimmed) || trimmed.startsWith("/") || /(?:[?&]|^)type=2000(?:&|$)/.test(trimmed);
+}
+
+function isImageUrlLike(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) return false;
+  if (/^data:image\//i.test(trimmed)) return true;
+  if (!/^(https?:)?\/\//i.test(trimmed) && !trimmed.startsWith("/")) return false;
+  return (
+    /\.(?:avif|bmp|gif|heic|heif|jpe?g|png|webp)(?:[?#]|$)/i.test(trimmed) ||
+    /(?:alicdn|alibaba|oss|cdn|img|image|picture|photo)/i.test(trimmed)
+  );
 }
 
 function isProductContent(

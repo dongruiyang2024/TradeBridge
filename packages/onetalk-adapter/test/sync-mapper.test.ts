@@ -233,6 +233,51 @@ test("mapWebliteToSyncBatch extracts product card metadata from serialized OneTa
   ]);
 });
 
+test("mapWebliteToSyncBatch maps OneTalk image messages into attachments", () => {
+  const batch = mapWebliteToSyncBatch({
+    sellerAccount: { externalAccountId: "seller-demo" },
+    device: { deviceId: "chrome-extension-demo" },
+    collectedAt: "2026-06-17T03:10:00.000Z",
+    source: "chrome-extension",
+    previousCursor: null,
+    weblite: {
+      html: "",
+      bootstrap: { aliId: "seller-ali" },
+      conversations: [{ cid: "conv-image", contactAccountId: "buyer-image" }]
+    },
+    messagesByConversationId: {
+      "conv-image": [
+        {
+          messageId: "msg-image",
+          senderAliId: "buyer-ali",
+          messageType: "image",
+          content: {
+            contentType: "image",
+            image: {
+              url: "https://sc04.alicdn.com/kf/H4a91e4c0831842d0b51a64b77c1c9c29V.jpg",
+              thumbnailUrl: "https://sc04.alicdn.com/kf/thumb.jpg",
+              mimeType: "image/jpeg"
+            }
+          },
+          sendTime: 1781665800000
+        }
+      ]
+    }
+  });
+
+  assert.deepEqual(batch.messages?.[0].attachments, [
+    {
+      type: "image",
+      fileName: "图片",
+      mimeType: "image/jpeg",
+      thumbnailUrl: "https://sc04.alicdn.com/kf/thumb.jpg",
+      url: "https://sc04.alicdn.com/kf/H4a91e4c0831842d0b51a64b77c1c9c29V.jpg"
+    }
+  ]);
+  assert.equal(batch.messages?.[0].content, undefined);
+  assert.equal(batch.messages?.[0].messageType, "image");
+});
+
 test("mapWebliteToSyncBatch maps LWP conversation and message models from OneTalk WebSocket", () => {
   const lastMessageAt = Date.parse("2026-05-27T04:33:20.000Z");
   const inboundAt = Date.parse("2026-05-27T04:32:30.000Z");

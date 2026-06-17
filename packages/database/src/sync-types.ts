@@ -56,9 +56,20 @@ export interface SyncMessageInput {
   direction: MessageDirection;
   messageType?: string | number;
   content?: string;
+  attachments?: SyncAttachment[];
   richContent?: SyncRichContent[];
   sentAt?: string;
   rawSanitized?: Record<string, unknown>;
+}
+
+export interface SyncAttachment {
+  type?: "file" | "image";
+  fileName?: string;
+  fileSize?: number;
+  fileSizeLabel?: string;
+  mimeType?: string;
+  thumbnailUrl?: string;
+  url?: string;
 }
 
 export type SyncRichContent = SyncProductContent;

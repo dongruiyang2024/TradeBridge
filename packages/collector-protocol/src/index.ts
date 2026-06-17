@@ -61,9 +61,20 @@ export interface ChannelSyncMessage {
   direction: MessageDirection;
   messageType?: string | number;
   content?: string;
+  attachments?: ChannelSyncAttachment[];
   richContent?: ChannelSyncRichContent[];
   sentAt?: string;
   rawSanitized?: Record<string, unknown>;
+}
+
+export interface ChannelSyncAttachment {
+  type?: "file" | "image";
+  fileName?: string;
+  fileSize?: number;
+  fileSizeLabel?: string;
+  mimeType?: string;
+  thumbnailUrl?: string;
+  url?: string;
 }
 
 export type ChannelSyncRichContent = ChannelSyncProductContent;
@@ -447,9 +458,23 @@ function isChannelSyncMessage(value: unknown): value is ChannelSyncMessage {
     (value.direction === "received" || value.direction === "sent" || value.direction === "unknown") &&
     (value.messageType === undefined || typeof value.messageType === "string" || typeof value.messageType === "number") &&
     isOptionalString(value.content) &&
+    isOptionalArray(value.attachments, isChannelSyncAttachment) &&
     isOptionalArray(value.richContent, isChannelSyncRichContent) &&
     isOptionalString(value.sentAt) &&
     isOptionalRecord(value.rawSanitized)
+  );
+}
+
+function isChannelSyncAttachment(value: unknown): value is ChannelSyncAttachment {
+  return (
+    isRecord(value) &&
+    (value.type === undefined || value.type === "file" || value.type === "image") &&
+    isOptionalString(value.fileName) &&
+    (value.fileSize === undefined || typeof value.fileSize === "number") &&
+    isOptionalString(value.fileSizeLabel) &&
+    isOptionalString(value.mimeType) &&
+    isOptionalString(value.thumbnailUrl) &&
+    isOptionalString(value.url)
   );
 }
 

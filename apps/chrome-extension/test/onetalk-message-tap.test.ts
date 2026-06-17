@@ -157,6 +157,42 @@ test("tap extracts nested rich fields from OneTalk product card payloads", () =>
   ]);
 });
 
+test("tap preserves OneTalk image message attachments", () => {
+  const emitter = new FakeEmitter();
+  const { fakeWindow, posted } = createFakeWindow(emitter);
+  installOneTalkMessageTap(fakeWindow as unknown as Window);
+
+  emitter.emit("BaaSMessageNew", {
+    messageModel: {
+      cid: "conv-image",
+      messageId: "msg-image",
+      content: {
+        contentType: "image",
+        image: {
+          url: "https://sc04.alicdn.com/kf/H4a91e4c0831842d0b51a64b77c1c9c29V.jpg",
+          thumbnailUrl: "https://sc04.alicdn.com/kf/thumb.jpg",
+          mimeType: "image/jpeg"
+        }
+      },
+      createAt: 1781665800000,
+      sender: { uid: "buyer-ali" }
+    }
+  });
+
+  const observed = observedOf(posted);
+  assert.equal(observed.length, 1);
+  const message = observed[0].messages[0].message as Record<string, unknown>;
+  assert.deepEqual(message.attachments, [
+    {
+      type: "image",
+      fileName: "图片",
+      mimeType: "image/jpeg",
+      thumbnailUrl: "https://sc04.alicdn.com/kf/thumb.jpg",
+      url: "https://sc04.alicdn.com/kf/H4a91e4c0831842d0b51a64b77c1c9c29V.jpg"
+    }
+  ]);
+});
+
 test("tap extracts a sent message (BaaSMessageSendCallback) with direction and contact", () => {
   const emitter = new FakeEmitter();
   const { fakeWindow, posted } = createFakeWindow(emitter);
