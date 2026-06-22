@@ -6,7 +6,7 @@ import zlib from "node:zlib";
 
 const manifestPath = path.resolve("public/manifest.json");
 
-test("manifest uses minimal permissions for internal OneTalk collector", () => {
+test("manifest uses minimal permissions for internal browser-channel collector", () => {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
     manifest_version: number;
     minimum_chrome_version?: string;
@@ -25,7 +25,7 @@ test("manifest uses minimal permissions for internal OneTalk collector", () => {
   assert.equal(manifest.minimum_chrome_version, "116");
   assert.equal(manifest.version, "0.1.1");
   assert.deepEqual(manifest.permissions?.sort(), ["alarms", "scripting", "storage"]);
-  assert.deepEqual(manifest.host_permissions, ["https://onetalk.alibaba.com/*"]);
+  assert.deepEqual(manifest.host_permissions?.sort(), ["https://onetalk.alibaba.com/*", "https://web.whatsapp.com/*"]);
   assert.deepEqual(manifest.optional_host_permissions?.sort(), ["http://*/*", "https://*/*"]);
   assert.equal(manifest.host_permissions?.includes("http://127.0.0.1:5032/*"), false);
   assert.equal(manifest.host_permissions?.includes("ws://127.0.0.1:5032/*"), false);
@@ -49,10 +49,9 @@ test("manifest uses minimal permissions for internal OneTalk collector", () => {
   });
   assert.equal(manifest.action?.default_popup, "popup/popup.html");
   assert.equal(manifest.content_scripts?.[0]?.run_at, "document_start");
-  assert.equal(
-    manifest.web_accessible_resources?.[0]?.resources?.includes("channels/alibaba-im/onetalk-page-script.js"),
-    true
-  );
+  const accessibleResources = (manifest.web_accessible_resources || []).flatMap((entry) => entry.resources || []);
+  assert.equal(accessibleResources.includes("channels/alibaba-im/onetalk-page-script.js"), true);
+  assert.equal(accessibleResources.includes("channels/whatsapp-web/whatsapp-page-script.js"), true);
 });
 
 test("extension icons are real non-empty PNG assets", () => {
@@ -88,6 +87,15 @@ test("OneTalk content bridge does not collect business data from the page DOM", 
   assert.equal(bridgeSource.includes("MutationObserver"), false);
   assert.equal(bridgeSource.includes("tradebridgeOnetalkPageSnapshot"), false);
   assert.equal(bridgeSource.includes("onetalk-page-snapshot"), false);
+});
+
+test("WhatsApp content bridge does not collect business data from the page DOM", () => {
+  const bridgeSource = fs.readFileSync(path.resolve("src/channels/whatsapp-web/whatsapp-page-bridge.ts"), "utf8");
+
+  assert.equal(bridgeSource.includes("innerText"), false);
+  assert.equal(bridgeSource.includes("textContent"), false);
+  assert.equal(bridgeSource.includes("querySelectorAll"), false);
+  assert.equal(bridgeSource.includes("MutationObserver"), false);
 });
 
 function parsePng(buffer: Buffer): { width: number; height: number; visiblePixels: number; colorCount: number } {

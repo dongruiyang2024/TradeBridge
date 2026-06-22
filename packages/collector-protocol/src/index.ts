@@ -169,6 +169,7 @@ export type CollectorHelloMessage = CollectorWsEnvelope<
     deviceId: string;
     deviceName?: string;
     capabilities: string[];
+    channelAccounts?: ChannelAccountRef[];
   }
 >;
 
@@ -191,10 +192,21 @@ export type OutboundAvailableMessage = CollectorWsEnvelope<
   {
     sellerAccountExternalId: string;
     pendingCount: number;
+    channel?: ChannelId;
+    channelAccountExternalId?: string;
   }
 >;
 
-export type OutboundClaimMessage = CollectorWsEnvelope<"outbound.claim", { limit: number; leaseMs: number }>;
+export type OutboundClaimMessage = CollectorWsEnvelope<
+  "outbound.claim",
+  {
+    limit: number;
+    leaseMs: number;
+    channel?: ChannelId;
+    channelAccountExternalId?: string;
+    surface?: string;
+  }
+>;
 
 export type OutboundClaimedMessage = CollectorWsEnvelope<
   "outbound.claimed",
@@ -209,6 +221,8 @@ export type OutboundDeliveryReportMessage = CollectorWsEnvelope<
   "outbound.delivery.report",
   {
     outboundMessageId: string;
+    channel?: ChannelId;
+    channelAccountExternalId?: string;
     status: "sent" | "failed";
     externalMessageId?: string;
     errorCode?: string;
@@ -241,6 +255,9 @@ export interface CollectorOutboundMessage {
   sellerAccountExternalId: string;
   externalCustomerId: string;
   externalConversationId: string;
+  channel?: ChannelId;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
   content: string;
   status: "queued" | "sent" | "failed";
   createdByUserId?: string;
@@ -315,14 +332,15 @@ function isCollectorWsMessage(value: unknown): value is CollectorWsMessage {
   if (!isRecord(value.payload)) return false;
 
   switch (value.type) {
-    case "collector.hello":
-      return (
-        typeof value.payload.collectorToken === "string" &&
-        typeof value.payload.deviceId === "string" &&
-        isOptionalString(value.payload.deviceName) &&
-        Array.isArray(value.payload.capabilities) &&
-        value.payload.capabilities.every((item) => typeof item === "string")
-      );
+	    case "collector.hello":
+	      return (
+	        typeof value.payload.collectorToken === "string" &&
+	        typeof value.payload.deviceId === "string" &&
+	        isOptionalString(value.payload.deviceName) &&
+	        Array.isArray(value.payload.capabilities) &&
+	        value.payload.capabilities.every((item) => typeof item === "string") &&
+	        isOptionalArray(value.payload.channelAccounts, isChannelAccountRefAnyChannel)
+	      );
     case "collector.ready":
       return (
         typeof value.payload.sessionId === "string" &&
@@ -334,13 +352,21 @@ function isCollectorWsMessage(value: unknown): value is CollectorWsMessage {
     case "heartbeat.ping":
     case "heartbeat.pong":
       return typeof value.payload.nonce === "string";
-    case "outbound.available":
-      return (
-        typeof value.payload.sellerAccountExternalId === "string" &&
-        typeof value.payload.pendingCount === "number"
-      );
-    case "outbound.claim":
-      return typeof value.payload.limit === "number" && typeof value.payload.leaseMs === "number";
+	    case "outbound.available":
+	      return (
+	        typeof value.payload.sellerAccountExternalId === "string" &&
+	        typeof value.payload.pendingCount === "number" &&
+	        isOptionalString(value.payload.channel) &&
+	        isOptionalString(value.payload.channelAccountExternalId)
+	      );
+	    case "outbound.claim":
+	      return (
+	        typeof value.payload.limit === "number" &&
+	        typeof value.payload.leaseMs === "number" &&
+	        isOptionalString(value.payload.channel) &&
+	        isOptionalString(value.payload.channelAccountExternalId) &&
+	        isOptionalString(value.payload.surface)
+	      );
     case "outbound.claimed":
       return (
         typeof value.payload.requestId === "string" &&
@@ -348,10 +374,12 @@ function isCollectorWsMessage(value: unknown): value is CollectorWsMessage {
         Array.isArray(value.payload.messages) &&
         value.payload.messages.every(isCollectorOutboundMessage)
       );
-    case "outbound.delivery.report":
-      return (
-        typeof value.payload.outboundMessageId === "string" &&
-        (value.payload.status === "sent" || value.payload.status === "failed") &&
+	    case "outbound.delivery.report":
+	      return (
+	        typeof value.payload.outboundMessageId === "string" &&
+	        isOptionalString(value.payload.channel) &&
+	        isOptionalString(value.payload.channelAccountExternalId) &&
+	        (value.payload.status === "sent" || value.payload.status === "failed") &&
         isOptionalString(value.payload.externalMessageId) &&
         isOptionalString(value.payload.errorCode) &&
         isOptionalString(value.payload.errorMessage) &&
@@ -385,11 +413,14 @@ function isCollectorWsMessage(value: unknown): value is CollectorWsMessage {
 function isCollectorOutboundMessage(value: unknown): value is CollectorOutboundMessage {
   return (
     isRecord(value) &&
-    typeof value.id === "string" &&
-    typeof value.sellerAccountExternalId === "string" &&
-    typeof value.externalCustomerId === "string" &&
-    typeof value.externalConversationId === "string" &&
-    typeof value.content === "string" &&
+	    typeof value.id === "string" &&
+	    typeof value.sellerAccountExternalId === "string" &&
+	    typeof value.externalCustomerId === "string" &&
+	    typeof value.externalConversationId === "string" &&
+	    isOptionalString(value.channel) &&
+	    isOptionalString(value.channelAccountExternalId) &&
+	    isOptionalString(value.channelSurface) &&
+	    typeof value.content === "string" &&
     (value.status === "queued" || value.status === "sent" || value.status === "failed") &&
     isOptionalString(value.createdByUserId) &&
     isOptionalString(value.deliveredByDeviceId) &&
@@ -408,6 +439,16 @@ function isChannelAccountRef(value: unknown, channel: unknown): value is Channel
   return (
     isRecord(value) &&
     value.channel === channel &&
+    typeof value.externalAccountId === "string" &&
+    isOptionalString(value.displayName) &&
+    isOptionalString(value.surface)
+  );
+}
+
+function isChannelAccountRefAnyChannel(value: unknown): value is ChannelAccountRef {
+  return (
+    isRecord(value) &&
+    typeof value.channel === "string" &&
     typeof value.externalAccountId === "string" &&
     isOptionalString(value.displayName) &&
     isOptionalString(value.surface)

@@ -1022,7 +1022,7 @@ test("PostgresSyncStore lists messages scoped by conversation", async () => {
       uniqueKey: "seller-1:conv-1:msg-1"
     }
   ]);
-  assert.deepEqual(client.queries.at(-1)?.params, ["conv-1"]);
+  assert.deepEqual(client.queries.at(-1)?.params, ["conv-1", null, null, null]);
   assert.match(client.queries.at(-1)?.sql || "", /list_messages/i);
 });
 
@@ -1045,14 +1045,18 @@ test("PostgresSyncStore creates and lists customer notes with scoped params", as
   assert.deepEqual(notes, [note]);
   assert.deepEqual(client.queries.find((query) => /create_customer_note/i.test(query.sql))?.params, [
     "seller-1",
-    "customer-1",
-    "Customer asked for updated MOQ.",
-    null
-  ]);
-  assert.deepEqual(client.queries.find((query) => /list_customer_notes/i.test(query.sql))?.params, [
-    "seller-1",
-    "customer-1"
-  ]);
+	    "customer-1",
+	    "Customer asked for updated MOQ.",
+	    null,
+	    null,
+	    null
+	  ]);
+	  assert.deepEqual(client.queries.find((query) => /list_customer_notes/i.test(query.sql))?.params, [
+	    "seller-1",
+	    "customer-1",
+	    null,
+	    null
+	  ]);
 });
 
 test("PostgresSyncStore adds and lists customer tags with scoped params", async () => {
@@ -1071,10 +1075,12 @@ test("PostgresSyncStore adds and lists customer tags with scoped params", async 
   assert.deepEqual(tags, [tag]);
   assert.deepEqual(client.queries.find((query) => /add_customer_tag/i.test(query.sql))?.params, [
     "seller-1",
-    "customer-1",
-    "hot-lead",
-    null
-  ]);
+	    "customer-1",
+	    "hot-lead",
+	    null,
+	    null,
+	    null
+	  ]);
 });
 
 test("PostgresSyncStore creates and lists follow-up tasks with scoped params", async () => {
@@ -1101,10 +1107,12 @@ test("PostgresSyncStore creates and lists follow-up tasks with scoped params", a
     "seller-1",
     "customer-1",
     "Send revised quotation",
-    "user-1",
-    "2026-05-26T09:00:00.000Z",
-    "open"
-  ]);
+	    "user-1",
+	    "2026-05-26T09:00:00.000Z",
+	    "open",
+	    null,
+	    null
+	  ]);
 });
 
 test("PostgresSyncStore assigns customers and updates follow-up tasks with scoped params", async () => {
@@ -1136,14 +1144,18 @@ test("PostgresSyncStore assigns customers and updates follow-up tasks with scope
   assert.equal(task.title, "Send revised quotation tomorrow");
   assert.deepEqual(client.queries.find((query) => /assign_customer/i.test(query.sql))?.params, [
     "seller-1",
-    "customer-1",
-    "user-2",
-    "manager-1"
-  ]);
-  assert.deepEqual(client.queries.find((query) => /get_customer_assignment/i.test(query.sql))?.params, [
-    "seller-1",
-    "customer-1"
-  ]);
+	    "customer-1",
+	    "user-2",
+	    "manager-1",
+	    null,
+	    null
+	  ]);
+	  assert.deepEqual(client.queries.find((query) => /get_customer_assignment/i.test(query.sql))?.params, [
+	    "seller-1",
+	    "customer-1",
+	    null,
+	    null
+	  ]);
   assert.deepEqual(client.queries.find((query) => /update_follow_up_task/i.test(query.sql))?.params, [
     "task-db-id",
     "done",
@@ -1429,19 +1441,24 @@ test("PostgresSyncStore creates and reads AI summaries and reply suggestions wit
     "customer-1",
     "fake-ai-v1",
     "Buyer wants a quote for 500 units.",
-    "high",
-    "Send revised quotation",
-    "2026-05-25T09:00:00.000Z",
-    "2026-05-25T09:05:00.000Z"
-  ]);
+	    "high",
+	    "Send revised quotation",
+	    "2026-05-25T09:00:00.000Z",
+	    "2026-05-25T09:05:00.000Z",
+	    null,
+	    null
+	  ]);
   assert.deepEqual(client.queries.find((query) => /create_reply_suggestion/i.test(query.sql))?.params, [
     "seller-1",
     "conv-1",
     "fake-ai-v1",
-    "Thanks, I will send the quote today.",
-    "draft",
-    "user-1"
-  ]);
+	    "Thanks, I will send the quote today.",
+	    "draft",
+	    "user-1",
+	    "customer-1",
+	    null,
+	    null
+	  ]);
 });
 
 test("PostgresSyncStore claims pending outbound messages with a lease", async () => {
@@ -1459,7 +1476,7 @@ test("PostgresSyncStore claims pending outbound messages with a lease", async ()
   assert.ok(claimQuery);
   assert.match(claimQuery.sql, /FOR UPDATE SKIP LOCKED/i);
   assert.match(claimQuery.sql, /claim_expires_at/i);
-  assert.deepEqual(claimQuery.params, ["seller-1", 5, "device-1", 120000]);
+  assert.deepEqual(claimQuery.params, ["seller-1", 5, "device-1", 120000, null, null]);
   assert.equal(claimed.length, 1);
   assert.equal(claimed[0].claimedByDeviceId, "device-1");
   assert.equal(claimed[0].claimExpiresAt, "2026-06-01T00:02:01.000Z");

@@ -21,7 +21,7 @@ export interface RealtimeOrchestratorOptions {
   now?: () => Date;
   nextId?: () => string;
   sendWsMessage(message: CollectorWsMessage): void;
-  sendOutboundMessagesViaOneTalk(input: { messages: OutboundMessage[] }): Promise<OutboundDeliveryReport[]>;
+  sendOutboundMessages(input: { messages: OutboundMessage[] }): Promise<OutboundDeliveryReport[]>;
   runSyncNow(): Promise<SyncNowResponse>;
 }
 
@@ -38,7 +38,7 @@ export function createRealtimeOrchestrator(options: RealtimeOrchestratorOptions)
 
       if (message.type === "outbound.available") {
         if (message.payload.pendingCount <= 0) return;
-        claimOutboundMessages();
+        claimOutboundMessages(message.payload.channel, message.payload.channelAccountExternalId);
         return;
       }
 
@@ -53,13 +53,18 @@ export function createRealtimeOrchestrator(options: RealtimeOrchestratorOptions)
     }
   };
 
-  function claimOutboundMessages(): void {
+  function claimOutboundMessages(channel?: string, channelAccountExternalId?: string): void {
     options.sendWsMessage(
       buildCollectorWsMessage({
         id: nextId(),
         type: "outbound.claim",
         sentAt: now().toISOString(),
-        payload: { limit: DEFAULT_CLAIM_LIMIT, leaseMs: DEFAULT_LEASE_MS }
+        payload: {
+          limit: DEFAULT_CLAIM_LIMIT,
+          leaseMs: DEFAULT_LEASE_MS,
+          channel,
+          channelAccountExternalId
+        }
       })
     );
   }
@@ -76,8 +81,9 @@ export function createRealtimeOrchestrator(options: RealtimeOrchestratorOptions)
   }
 
   async function deliverClaimedMessages(message: OutboundClaimedMessage): Promise<void> {
-    const reports = await options.sendOutboundMessagesViaOneTalk({ messages: message.payload.messages });
+    const reports = await options.sendOutboundMessages({ messages: message.payload.messages });
     for (const report of reports) {
+      const deliveredMessage = message.payload.messages.find((item) => item.id === report.outboundMessageId);
       options.sendWsMessage(
         buildCollectorWsMessage({
           id: nextId(),
@@ -85,6 +91,8 @@ export function createRealtimeOrchestrator(options: RealtimeOrchestratorOptions)
           sentAt: now().toISOString(),
           payload: {
             outboundMessageId: report.outboundMessageId,
+            channel: deliveredMessage?.channel,
+            channelAccountExternalId: deliveredMessage?.channelAccountExternalId,
             status: report.status,
             externalMessageId: report.externalMessageId,
             errorCode: report.errorCode,

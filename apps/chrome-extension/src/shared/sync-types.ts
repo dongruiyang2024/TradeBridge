@@ -66,6 +66,9 @@ export interface OutboundMessage {
   sellerAccountExternalId: string;
   externalCustomerId: string;
   externalConversationId: string;
+  channel?: string;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
   content: string;
   status: OutboundMessageStatus;
   createdByUserId?: string;
@@ -85,6 +88,7 @@ export interface ExtensionConfig {
   sellerAccountExternalId: string;
   sellerAccountDisplayName?: string;
   channelAccountExternalId?: string;
+  whatsappChannelAccountExternalId?: string;
   tradeMindBindingToken?: string;
   deviceId: string;
   deviceName?: string;

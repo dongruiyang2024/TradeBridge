@@ -31,6 +31,7 @@ import type {
   InternalUserCredentials,
   IssueInternalSessionInput,
   ListOutboundMessagesInput,
+  ListMessagesInput,
   ListPendingOutboundMessagesInput,
   MarkOutboundMessageDeliveredInput,
   MessageDirection,
@@ -113,6 +114,9 @@ interface MessageRow {
 interface CustomerNoteRow {
   id: string;
   sellerAccountExternalId: string;
+  channel: string | null;
+  channelAccountExternalId: string | null;
+  channelSurface: string | null;
   externalCustomerId: string;
   body: string;
   createdByUserId: string | null;
@@ -123,6 +127,9 @@ interface CustomerNoteRow {
 interface CustomerTagRow {
   id: string;
   sellerAccountExternalId: string;
+  channel: string | null;
+  channelAccountExternalId: string | null;
+  channelSurface: string | null;
   externalCustomerId: string;
   tag: string;
   createdByUserId: string | null;
@@ -132,6 +139,9 @@ interface CustomerTagRow {
 interface FollowUpTaskRow {
   id: string;
   sellerAccountExternalId: string;
+  channel: string | null;
+  channelAccountExternalId: string | null;
+  channelSurface: string | null;
   externalCustomerId: string;
   title: string;
   assignedToUserId: string | null;
@@ -144,6 +154,9 @@ interface FollowUpTaskRow {
 interface CustomerAssignmentRow {
   id: string;
   sellerAccountExternalId: string;
+  channel: string | null;
+  channelAccountExternalId: string | null;
+  channelSurface: string | null;
   externalCustomerId: string;
   assignedToUserId: string;
   assignedByUserId: string | null;
@@ -164,6 +177,9 @@ interface AuditLogRow {
 interface AiSummaryRow {
   id: string;
   sellerAccountExternalId: string;
+  channel: string | null;
+  channelAccountExternalId: string | null;
+  channelSurface: string | null;
   externalCustomerId: string;
   promptVersion: string;
   summary: string;
@@ -177,6 +193,9 @@ interface AiSummaryRow {
 interface ReplySuggestionRow {
   id: string;
   sellerAccountExternalId: string;
+  channel: string | null;
+  channelAccountExternalId: string | null;
+  channelSurface: string | null;
   externalCustomerId: string;
   externalConversationId: string;
   promptVersion: string;
@@ -190,6 +209,9 @@ interface ReplySuggestionRow {
 interface OutboundMessageRow {
   id: string;
   sellerAccountExternalId: string;
+  channel: string | null;
+  channelAccountExternalId: string | null;
+  channelSurface: string | null;
   externalCustomerId: string;
   externalConversationId: string;
   content: string;
@@ -449,7 +471,8 @@ export class PostgresSyncStore {
     }));
   }
 
-  async listMessages(externalConversationId?: string): Promise<StoredMessage[]> {
+  async listMessages(input?: string | ListMessagesInput): Promise<StoredMessage[]> {
+    const scope = typeof input === "string" ? { externalConversationId: input } : input || {};
     const result = await this.client.query<MessageRow>(
       `
       /* list_messages */
@@ -475,9 +498,17 @@ export class PostgresSyncStore {
       INNER JOIN conversation conv ON conv.id = m.conversation_id
       LEFT JOIN channel_account ca ON ca.id = m.channel_account_id
       WHERE ($1::text IS NULL OR conv.external_conversation_id = $1)
+        AND ($2::text IS NULL OR s.external_account_id = $2)
+        AND ($3::text IS NULL OR m.channel = $3)
+        AND ($4::text IS NULL OR ca.external_account_id = $4)
       ORDER BY m.sent_at ASC NULLS LAST, m.id ASC
       `,
-      [externalConversationId || null]
+      [
+        scope.externalConversationId || null,
+        scope.sellerAccountExternalId || null,
+        scope.channel || null,
+        scope.channelAccountExternalId || null
+      ]
     );
 
     return result.rows.map((row) => ({
@@ -503,20 +534,26 @@ export class PostgresSyncStore {
     const result = await this.client.query<CustomerNoteRow>(
       `
       /* create_customer_note */
-      WITH scoped_customer AS (
-        SELECT c.id AS customer_id
-        FROM customer c
-        INNER JOIN seller_account s ON s.id = c.seller_account_id
-        WHERE s.external_account_id = $1
-          AND c.external_customer_id = $2
-      )
+        WITH scoped_customer AS (
+          SELECT c.id AS customer_id
+          FROM customer c
+          INNER JOIN seller_account s ON s.id = c.seller_account_id
+          LEFT JOIN channel_account ca ON ca.id = c.channel_account_id
+          WHERE s.external_account_id = $1
+            AND c.external_customer_id = $2
+            AND ($5::text IS NULL OR c.channel = $5)
+            AND ($6::text IS NULL OR ca.external_account_id = $6)
+        )
       INSERT INTO customer_note (customer_id, body, created_by)
       SELECT customer_id, $3, $4
       FROM scoped_customer
       RETURNING
-        id::text AS "id",
-        $1::text AS "sellerAccountExternalId",
-        $2::text AS "externalCustomerId",
+          id::text AS "id",
+          $1::text AS "sellerAccountExternalId",
+          $5::text AS "channel",
+          $6::text AS "channelAccountExternalId",
+          NULL::text AS "channelSurface",
+          $2::text AS "externalCustomerId",
         body AS "body",
         created_by::text AS "createdByUserId",
         created_at AS "createdAt",
@@ -526,7 +563,9 @@ export class PostgresSyncStore {
         input.sellerAccountExternalId,
         input.externalCustomerId,
         input.body,
-        input.createdByUserId || null
+        input.createdByUserId || null,
+        input.channel || null,
+        input.channelAccountExternalId || null
       ]
     );
     return mapCustomerNote(requiredRow(result.rows[0], "customer_note"));
@@ -537,19 +576,25 @@ export class PostgresSyncStore {
       `
       /* list_customer_notes */
       SELECT
-        n.id::text AS "id",
-        s.external_account_id AS "sellerAccountExternalId",
-        c.external_customer_id AS "externalCustomerId",
+          n.id::text AS "id",
+          s.external_account_id AS "sellerAccountExternalId",
+          c.channel AS "channel",
+          ca.external_account_id AS "channelAccountExternalId",
+          ca.surface AS "channelSurface",
+          c.external_customer_id AS "externalCustomerId",
         n.body AS "body",
         n.created_by::text AS "createdByUserId",
         n.created_at AS "createdAt",
         n.updated_at AS "updatedAt"
-      FROM customer_note n
-      INNER JOIN customer c ON c.id = n.customer_id
-      INNER JOIN seller_account s ON s.id = c.seller_account_id
-      WHERE s.external_account_id = $1
-        AND c.external_customer_id = $2
-      ORDER BY n.created_at DESC, n.id ASC
+        FROM customer_note n
+        INNER JOIN customer c ON c.id = n.customer_id
+        INNER JOIN seller_account s ON s.id = c.seller_account_id
+        LEFT JOIN channel_account ca ON ca.id = c.channel_account_id
+        WHERE s.external_account_id = $1
+          AND c.external_customer_id = $2
+          AND ($3::text IS NULL OR c.channel = $3)
+          AND ($4::text IS NULL OR ca.external_account_id = $4)
+        ORDER BY n.created_at DESC, n.id ASC
       `,
       customerScopeParams(scope)
     );
@@ -560,22 +605,28 @@ export class PostgresSyncStore {
     const result = await this.client.query<CustomerTagRow>(
       `
       /* add_customer_tag */
-      WITH scoped_customer AS (
-        SELECT c.id AS customer_id
-        FROM customer c
-        INNER JOIN seller_account s ON s.id = c.seller_account_id
-        WHERE s.external_account_id = $1
-          AND c.external_customer_id = $2
-      )
+        WITH scoped_customer AS (
+          SELECT c.id AS customer_id
+          FROM customer c
+          INNER JOIN seller_account s ON s.id = c.seller_account_id
+          LEFT JOIN channel_account ca ON ca.id = c.channel_account_id
+          WHERE s.external_account_id = $1
+            AND c.external_customer_id = $2
+            AND ($5::text IS NULL OR c.channel = $5)
+            AND ($6::text IS NULL OR ca.external_account_id = $6)
+        )
       INSERT INTO customer_tag (customer_id, tag, created_by)
       SELECT customer_id, $3, $4
       FROM scoped_customer
       ON CONFLICT (customer_id, tag)
       DO UPDATE SET tag = customer_tag.tag
       RETURNING
-        id::text AS "id",
-        $1::text AS "sellerAccountExternalId",
-        $2::text AS "externalCustomerId",
+          id::text AS "id",
+          $1::text AS "sellerAccountExternalId",
+          $5::text AS "channel",
+          $6::text AS "channelAccountExternalId",
+          NULL::text AS "channelSurface",
+          $2::text AS "externalCustomerId",
         tag AS "tag",
         created_by::text AS "createdByUserId",
         created_at AS "createdAt"
@@ -584,7 +635,9 @@ export class PostgresSyncStore {
         input.sellerAccountExternalId,
         input.externalCustomerId,
         input.tag,
-        input.createdByUserId || null
+        input.createdByUserId || null,
+        input.channel || null,
+        input.channelAccountExternalId || null
       ]
     );
     return mapCustomerTag(requiredRow(result.rows[0], "customer_tag"));
@@ -595,18 +648,24 @@ export class PostgresSyncStore {
       `
       /* list_customer_tags */
       SELECT
-        t.id::text AS "id",
-        s.external_account_id AS "sellerAccountExternalId",
-        c.external_customer_id AS "externalCustomerId",
+          t.id::text AS "id",
+          s.external_account_id AS "sellerAccountExternalId",
+          c.channel AS "channel",
+          ca.external_account_id AS "channelAccountExternalId",
+          ca.surface AS "channelSurface",
+          c.external_customer_id AS "externalCustomerId",
         t.tag AS "tag",
         t.created_by::text AS "createdByUserId",
         t.created_at AS "createdAt"
-      FROM customer_tag t
-      INNER JOIN customer c ON c.id = t.customer_id
-      INNER JOIN seller_account s ON s.id = c.seller_account_id
-      WHERE s.external_account_id = $1
-        AND c.external_customer_id = $2
-      ORDER BY t.tag ASC
+        FROM customer_tag t
+        INNER JOIN customer c ON c.id = t.customer_id
+        INNER JOIN seller_account s ON s.id = c.seller_account_id
+        LEFT JOIN channel_account ca ON ca.id = c.channel_account_id
+        WHERE s.external_account_id = $1
+          AND c.external_customer_id = $2
+          AND ($3::text IS NULL OR c.channel = $3)
+          AND ($4::text IS NULL OR ca.external_account_id = $4)
+        ORDER BY t.tag ASC
       `,
       customerScopeParams(scope)
     );
@@ -618,20 +677,26 @@ export class PostgresSyncStore {
     const result = await this.client.query<FollowUpTaskRow>(
       `
       /* create_follow_up_task */
-      WITH scoped_customer AS (
-        SELECT c.id AS customer_id
-        FROM customer c
-        INNER JOIN seller_account s ON s.id = c.seller_account_id
-        WHERE s.external_account_id = $1
-          AND c.external_customer_id = $2
-      )
+        WITH scoped_customer AS (
+          SELECT c.id AS customer_id
+          FROM customer c
+          INNER JOIN seller_account s ON s.id = c.seller_account_id
+          LEFT JOIN channel_account ca ON ca.id = c.channel_account_id
+          WHERE s.external_account_id = $1
+            AND c.external_customer_id = $2
+            AND ($7::text IS NULL OR c.channel = $7)
+            AND ($8::text IS NULL OR ca.external_account_id = $8)
+        )
       INSERT INTO follow_up_task (customer_id, title, assigned_to, due_at, status)
       SELECT customer_id, $3, $4, $5, $6
       FROM scoped_customer
       RETURNING
-        id::text AS "id",
-        $1::text AS "sellerAccountExternalId",
-        $2::text AS "externalCustomerId",
+          id::text AS "id",
+          $1::text AS "sellerAccountExternalId",
+          $7::text AS "channel",
+          $8::text AS "channelAccountExternalId",
+          NULL::text AS "channelSurface",
+          $2::text AS "externalCustomerId",
         title AS "title",
         assigned_to::text AS "assignedToUserId",
         status AS "status",
@@ -645,7 +710,9 @@ export class PostgresSyncStore {
         input.title,
         input.assignedToUserId || null,
         input.dueAt || null,
-        status
+        status,
+        input.channel || null,
+        input.channelAccountExternalId || null
       ]
     );
     return mapFollowUpTask(requiredRow(result.rows[0], "follow_up_task"));
@@ -656,21 +723,27 @@ export class PostgresSyncStore {
       `
       /* list_follow_up_tasks */
       SELECT
-        f.id::text AS "id",
-        s.external_account_id AS "sellerAccountExternalId",
-        c.external_customer_id AS "externalCustomerId",
+          f.id::text AS "id",
+          s.external_account_id AS "sellerAccountExternalId",
+          c.channel AS "channel",
+          ca.external_account_id AS "channelAccountExternalId",
+          ca.surface AS "channelSurface",
+          c.external_customer_id AS "externalCustomerId",
         f.title AS "title",
         f.assigned_to::text AS "assignedToUserId",
         f.status AS "status",
         f.due_at AS "dueAt",
         f.created_at AS "createdAt",
         f.updated_at AS "updatedAt"
-      FROM follow_up_task f
-      INNER JOIN customer c ON c.id = f.customer_id
-      INNER JOIN seller_account s ON s.id = c.seller_account_id
-      WHERE s.external_account_id = $1
-        AND c.external_customer_id = $2
-      ORDER BY f.due_at ASC NULLS LAST, f.created_at DESC
+        FROM follow_up_task f
+        INNER JOIN customer c ON c.id = f.customer_id
+        INNER JOIN seller_account s ON s.id = c.seller_account_id
+        LEFT JOIN channel_account ca ON ca.id = c.channel_account_id
+        WHERE s.external_account_id = $1
+          AND c.external_customer_id = $2
+          AND ($3::text IS NULL OR c.channel = $3)
+          AND ($4::text IS NULL OR ca.external_account_id = $4)
+        ORDER BY f.due_at ASC NULLS LAST, f.created_at DESC
       `,
       customerScopeParams(scope)
     );
@@ -681,13 +754,16 @@ export class PostgresSyncStore {
     const result = await this.client.query<CustomerAssignmentRow>(
       `
       /* assign_customer */
-      WITH scoped_customer AS (
-        SELECT c.id AS customer_id
-        FROM customer c
-        INNER JOIN seller_account s ON s.id = c.seller_account_id
-        WHERE s.external_account_id = $1
-          AND c.external_customer_id = $2
-      )
+        WITH scoped_customer AS (
+          SELECT c.id AS customer_id
+          FROM customer c
+          INNER JOIN seller_account s ON s.id = c.seller_account_id
+          LEFT JOIN channel_account ca ON ca.id = c.channel_account_id
+          WHERE s.external_account_id = $1
+            AND c.external_customer_id = $2
+            AND ($5::text IS NULL OR c.channel = $5)
+            AND ($6::text IS NULL OR ca.external_account_id = $6)
+        )
       INSERT INTO customer_assignment (customer_id, user_id, assigned_by)
       SELECT customer_id, $3, $4
       FROM scoped_customer
@@ -696,9 +772,12 @@ export class PostgresSyncStore {
         assigned_by = EXCLUDED.assigned_by,
         updated_at = now()
       RETURNING
-        id::text AS "id",
-        $1::text AS "sellerAccountExternalId",
-        $2::text AS "externalCustomerId",
+          id::text AS "id",
+          $1::text AS "sellerAccountExternalId",
+          $5::text AS "channel",
+          $6::text AS "channelAccountExternalId",
+          NULL::text AS "channelSurface",
+          $2::text AS "externalCustomerId",
         user_id::text AS "assignedToUserId",
         assigned_by::text AS "assignedByUserId",
         assigned_at AS "assignedAt",
@@ -708,7 +787,9 @@ export class PostgresSyncStore {
         input.sellerAccountExternalId,
         input.externalCustomerId,
         input.assignedToUserId,
-        input.assignedByUserId || null
+        input.assignedByUserId || null,
+        input.channel || null,
+        input.channelAccountExternalId || null
       ]
     );
     return mapCustomerAssignment(requiredRow(result.rows[0], "customer_assignment"));
@@ -719,19 +800,25 @@ export class PostgresSyncStore {
       `
       /* get_customer_assignment */
       SELECT
-        a.id::text AS "id",
-        s.external_account_id AS "sellerAccountExternalId",
-        c.external_customer_id AS "externalCustomerId",
+          a.id::text AS "id",
+          s.external_account_id AS "sellerAccountExternalId",
+          c.channel AS "channel",
+          ca.external_account_id AS "channelAccountExternalId",
+          ca.surface AS "channelSurface",
+          c.external_customer_id AS "externalCustomerId",
         a.user_id::text AS "assignedToUserId",
         a.assigned_by::text AS "assignedByUserId",
         a.assigned_at AS "assignedAt",
         a.updated_at AS "updatedAt"
-      FROM customer_assignment a
-      INNER JOIN customer c ON c.id = a.customer_id
-      INNER JOIN seller_account s ON s.id = c.seller_account_id
-      WHERE s.external_account_id = $1
-        AND c.external_customer_id = $2
-      ORDER BY a.updated_at DESC, a.assigned_at DESC
+        FROM customer_assignment a
+        INNER JOIN customer c ON c.id = a.customer_id
+        INNER JOIN seller_account s ON s.id = c.seller_account_id
+        LEFT JOIN channel_account ca ON ca.id = c.channel_account_id
+        WHERE s.external_account_id = $1
+          AND c.external_customer_id = $2
+          AND ($3::text IS NULL OR c.channel = $3)
+          AND ($4::text IS NULL OR ca.external_account_id = $4)
+        ORDER BY a.updated_at DESC, a.assigned_at DESC
       LIMIT 1
       `,
       customerScopeParams(scope)
@@ -756,18 +843,22 @@ export class PostgresSyncStore {
         RETURNING id, customer_id, title, assigned_to, status, due_at, created_at, updated_at
       )
       SELECT
-        f.id::text AS "id",
-        s.external_account_id AS "sellerAccountExternalId",
-        c.external_customer_id AS "externalCustomerId",
+          f.id::text AS "id",
+          s.external_account_id AS "sellerAccountExternalId",
+          c.channel AS "channel",
+          ca.external_account_id AS "channelAccountExternalId",
+          ca.surface AS "channelSurface",
+          c.external_customer_id AS "externalCustomerId",
         f.title AS "title",
         f.assigned_to::text AS "assignedToUserId",
         f.status AS "status",
         f.due_at AS "dueAt",
         f.created_at AS "createdAt",
         f.updated_at AS "updatedAt"
-      FROM updated_task f
-      INNER JOIN customer c ON c.id = f.customer_id
-      INNER JOIN seller_account s ON s.id = c.seller_account_id
+        FROM updated_task f
+        INNER JOIN customer c ON c.id = f.customer_id
+        INNER JOIN seller_account s ON s.id = c.seller_account_id
+        LEFT JOIN channel_account ca ON ca.id = c.channel_account_id
       `,
       [
         input.taskId,
@@ -830,13 +921,16 @@ export class PostgresSyncStore {
     const result = await this.client.query<AiSummaryRow>(
       `
       /* create_ai_summary */
-      WITH scoped_customer AS (
-        SELECT c.id AS customer_id
-        FROM customer c
-        INNER JOIN seller_account s ON s.id = c.seller_account_id
-        WHERE s.external_account_id = $1
-          AND c.external_customer_id = $2
-      )
+        WITH scoped_customer AS (
+          SELECT c.id AS customer_id
+          FROM customer c
+          INNER JOIN seller_account s ON s.id = c.seller_account_id
+          LEFT JOIN channel_account ca ON ca.id = c.channel_account_id
+          WHERE s.external_account_id = $1
+            AND c.external_customer_id = $2
+            AND ($9::text IS NULL OR c.channel = $9)
+            AND ($10::text IS NULL OR ca.external_account_id = $10)
+        )
       INSERT INTO ai_summary (
         customer_id,
         prompt_version,
@@ -849,9 +943,12 @@ export class PostgresSyncStore {
       SELECT customer_id, $3, $4, $5, $6, $7, $8
       FROM scoped_customer
       RETURNING
-        id::text AS "id",
-        $1::text AS "sellerAccountExternalId",
-        $2::text AS "externalCustomerId",
+          id::text AS "id",
+          $1::text AS "sellerAccountExternalId",
+          $9::text AS "channel",
+          $10::text AS "channelAccountExternalId",
+          NULL::text AS "channelSurface",
+          $2::text AS "externalCustomerId",
         prompt_version AS "promptVersion",
         summary AS "summary",
         intent_level AS "intentLevel",
@@ -868,7 +965,9 @@ export class PostgresSyncStore {
         input.intentLevel || null,
         input.nextAction || null,
         input.sourceMessageStartAt || null,
-        input.sourceMessageEndAt || null
+        input.sourceMessageEndAt || null,
+        input.channel || null,
+        input.channelAccountExternalId || null
       ]
     );
     return mapAiSummary(requiredRow(result.rows[0], "ai_summary"));
@@ -879,9 +978,12 @@ export class PostgresSyncStore {
       `
       /* get_latest_ai_summary */
       SELECT
-        a.id::text AS "id",
-        s.external_account_id AS "sellerAccountExternalId",
-        c.external_customer_id AS "externalCustomerId",
+          a.id::text AS "id",
+          s.external_account_id AS "sellerAccountExternalId",
+          c.channel AS "channel",
+          ca.external_account_id AS "channelAccountExternalId",
+          ca.surface AS "channelSurface",
+          c.external_customer_id AS "externalCustomerId",
         a.prompt_version AS "promptVersion",
         a.summary AS "summary",
         a.intent_level AS "intentLevel",
@@ -889,12 +991,15 @@ export class PostgresSyncStore {
         a.source_message_start_at AS "sourceMessageStartAt",
         a.source_message_end_at AS "sourceMessageEndAt",
         a.created_at AS "createdAt"
-      FROM ai_summary a
-      INNER JOIN customer c ON c.id = a.customer_id
-      INNER JOIN seller_account s ON s.id = c.seller_account_id
-      WHERE s.external_account_id = $1
-        AND c.external_customer_id = $2
-      ORDER BY a.created_at DESC, a.id DESC
+        FROM ai_summary a
+        INNER JOIN customer c ON c.id = a.customer_id
+        INNER JOIN seller_account s ON s.id = c.seller_account_id
+        LEFT JOIN channel_account ca ON ca.id = c.channel_account_id
+        WHERE s.external_account_id = $1
+          AND c.external_customer_id = $2
+          AND ($3::text IS NULL OR c.channel = $3)
+          AND ($4::text IS NULL OR ca.external_account_id = $4)
+        ORDER BY a.created_at DESC, a.id DESC
       LIMIT 1
       `,
       customerScopeParams(scope)
@@ -909,15 +1014,22 @@ export class PostgresSyncStore {
       /* create_reply_suggestion */
       WITH scoped_conversation AS (
         SELECT
-          conv.id AS conversation_id,
-          conv.customer_id,
-          c.external_customer_id
-        FROM conversation conv
-        INNER JOIN seller_account s ON s.id = conv.seller_account_id
-        INNER JOIN customer c ON c.id = conv.customer_id
-        WHERE s.external_account_id = $1
-          AND conv.external_conversation_id = $2
-      )
+            conv.id AS conversation_id,
+            conv.customer_id,
+            c.external_customer_id,
+            conv.channel,
+            ca.external_account_id AS channel_account_external_id,
+            ca.surface AS channel_surface
+          FROM conversation conv
+          INNER JOIN seller_account s ON s.id = conv.seller_account_id
+          INNER JOIN customer c ON c.id = conv.customer_id
+          LEFT JOIN channel_account ca ON ca.id = conv.channel_account_id
+          WHERE s.external_account_id = $1
+            AND conv.external_conversation_id = $2
+            AND c.external_customer_id = $7
+            AND ($8::text IS NULL OR conv.channel = $8)
+            AND ($9::text IS NULL OR ca.external_account_id = $9)
+        )
       INSERT INTO reply_suggestion (
         customer_id,
         conversation_id,
@@ -929,9 +1041,12 @@ export class PostgresSyncStore {
       SELECT customer_id, conversation_id, $3, $4, $5, $6
       FROM scoped_conversation
       RETURNING
-        id::text AS "id",
-        $1::text AS "sellerAccountExternalId",
-        (SELECT external_customer_id FROM scoped_conversation) AS "externalCustomerId",
+          id::text AS "id",
+          $1::text AS "sellerAccountExternalId",
+          (SELECT channel FROM scoped_conversation) AS "channel",
+          (SELECT channel_account_external_id FROM scoped_conversation) AS "channelAccountExternalId",
+          (SELECT channel_surface FROM scoped_conversation) AS "channelSurface",
+          (SELECT external_customer_id FROM scoped_conversation) AS "externalCustomerId",
         $2::text AS "externalConversationId",
         prompt_version AS "promptVersion",
         suggestion AS "suggestion",
@@ -946,7 +1061,10 @@ export class PostgresSyncStore {
         input.promptVersion,
         input.suggestion,
         input.status || "draft",
-        input.createdByUserId || null
+        input.createdByUserId || null,
+        input.externalCustomerId,
+        input.channel || null,
+        input.channelAccountExternalId || null
       ]
     );
     return mapReplySuggestion(requiredRow(result.rows[0], "reply_suggestion"));
@@ -957,9 +1075,12 @@ export class PostgresSyncStore {
       `
       /* list_reply_suggestions */
       SELECT
-        r.id::text AS "id",
-        s.external_account_id AS "sellerAccountExternalId",
-        c.external_customer_id AS "externalCustomerId",
+          r.id::text AS "id",
+          s.external_account_id AS "sellerAccountExternalId",
+          conv.channel AS "channel",
+          ca.external_account_id AS "channelAccountExternalId",
+          ca.surface AS "channelSurface",
+          c.external_customer_id AS "externalCustomerId",
         conv.external_conversation_id AS "externalConversationId",
         r.prompt_version AS "promptVersion",
         r.suggestion AS "suggestion",
@@ -969,13 +1090,23 @@ export class PostgresSyncStore {
         r.updated_at AS "updatedAt"
       FROM reply_suggestion r
       INNER JOIN conversation conv ON conv.id = r.conversation_id
-      INNER JOIN customer c ON c.id = r.customer_id
-      INNER JOIN seller_account s ON s.id = conv.seller_account_id
-      WHERE s.external_account_id = $1
-        AND conv.external_conversation_id = $2
-      ORDER BY r.created_at DESC, r.id DESC
-      `,
-      [scope.sellerAccountExternalId, scope.externalConversationId]
+        INNER JOIN customer c ON c.id = r.customer_id
+        INNER JOIN seller_account s ON s.id = conv.seller_account_id
+        LEFT JOIN channel_account ca ON ca.id = conv.channel_account_id
+        WHERE s.external_account_id = $1
+          AND conv.external_conversation_id = $2
+          AND c.external_customer_id = $3
+          AND ($4::text IS NULL OR conv.channel = $4)
+          AND ($5::text IS NULL OR ca.external_account_id = $5)
+        ORDER BY r.created_at DESC, r.id DESC
+        `,
+      [
+        scope.sellerAccountExternalId,
+        scope.externalConversationId,
+        scope.externalCustomerId,
+        scope.channel || null,
+        scope.channelAccountExternalId || null
+      ]
     );
     return result.rows.map(mapReplySuggestion);
   }
@@ -984,25 +1115,35 @@ export class PostgresSyncStore {
     const result = await this.client.query<OutboundMessageRow>(
       `
       /* create_outbound_message */
-      WITH scoped_conversation AS (
-        SELECT
-          conv.id AS conversation_id,
-          c.id AS customer_id
-        FROM conversation conv
-        INNER JOIN seller_account s ON s.id = conv.seller_account_id
-        INNER JOIN customer c ON c.id = conv.customer_id
-        WHERE s.external_account_id = $1
-          AND c.external_customer_id = $2
-          AND conv.external_conversation_id = $3
-      )
-      INSERT INTO outbound_message (seller_account_id, customer_id, conversation_id, content, created_by)
-      SELECT s.id, customer_id, conversation_id, $4, $5::uuid
-      FROM scoped_conversation
-      INNER JOIN seller_account s ON s.external_account_id = $1
-      RETURNING
-        id::text AS "id",
-        $1::text AS "sellerAccountExternalId",
-        $2::text AS "externalCustomerId",
+        WITH scoped_conversation AS (
+          SELECT
+            conv.id AS conversation_id,
+            c.id AS customer_id,
+            conv.channel,
+            conv.channel_account_id,
+            ca.external_account_id AS channel_account_external_id,
+            ca.surface AS channel_surface
+          FROM conversation conv
+          INNER JOIN seller_account s ON s.id = conv.seller_account_id
+          INNER JOIN customer c ON c.id = conv.customer_id
+          LEFT JOIN channel_account ca ON ca.id = conv.channel_account_id
+          WHERE s.external_account_id = $1
+            AND c.external_customer_id = $2
+            AND conv.external_conversation_id = $3
+            AND ($6::text IS NULL OR conv.channel = $6)
+            AND ($7::text IS NULL OR ca.external_account_id = $7)
+        )
+        INSERT INTO outbound_message (seller_account_id, customer_id, conversation_id, channel_account_id, channel, content, created_by)
+        SELECT s.id, customer_id, conversation_id, channel_account_id, channel, $4, $5::uuid
+        FROM scoped_conversation
+        INNER JOIN seller_account s ON s.external_account_id = $1
+        RETURNING
+          id::text AS "id",
+          $1::text AS "sellerAccountExternalId",
+          (SELECT channel FROM scoped_conversation) AS "channel",
+          (SELECT channel_account_external_id FROM scoped_conversation) AS "channelAccountExternalId",
+          (SELECT channel_surface FROM scoped_conversation) AS "channelSurface",
+          $2::text AS "externalCustomerId",
         $3::text AS "externalConversationId",
         content AS "content",
         status AS "status",
@@ -1020,7 +1161,9 @@ export class PostgresSyncStore {
         input.externalCustomerId,
         input.externalConversationId,
         input.content,
-        input.createdByUserId || null
+        input.createdByUserId || null,
+        input.channel || null,
+        input.channelAccountExternalId || null
       ]
     );
     return mapOutboundMessage(requiredRow(result.rows[0], "outbound_conversation"));
@@ -1032,9 +1175,12 @@ export class PostgresSyncStore {
       `
       /* list_pending_outbound_messages */
       SELECT
-        om.id::text AS "id",
-        s.external_account_id AS "sellerAccountExternalId",
-        c.external_customer_id AS "externalCustomerId",
+          om.id::text AS "id",
+          s.external_account_id AS "sellerAccountExternalId",
+          om.channel AS "channel",
+          ca.external_account_id AS "channelAccountExternalId",
+          ca.surface AS "channelSurface",
+          c.external_customer_id AS "externalCustomerId",
         conv.external_conversation_id AS "externalConversationId",
         om.content AS "content",
         om.status AS "status",
@@ -1049,16 +1195,24 @@ export class PostgresSyncStore {
         om.claimed_by_device_id AS "claimedByDeviceId",
         om.claim_expires_at AS "claimExpiresAt"
       FROM outbound_message om
-      INNER JOIN seller_account s ON s.id = om.seller_account_id
-      INNER JOIN customer c ON c.id = om.customer_id
-      INNER JOIN conversation conv ON conv.id = om.conversation_id
-      WHERE s.external_account_id = $1
-        AND om.status = 'queued'
-        AND (om.claim_expires_at IS NULL OR om.claim_expires_at <= now())
-      ORDER BY om.created_at ASC, om.id ASC
-      LIMIT $2
-      `,
-      [input.sellerAccountExternalId, limit]
+        INNER JOIN seller_account s ON s.id = om.seller_account_id
+        INNER JOIN customer c ON c.id = om.customer_id
+        INNER JOIN conversation conv ON conv.id = om.conversation_id
+        LEFT JOIN channel_account ca ON ca.id = om.channel_account_id
+        WHERE s.external_account_id = $1
+          AND om.status = 'queued'
+          AND (om.claim_expires_at IS NULL OR om.claim_expires_at <= now())
+          AND ($3::text IS NULL OR om.channel = $3)
+          AND ($4::text IS NULL OR ca.external_account_id = $4)
+        ORDER BY om.created_at ASC, om.id ASC
+        LIMIT $2
+        `,
+      [
+        input.sellerAccountExternalId,
+        limit,
+        input.channel || null,
+        input.channelAccountExternalId || null
+      ]
     );
     return result.rows.map(mapOutboundMessage);
   }
@@ -1071,12 +1225,15 @@ export class PostgresSyncStore {
       /* claim_pending_outbound_messages */
       WITH candidates AS (
         SELECT om.id
-        FROM outbound_message om
-        INNER JOIN seller_account s ON s.id = om.seller_account_id
-        WHERE s.external_account_id = $1
-          AND om.status = 'queued'
-          AND (om.claim_expires_at IS NULL OR om.claim_expires_at <= now())
-        ORDER BY om.created_at ASC, om.id ASC
+          FROM outbound_message om
+          INNER JOIN seller_account s ON s.id = om.seller_account_id
+          LEFT JOIN channel_account ca ON ca.id = om.channel_account_id
+          WHERE s.external_account_id = $1
+            AND om.status = 'queued'
+            AND (om.claim_expires_at IS NULL OR om.claim_expires_at <= now())
+            AND ($5::text IS NULL OR om.channel = $5)
+            AND ($6::text IS NULL OR ca.external_account_id = $6)
+          ORDER BY om.created_at ASC, om.id ASC
         LIMIT $2
         FOR UPDATE SKIP LOCKED
       ),
@@ -1091,9 +1248,12 @@ export class PostgresSyncStore {
         RETURNING om.*
       )
       SELECT
-        om.id::text AS "id",
-        s.external_account_id AS "sellerAccountExternalId",
-        c.external_customer_id AS "externalCustomerId",
+          om.id::text AS "id",
+          s.external_account_id AS "sellerAccountExternalId",
+          om.channel AS "channel",
+          ca.external_account_id AS "channelAccountExternalId",
+          ca.surface AS "channelSurface",
+          c.external_customer_id AS "externalCustomerId",
         conv.external_conversation_id AS "externalConversationId",
         om.content AS "content",
         om.status AS "status",
@@ -1108,11 +1268,19 @@ export class PostgresSyncStore {
         om.claimed_by_device_id AS "claimedByDeviceId",
         om.claim_expires_at AS "claimExpiresAt"
       FROM updated_message om
-      INNER JOIN seller_account s ON s.id = om.seller_account_id
-      INNER JOIN customer c ON c.id = om.customer_id
-      INNER JOIN conversation conv ON conv.id = om.conversation_id
-      `,
-      [input.sellerAccountExternalId, limit, input.deviceId, leaseMs]
+        INNER JOIN seller_account s ON s.id = om.seller_account_id
+        INNER JOIN customer c ON c.id = om.customer_id
+        INNER JOIN conversation conv ON conv.id = om.conversation_id
+        LEFT JOIN channel_account ca ON ca.id = om.channel_account_id
+        `,
+      [
+        input.sellerAccountExternalId,
+        limit,
+        input.deviceId,
+        leaseMs,
+        input.channel || null,
+        input.channelAccountExternalId || null
+      ]
     );
     return result.rows.map(mapOutboundMessage);
   }
@@ -1122,9 +1290,12 @@ export class PostgresSyncStore {
       `
       /* list_outbound_messages */
       SELECT
-        om.id::text AS "id",
-        s.external_account_id AS "sellerAccountExternalId",
-        c.external_customer_id AS "externalCustomerId",
+          om.id::text AS "id",
+          s.external_account_id AS "sellerAccountExternalId",
+          om.channel AS "channel",
+          ca.external_account_id AS "channelAccountExternalId",
+          ca.surface AS "channelSurface",
+          c.external_customer_id AS "externalCustomerId",
         conv.external_conversation_id AS "externalConversationId",
         om.content AS "content",
         om.status AS "status",
@@ -1139,14 +1310,22 @@ export class PostgresSyncStore {
         om.claimed_by_device_id AS "claimedByDeviceId",
         om.claim_expires_at AS "claimExpiresAt"
       FROM outbound_message om
-      INNER JOIN seller_account s ON s.id = om.seller_account_id
-      INNER JOIN customer c ON c.id = om.customer_id
-      INNER JOIN conversation conv ON conv.id = om.conversation_id
-      WHERE s.external_account_id = $1
-        AND ($2::text IS NULL OR conv.external_conversation_id = $2)
-      ORDER BY om.created_at ASC, om.id ASC
-      `,
-      [input.sellerAccountExternalId, input.externalConversationId || null]
+        INNER JOIN seller_account s ON s.id = om.seller_account_id
+        INNER JOIN customer c ON c.id = om.customer_id
+        INNER JOIN conversation conv ON conv.id = om.conversation_id
+        LEFT JOIN channel_account ca ON ca.id = om.channel_account_id
+        WHERE s.external_account_id = $1
+          AND ($2::text IS NULL OR conv.external_conversation_id = $2)
+          AND ($3::text IS NULL OR om.channel = $3)
+          AND ($4::text IS NULL OR ca.external_account_id = $4)
+        ORDER BY om.created_at ASC, om.id ASC
+        `,
+      [
+        input.sellerAccountExternalId,
+        input.externalConversationId || null,
+        input.channel || null,
+        input.channelAccountExternalId || null
+      ]
     );
     return result.rows.map(mapOutboundMessage);
   }
@@ -1167,14 +1346,18 @@ export class PostgresSyncStore {
           updated_at = now()
         FROM seller_account s
         WHERE om.seller_account_id = s.id
-          AND om.id = $1::uuid
-          AND s.external_account_id = $2
-        RETURNING om.*
-      )
-      SELECT
-        om.id::text AS "id",
-        s.external_account_id AS "sellerAccountExternalId",
-        c.external_customer_id AS "externalCustomerId",
+            AND om.id = $1::uuid
+            AND s.external_account_id = $2
+            AND ($9::text IS NULL OR om.channel = $9)
+          RETURNING om.*
+        )
+        SELECT
+          om.id::text AS "id",
+          s.external_account_id AS "sellerAccountExternalId",
+          om.channel AS "channel",
+          ca.external_account_id AS "channelAccountExternalId",
+          ca.surface AS "channelSurface",
+          c.external_customer_id AS "externalCustomerId",
         conv.external_conversation_id AS "externalConversationId",
         om.content AS "content",
         om.status AS "status",
@@ -1189,10 +1372,12 @@ export class PostgresSyncStore {
         om.claimed_by_device_id AS "claimedByDeviceId",
         om.claim_expires_at AS "claimExpiresAt"
       FROM updated_message om
-      INNER JOIN seller_account s ON s.id = om.seller_account_id
-      INNER JOIN customer c ON c.id = om.customer_id
-      INNER JOIN conversation conv ON conv.id = om.conversation_id
-      `,
+        INNER JOIN seller_account s ON s.id = om.seller_account_id
+        INNER JOIN customer c ON c.id = om.customer_id
+        INNER JOIN conversation conv ON conv.id = om.conversation_id
+        LEFT JOIN channel_account ca ON ca.id = om.channel_account_id
+        WHERE ($10::text IS NULL OR ca.external_account_id = $10)
+        `,
       [
         input.id,
         input.sellerAccountExternalId,
@@ -1201,7 +1386,9 @@ export class PostgresSyncStore {
         input.deliveredByDeviceId || null,
         input.deliveredAt || null,
         input.errorCode || null,
-        input.errorMessage || null
+        input.errorMessage || null,
+        input.channel || null,
+        input.channelAccountExternalId || null
       ]
     );
     return mapOutboundMessage(requiredRow(result.rows[0], "outbound_message"));
@@ -2209,7 +2396,7 @@ export class PostgresSyncStore {
         stage
       )
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-      ON CONFLICT (seller_account_id, channel, external_customer_id)
+        ON CONFLICT (seller_account_id, channel, channel_account_id, external_customer_id)
       DO UPDATE SET
         login_id = COALESCE(EXCLUDED.login_id, customer.login_id),
         login_id_encrypt = COALESCE(EXCLUDED.login_id_encrypt, customer.login_id_encrypt),
@@ -2269,7 +2456,7 @@ export class PostgresSyncStore {
         last_message_at
       )
       VALUES ($1, $2, $3, $4, $5, $6)
-      ON CONFLICT (seller_account_id, channel, external_conversation_id)
+        ON CONFLICT (seller_account_id, channel, channel_account_id, external_conversation_id)
       DO UPDATE SET
         customer_id = COALESCE(EXCLUDED.customer_id, conversation.customer_id),
         last_message_at = COALESCE(EXCLUDED.last_message_at, conversation.last_message_at),
@@ -2308,7 +2495,7 @@ export class PostgresSyncStore {
         source_meta
       )
       VALUES ($1, $2, $3, $4, $5, $6, $7)
-      ON CONFLICT (seller_account_id, channel, source_batch_key) DO NOTHING
+        ON CONFLICT (seller_account_id, channel, channel_account_id, source_batch_key) DO NOTHING
       `,
       [
         sellerAccountId,
@@ -2468,8 +2655,13 @@ function optionalProps<T extends Record<string, unknown>>(
   };
 }
 
-function customerScopeParams(scope: CustomerScope): [string, string] {
-  return [scope.sellerAccountExternalId, scope.externalCustomerId];
+function customerScopeParams(scope: CustomerScope): [string, string, string | null, string | null] {
+  return [
+    scope.sellerAccountExternalId,
+    scope.externalCustomerId,
+    scope.channel || null,
+    scope.channelAccountExternalId || null
+  ];
 }
 
 function mapCustomerNote(row: CustomerNoteRow): StoredCustomerNote {
@@ -2481,6 +2673,9 @@ function mapCustomerNote(row: CustomerNoteRow): StoredCustomerNote {
     createdAt: isoString(row.createdAt) || "",
     updatedAt: isoString(row.updatedAt) || "",
     ...optionalProps({
+      channel: row.channel,
+      channelAccountExternalId: row.channelAccountExternalId,
+      channelSurface: row.channelSurface,
       createdByUserId: row.createdByUserId
     })
   };
@@ -2494,6 +2689,9 @@ function mapCustomerTag(row: CustomerTagRow): StoredCustomerTag {
     tag: row.tag,
     createdAt: isoString(row.createdAt) || "",
     ...optionalProps({
+      channel: row.channel,
+      channelAccountExternalId: row.channelAccountExternalId,
+      channelSurface: row.channelSurface,
       createdByUserId: row.createdByUserId
     })
   };
@@ -2509,6 +2707,9 @@ function mapFollowUpTask(row: FollowUpTaskRow): StoredFollowUpTask {
     createdAt: isoString(row.createdAt) || "",
     updatedAt: isoString(row.updatedAt) || "",
     ...optionalProps({
+      channel: row.channel,
+      channelAccountExternalId: row.channelAccountExternalId,
+      channelSurface: row.channelSurface,
       assignedToUserId: row.assignedToUserId,
       dueAt: isoString(row.dueAt)
     })
@@ -2524,6 +2725,9 @@ function mapCustomerAssignment(row: CustomerAssignmentRow): StoredCustomerAssign
     assignedAt: isoString(row.assignedAt) || "",
     updatedAt: isoString(row.updatedAt) || "",
     ...optionalProps({
+      channel: row.channel,
+      channelAccountExternalId: row.channelAccountExternalId,
+      channelSurface: row.channelSurface,
       assignedByUserId: row.assignedByUserId
     })
   };
@@ -2552,6 +2756,9 @@ function mapAiSummary(row: AiSummaryRow): StoredAiSummary {
     summary: row.summary,
     createdAt: isoString(row.createdAt) || "",
     ...optionalProps({
+      channel: row.channel,
+      channelAccountExternalId: row.channelAccountExternalId,
+      channelSurface: row.channelSurface,
       intentLevel: row.intentLevel,
       nextAction: row.nextAction,
       sourceMessageStartAt: isoString(row.sourceMessageStartAt),
@@ -2572,6 +2779,9 @@ function mapReplySuggestion(row: ReplySuggestionRow): StoredReplySuggestion {
     createdAt: isoString(row.createdAt) || "",
     updatedAt: isoString(row.updatedAt) || "",
     ...optionalProps({
+      channel: row.channel,
+      channelAccountExternalId: row.channelAccountExternalId,
+      channelSurface: row.channelSurface,
       createdByUserId: row.createdByUserId
     })
   };
@@ -2588,6 +2798,9 @@ function mapOutboundMessage(row: OutboundMessageRow): StoredOutboundMessage {
     createdAt: isoString(row.createdAt) || "",
     updatedAt: isoString(row.updatedAt) || "",
     ...optionalProps({
+      channel: row.channel,
+      channelAccountExternalId: row.channelAccountExternalId,
+      channelSurface: row.channelSurface,
       createdByUserId: row.createdByUserId,
       deliveredByDeviceId: row.deliveredByDeviceId,
       externalMessageId: row.externalMessageId,

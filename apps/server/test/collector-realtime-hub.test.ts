@@ -23,7 +23,7 @@ test("collector realtime hub sends outbound availability to seller sessions", ()
     socket: otherSocket
   });
 
-  const delivered = hub.notifyOutboundAvailable("seller-1", 3);
+  const delivered = hub.notifyOutboundAvailable({ sellerAccountExternalId: "seller-1", pendingCount: 3 });
 
   assert.equal(delivered, 1);
   assert.equal(sellerSocket.sent.length, 1);
@@ -44,7 +44,37 @@ test("collector realtime hub removes closed sessions", () => {
 
   hub.removeSession("session-1");
 
-  assert.equal(hub.notifyOutboundAvailable("seller-1", 1), 0);
+  assert.equal(hub.notifyOutboundAvailable({ sellerAccountExternalId: "seller-1", pendingCount: 1 }), 0);
+});
+
+test("collector realtime hub filters channel availability by session capabilities", () => {
+  const hub = createCollectorRealtimeHub();
+  const whatsappSocket = fakeSocket();
+  const onetalkSocket = fakeSocket();
+  hub.addSession({
+    sessionId: "session-whatsapp",
+    sellerAccountExternalId: "seller-1",
+    deviceId: "device-1",
+    capabilities: ["channel:whatsapp-web"],
+    socket: whatsappSocket
+  });
+  hub.addSession({
+    sessionId: "session-onetalk",
+    sellerAccountExternalId: "seller-1",
+    deviceId: "device-2",
+    capabilities: ["channel:alibaba-im"],
+    socket: onetalkSocket
+  });
+
+  const delivered = hub.notifyOutboundAvailable({
+    sellerAccountExternalId: "seller-1",
+    pendingCount: 1,
+    channel: "whatsapp-web"
+  });
+
+  assert.equal(delivered, 1);
+  assert.equal(whatsappSocket.sent.length, 1);
+  assert.equal(onetalkSocket.sent.length, 0);
 });
 
 function fakeSocket() {

@@ -65,7 +65,25 @@ export class TradeBridgeWsClient {
             collectorToken: config.collectorToken,
             deviceId: config.deviceId,
             deviceName: config.deviceName,
-            capabilities: ["outbound.claim", "delivery.report", "collector.status"]
+            capabilities: [
+              "outbound.claim",
+              "delivery.report",
+              "collector.status",
+              "channel:alibaba-im",
+              "channel:whatsapp-web"
+            ],
+            channelAccounts: [
+              {
+                channel: "alibaba-im",
+                externalAccountId: config.channelAccountExternalId || config.sellerAccountExternalId,
+                surface: "onetalk-web"
+              },
+              {
+                channel: "whatsapp-web",
+                externalAccountId: config.channelAccountExternalId || config.sellerAccountExternalId,
+                surface: "whatsapp-web"
+              }
+            ]
           }
         });
         this.startKeepalive();

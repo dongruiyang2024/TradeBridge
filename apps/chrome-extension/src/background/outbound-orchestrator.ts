@@ -1,6 +1,7 @@
 import { sendMessageToOneTalkTab } from "./onetalk-tab-messaging.js";
 import { OutboundPacer } from "./outbound-pacer.js";
 import { validateConfig } from "./storage.js";
+import { sendMessageToWhatsAppTab } from "./whatsapp-tab-messaging.js";
 import type { ChromeApi } from "../shared/chrome-api.js";
 import type { ExtensionConfig, ExtensionStatus, OutboundMessage } from "../shared/sync-types.js";
 
@@ -62,7 +63,11 @@ export async function runOutboundDelivery(options: RunOutboundDeliveryOptions): 
     let sentCount = 0;
     let failedCount = 0;
 
-    const reports = await sendOutboundMessagesViaOneTalk({ chromeApi: options.chromeApi, messages, pacer: options.pacer });
+    const reports = await sendOutboundMessagesViaBrowserChannels({
+      chromeApi: options.chromeApi,
+      messages,
+      pacer: options.pacer
+    });
     for (const report of reports) {
       await options.markOutboundMessageDelivered({
         serverUrl: config.serverUrl,
@@ -101,6 +106,14 @@ export async function sendOutboundMessagesViaOneTalk(options: {
   messages: OutboundMessage[];
   pacer?: OutboundPacer;
 }): Promise<OutboundDeliveryReport[]> {
+  return sendOutboundMessagesViaBrowserChannels(options);
+}
+
+export async function sendOutboundMessagesViaBrowserChannels(options: {
+  chromeApi: ChromeApi;
+  messages: OutboundMessage[];
+  pacer?: OutboundPacer;
+}): Promise<OutboundDeliveryReport[]> {
   const pacer = options.pacer ?? new OutboundPacer();
   pacer.beginBatch();
   const reports: OutboundDeliveryReport[] = [];
@@ -112,7 +125,7 @@ export async function sendOutboundMessagesViaOneTalk(options: {
     if (decision.kind === "defer") break;
     await pacer.waitAndRecord(decision.waitMs);
 
-    const result = await sendViaOneTalkTab(options.chromeApi, message);
+    const result = await sendViaChannelTab(options.chromeApi, message);
     if (result.ok) {
       const report: OutboundDeliveryReport = {
         outboundMessageId: message.id,
@@ -124,12 +137,19 @@ export async function sendOutboundMessagesViaOneTalk(options: {
       reports.push({
         outboundMessageId: message.id,
         status: "failed",
-        errorCode: result.error || "onetalk_send_failed",
-        errorMessage: result.error || "OneTalk send failed"
+        errorCode: result.error || "channel_send_failed",
+        errorMessage: result.error || "Channel send failed"
       });
     }
   }
   return reports;
+}
+
+async function sendViaChannelTab(chromeApi: ChromeApi, message: OutboundMessage): Promise<PageSendResponse> {
+  const channel = message.channel || "alibaba-im";
+  if (channel === "alibaba-im") return sendViaOneTalkTab(chromeApi, message);
+  if (channel === "whatsapp-web") return sendViaWhatsAppTab(chromeApi, message);
+  return { ok: false, error: "channel_not_supported_by_collector" };
 }
 
 async function sendViaOneTalkTab(chromeApi: ChromeApi, message: OutboundMessage): Promise<PageSendResponse> {
@@ -141,6 +161,18 @@ async function sendViaOneTalkTab(chromeApi: ChromeApi, message: OutboundMessage)
     return isPageSendResponse(response) ? response : { ok: false, error: "onetalk_send_response_invalid" };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "onetalk_send_failed" };
+  }
+}
+
+async function sendViaWhatsAppTab(chromeApi: ChromeApi, message: OutboundMessage): Promise<PageSendResponse> {
+  try {
+    const response = await sendMessageToWhatsAppTab(chromeApi, {
+      type: "send-whatsapp-web-message",
+      message
+    });
+    return isPageSendResponse(response) ? response : { ok: false, error: "whatsapp_web_send_response_invalid" };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "whatsapp_web_send_failed" };
   }
 }
 

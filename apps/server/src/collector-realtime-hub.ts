@@ -16,6 +16,7 @@ export interface CollectorRealtimeSession {
   sessionId: string;
   sellerAccountExternalId: string;
   deviceId: string;
+  capabilities?: string[];
   socket: CollectorRealtimeSocket;
 }
 
@@ -27,7 +28,12 @@ export interface CollectorRealtimeHubOptions {
 export interface CollectorRealtimeHub {
   addSession(session: CollectorRealtimeSession): void;
   removeSession(sessionId: string): void;
-  notifyOutboundAvailable(sellerAccountExternalId: string, pendingCount: number): number;
+  notifyOutboundAvailable(input: {
+    sellerAccountExternalId: string;
+    pendingCount: number;
+    channel?: string;
+    channelAccountExternalId?: string;
+  }): number;
   sendToSession(sessionId: string, message: CollectorWsMessage): boolean;
 }
 
@@ -43,16 +49,22 @@ export function createCollectorRealtimeHub(options: CollectorRealtimeHubOptions 
     removeSession(sessionId) {
       sessions.delete(sessionId);
     },
-    notifyOutboundAvailable(sellerAccountExternalId, pendingCount) {
+    notifyOutboundAvailable(input) {
       const message = buildCollectorWsMessage({
         id: nextId(),
         type: "outbound.available",
         sentAt: now().toISOString(),
-        payload: { sellerAccountExternalId, pendingCount }
+        payload: {
+          sellerAccountExternalId: input.sellerAccountExternalId,
+          pendingCount: input.pendingCount,
+          channel: input.channel,
+          channelAccountExternalId: input.channelAccountExternalId
+        }
       });
       let delivered = 0;
       for (const session of sessions.values()) {
-        if (session.sellerAccountExternalId !== sellerAccountExternalId) continue;
+        if (session.sellerAccountExternalId !== input.sellerAccountExternalId) continue;
+        if (input.channel && !sessionSupportsChannel(session, input.channel)) continue;
         if (send(session.socket, message)) delivered += 1;
       }
       return delivered;
@@ -62,6 +74,10 @@ export function createCollectorRealtimeHub(options: CollectorRealtimeHubOptions 
       return session ? send(session.socket, message) : false;
     }
   };
+}
+
+function sessionSupportsChannel(session: CollectorRealtimeSession, channel: string): boolean {
+  return !session.capabilities?.length || session.capabilities.includes(`channel:${channel}`);
 }
 
 function send(socket: CollectorRealtimeSocket, message: CollectorWsMessage): boolean {

@@ -78,6 +78,21 @@ export function createInternalApiClient(options: CreateInternalApiClientOptions)
     return data;
   }
 
+  async function listMessages(externalConversationId: string): Promise<StoredMessage[]>;
+  async function listMessages(scope: CustomerScope, externalConversationId: string): Promise<StoredMessage[]>;
+  async function listMessages(
+    scopeOrExternalConversationId: CustomerScope | string,
+    externalConversationId?: string
+  ): Promise<StoredMessage[]> {
+    const scope = typeof scopeOrExternalConversationId === "string" ? undefined : scopeOrExternalConversationId;
+    const conversationId =
+      typeof scopeOrExternalConversationId === "string" ? scopeOrExternalConversationId : externalConversationId;
+    const data = await request<StoredMessage[]>(conversationPath(requireField(conversationId, "conversationId"), "messages"), {
+      query: scope ? scopeQuery(scope) : undefined
+    });
+    return data.messages || [];
+  }
+
   return {
     async login(input) {
       const data = await request<LoginResult>("/internal/v1/auth/login", {
@@ -166,12 +181,7 @@ export function createInternalApiClient(options: CreateInternalApiClientOptions)
       const data = await request<StoredConversation[]>("/internal/v1/conversations");
       return data.conversations || [];
     },
-    async listMessages(externalConversationId) {
-      const data = await request<StoredMessage[]>(
-        `/internal/v1/conversations/${encodeURIComponent(externalConversationId)}/messages`
-      );
-      return data.messages || [];
-    },
+    listMessages,
     async listOutboundMessages(scope, externalConversationId) {
       const data = await request<StoredOutboundMessage[]>(
         conversationPath(externalConversationId, "outbound-messages"),
@@ -242,9 +252,11 @@ function conversationPath(externalConversationId: string, child: string): string
   return `/internal/v1/conversations/${encodeURIComponent(externalConversationId)}/${child}`;
 }
 
-function scopeQuery(scope: CustomerScope): Record<string, string> {
+function scopeQuery(scope: CustomerScope): Record<string, string | undefined> {
   return {
-    sellerAccountExternalId: scope.sellerAccountExternalId
+    sellerAccountExternalId: scope.sellerAccountExternalId,
+    channel: scope.channel,
+    channelAccountExternalId: scope.channelAccountExternalId
   };
 }
 

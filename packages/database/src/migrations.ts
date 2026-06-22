@@ -15,7 +15,8 @@ export const INTERNAL_SYNC_MIGRATIONS: DatabaseMigration[] = [
   loadMigration("005_channel_dimension", "005_channel_dimension.sql"),
   loadMigration("006_customer_profile_enrichment", "006_customer_profile_enrichment.sql"),
   loadMigration("007_collector_device_trademind_binding", "007_collector_device_trademind_binding.sql"),
-  loadMigration("008_managed_trademind_activation", "008_managed_trademind_activation.sql")
+  loadMigration("008_managed_trademind_activation", "008_managed_trademind_activation.sql"),
+  loadMigration("009_channel_account_identity_scope", "009_channel_account_identity_scope.sql")
 ];
 
 function loadMigration(id: string, filename: string): DatabaseMigration {

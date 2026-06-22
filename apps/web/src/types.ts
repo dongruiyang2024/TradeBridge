@@ -72,6 +72,9 @@ export interface StoredOutboundMessage {
 export interface CustomerScope {
   sellerAccountExternalId: string;
   externalCustomerId: string;
+  channel?: string;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
 }
 
 export interface StoredCustomerNote extends CustomerScope {
@@ -188,6 +191,7 @@ export interface InternalApiClient {
   listCustomers(): Promise<StoredCustomer[]>;
   listConversations(): Promise<StoredConversation[]>;
   listMessages(externalConversationId: string): Promise<StoredMessage[]>;
+  listMessages(scope: CustomerScope, externalConversationId: string): Promise<StoredMessage[]>;
   listOutboundMessages(scope: CustomerScope, externalConversationId: string): Promise<StoredOutboundMessage[]>;
   createOutboundMessage(
     scope: CustomerScope,

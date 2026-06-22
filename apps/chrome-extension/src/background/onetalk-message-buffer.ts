@@ -16,6 +16,7 @@ interface BufferShape {
 }
 
 export interface OneTalkMessageBufferOptions {
+  storageKey?: string;
   maxMessagesPerConversation?: number;
   maxConversations?: number;
 }
@@ -24,6 +25,7 @@ export class OneTalkMessageBuffer {
   private cache: BufferShape | null = null;
   private loadPromise: Promise<BufferShape> | null = null;
   private writeChain: Promise<void> = Promise.resolve();
+  private readonly storageKey: string;
   private readonly maxPerConversation: number;
   private readonly maxConversations: number;
 
@@ -31,6 +33,7 @@ export class OneTalkMessageBuffer {
     private readonly storage: ChromeStorageArea,
     options: OneTalkMessageBufferOptions = {}
   ) {
+    this.storageKey = options.storageKey ?? BUFFER_KEY;
     this.maxPerConversation = options.maxMessagesPerConversation ?? DEFAULT_MAX_MESSAGES_PER_CONVERSATION;
     this.maxConversations = options.maxConversations ?? DEFAULT_MAX_CONVERSATIONS;
   }
@@ -99,9 +102,9 @@ export class OneTalkMessageBuffer {
     if (this.cache) return Promise.resolve(this.cache);
     if (this.loadPromise) return this.loadPromise;
     this.loadPromise = this.storage
-      .get(BUFFER_KEY)
+      .get(this.storageKey)
       .then((data) => {
-        if (!this.cache) this.cache = normalizeBuffer(data[BUFFER_KEY]);
+        if (!this.cache) this.cache = normalizeBuffer(data[this.storageKey]);
         return this.cache;
       })
       .finally(() => {
@@ -113,7 +116,7 @@ export class OneTalkMessageBuffer {
   private flush(): Promise<void> {
     const buffer = this.cache;
     if (!buffer) return Promise.resolve();
-    this.writeChain = this.writeChain.then(() => this.storage.set({ [BUFFER_KEY]: buffer })).catch(() => undefined);
+    this.writeChain = this.writeChain.then(() => this.storage.set({ [this.storageKey]: buffer })).catch(() => undefined);
     return this.writeChain;
   }
 }

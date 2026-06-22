@@ -17,6 +17,8 @@ export interface UploadSyncBatchOptions {
 export interface ListOutboundMessagesOptions {
   serverUrl: string;
   collectorToken: string;
+  channel?: string;
+  channelAccountExternalId?: string;
 }
 
 export interface MarkOutboundMessageDeliveredOptions {
@@ -212,7 +214,7 @@ export async function validateTradeMindBinding(
 }
 
 export async function listOutboundMessages(options: ListOutboundMessagesOptions): Promise<OutboundMessage[]> {
-  const response = await fetch(outboundMessagesUrl(options.serverUrl), {
+  const response = await fetch(outboundMessagesUrl(options.serverUrl, options), {
     headers: {
       Authorization: `Bearer ${options.collectorToken}`
     }
@@ -280,8 +282,11 @@ function tradeMindBindingValidateUrl(serverUrl: string): string {
   return new URL("/collector/v1/trademind/validate", serverUrl).toString();
 }
 
-function outboundMessagesUrl(serverUrl: string): string {
-  return new URL("/collector/v1/outbound-messages", serverUrl).toString();
+function outboundMessagesUrl(serverUrl: string, input: { channel?: string; channelAccountExternalId?: string } = {}): string {
+  const url = new URL("/collector/v1/outbound-messages", serverUrl);
+  if (input.channel) url.searchParams.set("channel", input.channel);
+  if (input.channelAccountExternalId) url.searchParams.set("channelAccountExternalId", input.channelAccountExternalId);
+  return url.toString();
 }
 
 function outboundDeliveryUrl(serverUrl: string, outboundMessageId: string): string {
@@ -407,9 +412,12 @@ function isOutboundMessage(value: unknown): value is OutboundMessage {
     isRecord(value) &&
     typeof value.id === "string" &&
     typeof value.sellerAccountExternalId === "string" &&
-    typeof value.externalCustomerId === "string" &&
-    typeof value.externalConversationId === "string" &&
-    typeof value.content === "string" &&
+	    typeof value.externalCustomerId === "string" &&
+	    typeof value.externalConversationId === "string" &&
+	    (value.channel === undefined || typeof value.channel === "string") &&
+	    (value.channelAccountExternalId === undefined || typeof value.channelAccountExternalId === "string") &&
+	    (value.channelSurface === undefined || typeof value.channelSurface === "string") &&
+	    typeof value.content === "string" &&
     isOutboundStatus(value.status) &&
     typeof value.createdAt === "string" &&
     typeof value.updatedAt === "string"

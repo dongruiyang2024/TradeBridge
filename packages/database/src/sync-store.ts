@@ -29,6 +29,7 @@ import type {
   InternalUserCredentials,
   IssueInternalSessionInput,
   ListOutboundMessagesInput,
+  ListMessagesInput,
   ListPendingOutboundMessagesInput,
   MarkOutboundMessageDeliveredInput,
   RegisteredCollectorDevice,
@@ -162,9 +163,13 @@ export class InMemorySyncStore {
     return Array.from(this.conversations.values());
   }
 
-  listMessages(externalConversationId?: string): StoredMessage[] {
+  listMessages(input?: string | ListMessagesInput): StoredMessage[] {
+    const scope = typeof input === "string" ? { externalConversationId: input } : input || {};
     return Array.from(this.messages.values()).filter(
-      (item) => !externalConversationId || item.externalConversationId === externalConversationId
+      (item) =>
+        (!scope.sellerAccountExternalId || item.sellerAccountExternalId === scope.sellerAccountExternalId) &&
+        (!scope.externalConversationId || item.externalConversationId === scope.externalConversationId) &&
+        matchesOptionalChannelScope(item, scope)
     );
   }
 
@@ -220,7 +225,7 @@ export class InMemorySyncStore {
 
   async assignCustomer(input: AssignCustomerInput): Promise<StoredCustomerAssignment> {
     const now = new Date().toISOString();
-    const key = customerCollaborationKey(input.sellerAccountExternalId, input.externalCustomerId);
+    const key = customerCollaborationKey(input);
     const existing = this.customerAssignments.get(key);
     const assignment: StoredCustomerAssignment = {
       ...input,
@@ -233,7 +238,7 @@ export class InMemorySyncStore {
   }
 
   async getCustomerAssignment(scope: CustomerScope): Promise<StoredCustomerAssignment | null> {
-    return this.customerAssignments.get(customerCollaborationKey(scope.sellerAccountExternalId, scope.externalCustomerId)) || null;
+    return this.customerAssignments.get(customerCollaborationKey(scope)) || null;
   }
 
   async updateFollowUpTask(input: UpdateFollowUpTaskInput): Promise<StoredFollowUpTask> {
@@ -305,7 +310,8 @@ export class InMemorySyncStore {
       (item) =>
         item.sellerAccountExternalId === input.sellerAccountExternalId &&
         item.externalConversationId === input.externalConversationId &&
-        item.externalCustomerId === input.externalCustomerId
+        item.externalCustomerId === input.externalCustomerId &&
+        matchesOptionalChannelScope(item, input)
     );
     if (!conversation || conversation.externalCustomerId !== input.externalCustomerId) {
       throw new Error("outbound_conversation_not_found");
@@ -332,6 +338,7 @@ export class InMemorySyncStore {
         (item) =>
           item.sellerAccountExternalId === input.sellerAccountExternalId &&
           item.status === "queued" &&
+          matchesOptionalChannelScope(item, input) &&
           isClaimExpired(item, now)
       )
       .slice(0, limit);
@@ -347,6 +354,7 @@ export class InMemorySyncStore {
     for (const message of this.sortedOutboundMessages()) {
       if (claimed.length >= limit) break;
       if (message.sellerAccountExternalId !== input.sellerAccountExternalId || message.status !== "queued") continue;
+      if (!matchesOptionalChannelScope(message, input)) continue;
       if (!isClaimExpired(message, now)) continue;
 
       const updated: StoredOutboundMessage = {
@@ -366,13 +374,18 @@ export class InMemorySyncStore {
     return this.sortedOutboundMessages().filter(
       (item) =>
         item.sellerAccountExternalId === input.sellerAccountExternalId &&
-        (!input.externalConversationId || item.externalConversationId === input.externalConversationId)
+        (!input.externalConversationId || item.externalConversationId === input.externalConversationId) &&
+        matchesOptionalChannelScope(item, input)
     );
   }
 
   async markOutboundMessageDelivered(input: MarkOutboundMessageDeliveredInput): Promise<StoredOutboundMessage> {
     const existing = this.outboundMessages.get(input.id);
-    if (!existing || existing.sellerAccountExternalId !== input.sellerAccountExternalId) {
+    if (
+      !existing ||
+      existing.sellerAccountExternalId !== input.sellerAccountExternalId ||
+      !matchesOptionalChannelScope(existing, input)
+    ) {
       throw new Error("outbound_message_not_found");
     }
 
@@ -750,8 +763,13 @@ function customerKey(sellerAccountExternalId: string, scope: SyncChannelScope, e
   return [sellerAccountExternalId, channelScopeKey(scope), externalCustomerId].join(":");
 }
 
-function customerCollaborationKey(sellerAccountExternalId: string, externalCustomerId: string): string {
-  return [sellerAccountExternalId, externalCustomerId].join(":");
+function customerCollaborationKey(scope: CustomerScope): string {
+  return [
+    scope.sellerAccountExternalId,
+    scope.channel || "",
+    scope.channelAccountExternalId || "",
+    scope.externalCustomerId
+  ].join(":");
 }
 
 function conversationKey(sellerAccountExternalId: string, scope: SyncChannelScope, externalConversationId: string): string {
@@ -784,12 +802,28 @@ function sourceTime(batch: SyncBatch): string {
 function isSameCustomerScope(left: CustomerScope, right: CustomerScope): boolean {
   return (
     left.sellerAccountExternalId === right.sellerAccountExternalId &&
-    left.externalCustomerId === right.externalCustomerId
+    left.externalCustomerId === right.externalCustomerId &&
+    matchesOptionalChannelScope(left, right) &&
+    matchesOptionalChannelScope(right, left)
   );
 }
 
 function isSameConversationCustomerScope(left: ConversationCustomerScope, right: ConversationCustomerScope): boolean {
-  return isSameCustomerScope(left, right) && left.externalConversationId === right.externalConversationId;
+  return (
+    isSameCustomerScope(left, right) &&
+    left.externalConversationId === right.externalConversationId
+  );
+}
+
+function matchesOptionalChannelScope(
+  item: { channel?: string; channelAccountExternalId?: string; channelSurface?: string },
+  scope: { channel?: string; channelAccountExternalId?: string; channelSurface?: string }
+): boolean {
+  return (
+    (!scope.channel || item.channel === scope.channel) &&
+    (!scope.channelAccountExternalId || item.channelAccountExternalId === scope.channelAccountExternalId) &&
+    (!scope.channelSurface || item.channelSurface === scope.channelSurface)
+  );
 }
 
 function isClaimExpired(message: StoredOutboundMessage, now: Date): boolean {

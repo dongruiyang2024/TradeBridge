@@ -29,6 +29,8 @@ import {
   createNoteForSelectedCustomer,
   createOutboundMessageForSelectedConversation,
   createTaskForSelectedCustomer,
+  customerKey,
+  isCustomerSelection,
   loadCustomerList,
   refreshDashboard,
   selectConversation,
@@ -548,8 +550,8 @@ export function DashboardView(props: DashboardViewProps) {
   const [tagDraft, setTagDraft] = useState("");
   const [taskDraft, setTaskDraft] = useState("");
   const [replyDraft, setReplyDraft] = useState("");
-  const selectedCustomer = props.state.customers.find(
-    (customer) => customer.externalCustomerId === props.state.selectedCustomerId
+  const selectedCustomer = props.state.customers.find((customer) =>
+    isCustomerSelection(customer, props.state.selectedCustomerId)
   );
   const filteredCustomers = props.state.customers.filter((customer) => {
     const haystack = [customer.displayName, customer.companyName, customer.loginId, customer.externalCustomerId, customer.country]
@@ -625,9 +627,9 @@ export function DashboardView(props: DashboardViewProps) {
             {filteredCustomers.map((customer) => (
               <button
                 type="button"
-                className={customer.externalCustomerId === props.state.selectedCustomerId ? "customer active" : "customer"}
-                key={customer.externalCustomerId}
-                onClick={() => props.onSelectCustomer(customer.externalCustomerId)}
+                className={isCustomerSelection(customer, props.state.selectedCustomerId) ? "customer active" : "customer"}
+                key={customerKey(customer)}
+                onClick={() => props.onSelectCustomer(customerKey(customer))}
               >
                 <span className="customer-name">{customer.displayName || customer.loginId || customer.externalCustomerId}</span>
                 <span className="customer-meta">

@@ -142,6 +142,27 @@ test("acceptSyncBatch keeps identical external ids isolated by channel", async (
   );
 });
 
+test("acceptSyncBatch keeps identical external ids isolated by channel account", async () => {
+  const store = new InMemorySyncStore();
+
+  await store.acceptSyncBatch(channelBatch("whatsapp-web", "wa-account-1", "hello from account 1"));
+  await store.acceptSyncBatch(channelBatch("whatsapp-web", "wa-account-2", "hello from account 2"));
+
+  assert.deepEqual(
+    store.listMessages().map((message) => [
+      message.channel,
+      message.channelAccountExternalId,
+      message.externalConversationId,
+      message.externalMessageId,
+      message.content
+    ]),
+    [
+      ["whatsapp-web", "wa-account-1", "conv-same", "msg-same", "hello from account 1"],
+      ["whatsapp-web", "wa-account-2", "conv-same", "msg-same", "hello from account 2"]
+    ]
+  );
+});
+
 test("acceptSyncBatch deduplicates messages without upstream ids by content hash", async () => {
   const store = new InMemorySyncStore();
   await store.acceptSyncBatch({

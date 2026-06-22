@@ -124,6 +124,9 @@ export interface StoredMessage extends SyncMessageInput {
 export interface CustomerScope {
   sellerAccountExternalId: string;
   externalCustomerId: string;
+  channel?: string;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
 }
 
 export interface CreateCustomerNoteInput extends CustomerScope {
@@ -243,6 +246,9 @@ export interface CreateOutboundMessageInput extends ConversationCustomerScope {
 
 export interface ListPendingOutboundMessagesInput {
   sellerAccountExternalId: string;
+  channel?: string;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
   limit?: number;
   now?: Date;
 }
@@ -250,6 +256,9 @@ export interface ListPendingOutboundMessagesInput {
 export interface ClaimPendingOutboundMessagesInput {
   sellerAccountExternalId: string;
   deviceId: string;
+  channel?: string;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
   limit?: number;
   leaseMs?: number;
   now?: Date;
@@ -258,17 +267,29 @@ export interface ClaimPendingOutboundMessagesInput {
 export interface ListOutboundMessagesInput {
   sellerAccountExternalId: string;
   externalConversationId?: string;
+  channel?: string;
+  channelAccountExternalId?: string;
+  channelSurface?: string;
 }
 
 export interface MarkOutboundMessageDeliveredInput {
   id: string;
   sellerAccountExternalId: string;
+  channel?: string;
+  channelAccountExternalId?: string;
   status: "sent" | "failed";
   externalMessageId?: string;
   deliveredByDeviceId?: string;
   deliveredAt?: string;
   errorCode?: string;
   errorMessage?: string;
+}
+
+export interface ListMessagesInput {
+  sellerAccountExternalId?: string;
+  externalConversationId?: string;
+  channel?: string;
+  channelAccountExternalId?: string;
 }
 
 export interface StoredOutboundMessage extends ConversationCustomerScope {

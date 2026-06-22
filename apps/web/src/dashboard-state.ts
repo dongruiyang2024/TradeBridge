@@ -26,7 +26,7 @@ export async function loadCustomerList(state: DashboardState, client: InternalAp
   const customers = sortCustomers(await client.listCustomers());
   const nextCustomerId = selectedCustomerExists(customers, state.selectedCustomerId)
     ? state.selectedCustomerId
-    : customers[0]?.externalCustomerId;
+    : customers[0] ? customerKey(customers[0]) : undefined;
   const nextState: DashboardState = {
     ...state,
     customers,
@@ -49,7 +49,7 @@ export async function refreshDashboard(state: DashboardState, client: InternalAp
     ? state.selectedCustomerId
     : customers[0]?.externalCustomerId;
 
-  const selectedCustomer = customers.find((customer) => customer.externalCustomerId === selectedCustomerId);
+  const selectedCustomer = customers.find((customer) => isCustomerSelection(customer, selectedCustomerId));
   if (!selectedCustomer) {
     return { ...clearSelection({ ...state, customers }), error: undefined };
   }
@@ -66,7 +66,7 @@ export async function refreshDashboard(state: DashboardState, client: InternalAp
     : conversations[0]?.externalConversationId;
 
   const [messages, outboundMessages] = await Promise.all([
-    selectedConversationId ? client.listMessages(selectedConversationId) : Promise.resolve([]),
+    selectedConversationId ? listMessagesForConversation(client, scope, selectedConversationId) : Promise.resolve([]),
     selectedConversationId ? client.listOutboundMessages(scope, selectedConversationId) : Promise.resolve([])
   ]);
 
@@ -85,9 +85,9 @@ export async function refreshDashboard(state: DashboardState, client: InternalAp
 export async function selectCustomer(
   state: DashboardState,
   client: InternalApiClient,
-  externalCustomerId: string
+  selectedCustomerKey: string
 ): Promise<DashboardState> {
-  const selectedCustomer = state.customers.find((customer) => customer.externalCustomerId === externalCustomerId);
+  const selectedCustomer = state.customers.find((customer) => isCustomerSelection(customer, selectedCustomerKey));
   if (!selectedCustomer) {
     return {
       ...state,
@@ -111,7 +111,7 @@ export async function selectCustomer(
   );
   const selectedConversationId = conversations[0]?.externalConversationId;
   const [messages, outboundMessages, assignment, notes, tags, tasks] = await Promise.all([
-    selectedConversationId ? client.listMessages(selectedConversationId) : Promise.resolve([]),
+    selectedConversationId ? listMessagesForConversation(client, scope, selectedConversationId) : Promise.resolve([]),
     selectedConversationId ? client.listOutboundMessages(scope, selectedConversationId) : Promise.resolve([]),
     client.getCustomerAssignment(scope),
     client.listCustomerNotes(scope),
@@ -121,7 +121,7 @@ export async function selectCustomer(
 
   return {
     ...state,
-    selectedCustomerId: externalCustomerId,
+    selectedCustomerId: selectedCustomerKey,
     conversations,
     selectedConversationId,
     assignment,
@@ -142,7 +142,7 @@ export async function selectConversation(
 ): Promise<DashboardState> {
   const scope = selectedCustomerScope(state);
   const [messages, outboundMessages] = await Promise.all([
-    client.listMessages(externalConversationId),
+    scope ? listMessagesForConversation(client, scope, externalConversationId) : Promise.resolve([]),
     scope ? client.listOutboundMessages(scope, externalConversationId) : Promise.resolve([])
   ]);
   return {
@@ -229,15 +229,28 @@ export async function createTaskForSelectedCustomer(
 }
 
 function selectedCustomerScope(state: DashboardState): CustomerScope | null {
-  const customer = state.customers.find((item) => item.externalCustomerId === state.selectedCustomerId);
+  const customer = state.customers.find((item) => isCustomerSelection(item, state.selectedCustomerId));
   return customer ? customerScope(customer) : null;
 }
 
 function customerScope(customer: StoredCustomer): CustomerScope {
   return {
     sellerAccountExternalId: customer.sellerAccountExternalId,
-    externalCustomerId: customer.externalCustomerId
+    externalCustomerId: customer.externalCustomerId,
+    channel: customer.channel,
+    channelAccountExternalId: customer.channelAccountExternalId,
+    channelSurface: customer.channelSurface
   };
+}
+
+function listMessagesForConversation(
+  client: InternalApiClient,
+  scope: CustomerScope,
+  externalConversationId: string
+): Promise<StoredMessage[]> {
+  return client.listMessages.length <= 1
+    ? client.listMessages(externalConversationId)
+    : client.listMessages(scope, externalConversationId);
 }
 
 // A conversation belongs to the selected customer only when it matches the full
@@ -253,7 +266,23 @@ function isSameCustomerConversation(conversation: StoredConversation, customer: 
 }
 
 function selectedCustomerExists(customers: StoredCustomer[], selectedCustomerId?: string): boolean {
-  return Boolean(selectedCustomerId && customers.some((customer) => customer.externalCustomerId === selectedCustomerId));
+  return Boolean(selectedCustomerId && customers.some((customer) => isCustomerSelection(customer, selectedCustomerId)));
+}
+
+export function customerKey(customer: StoredCustomer): string {
+  return [
+    customer.sellerAccountExternalId,
+    customer.channel || "",
+    customer.channelAccountExternalId || "",
+    customer.externalCustomerId
+  ].join("::");
+}
+
+export function isCustomerSelection(customer: StoredCustomer, selectedCustomerId?: string): boolean {
+  return Boolean(
+    selectedCustomerId &&
+      (customerKey(customer) === selectedCustomerId || customer.externalCustomerId === selectedCustomerId)
+  );
 }
 
 function clearSelection(state: DashboardState): DashboardState {

@@ -12,6 +12,7 @@ import {
   createInitialDashboardState,
   createNoteForSelectedCustomer,
   createTaskForSelectedCustomer,
+  customerKey,
   loadCustomerList
 } from "../../apps/web/src/dashboard-state";
 
@@ -84,9 +85,9 @@ test("internal trial flow uploads Chrome extension data and exercises the Web cu
     let dashboard = await loadCustomerList(createInitialDashboardState(), client);
 
     assert.equal(dashboard.customers.length, 1);
-    // The mapper anchors a buyer on the stable contactLoginId, not the rotating
-    // contactAccountId, so the selected customer id is the login id.
-    assert.equal(dashboard.selectedCustomerId, "trial_buyer");
+    // Selection uses the full channel-scoped customer key so identical buyer
+    // ids from different seller/channel accounts cannot collide in the UI.
+    assert.equal(dashboard.selectedCustomerId, customerKey(dashboard.customers[0]));
     assert.equal(dashboard.customers[0].channel, "alibaba-im");
     assert.equal(dashboard.customers[0].channelAccountExternalId, SELLER_ACCOUNT_ID);
     assert.equal(dashboard.customers[0].channelSurface, "onetalk-web");

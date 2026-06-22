@@ -34,6 +34,7 @@ export async function registerCollectorWsRoutes(
     let sessionId: string | null = null;
     let sellerAccountExternalId: string | null = null;
     let deviceId: string | null = null;
+    let capabilities: string[] = [];
     const heartbeat = globalThis.setInterval(() => {
       send(socket, {
         id: nextId(),
@@ -68,7 +69,9 @@ export async function registerCollectorWsRoutes(
             sellerAccountExternalId: sellerAccountExternalId || "default-seller",
             deviceId: deviceId || "unknown-device",
             limit: message.payload.limit,
-            leaseMs: message.payload.leaseMs || OUTBOUND_LEASE_MS
+            leaseMs: message.payload.leaseMs || OUTBOUND_LEASE_MS,
+            channel: claimChannel(message.payload.channel, capabilities),
+            channelAccountExternalId: message.payload.channelAccountExternalId
           });
           send(socket, {
             id: nextId(),
@@ -87,6 +90,8 @@ export async function registerCollectorWsRoutes(
           await options.store.markOutboundMessageDelivered({
             id: message.payload.outboundMessageId,
             sellerAccountExternalId: sellerAccountExternalId || "default-seller",
+            channel: message.payload.channel,
+            channelAccountExternalId: message.payload.channelAccountExternalId,
             status: message.payload.status,
             externalMessageId: message.payload.externalMessageId,
             deliveredByDeviceId: deviceId || undefined,
@@ -137,10 +142,12 @@ export async function registerCollectorWsRoutes(
       sessionId = nextId();
       sellerAccountExternalId = collectorDevice.sellerAccountExternalId || "default-seller";
       deviceId = collectorDevice.externalDeviceId || message.payload.deviceId;
+      capabilities = message.payload.capabilities;
       options.hub.addSession({
         sessionId,
         sellerAccountExternalId,
         deviceId,
+        capabilities,
         socket
       });
       send(socket, {
@@ -157,6 +164,14 @@ export async function registerCollectorWsRoutes(
       });
     }
   });
+}
+
+function claimChannel(requestedChannel: string | undefined, capabilities: string[]): string | undefined {
+  if (requestedChannel) return requestedChannel;
+  const supportedChannels = capabilities
+    .filter((capability) => capability.startsWith("channel:"))
+    .map((capability) => capability.slice("channel:".length));
+  return supportedChannels.length === 1 ? supportedChannels[0] : undefined;
 }
 
 function send(socket: WebSocket, message: CollectorWsMessageInput): void {

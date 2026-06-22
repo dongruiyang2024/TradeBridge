@@ -11,7 +11,7 @@ test("realtime orchestrator claims outbound messages and reports delivery", asyn
     now: () => new Date("2026-06-01T00:00:00.000Z"),
     nextId: () => "client-msg-1",
     sendWsMessage: (message) => sent.push(JSON.stringify(message)),
-    sendOutboundMessagesViaOneTalk: async ({ messages }) => {
+    sendOutboundMessages: async ({ messages }) => {
       deliveredMessages = messages;
       return [
         {
@@ -29,13 +29,14 @@ test("realtime orchestrator claims outbound messages and reports delivery", asyn
       id: "server-1",
       type: "outbound.available",
       sentAt: "2026-06-01T00:00:00.000Z",
-      payload: { sellerAccountExternalId: "seller-1", pendingCount: 1 }
+      payload: { sellerAccountExternalId: "seller-1", pendingCount: 1, channel: "alibaba-im" }
     })
   );
 
   const claim = parseCollectorWsMessage(sent[0]);
   assert.equal(claim.type, "outbound.claim");
   assert.equal(claim.payload.limit, 4);
+  assert.equal(claim.payload.channel, "alibaba-im");
 
   await orchestrator.handleMessage(
     buildCollectorWsMessage({
@@ -62,7 +63,7 @@ test("realtime orchestrator runs sync when server requests it", async () => {
   let syncCount = 0;
   const orchestrator = createRealtimeOrchestrator({
     sendWsMessage: () => undefined,
-    sendOutboundMessagesViaOneTalk: async () => [],
+    sendOutboundMessages: async () => [],
     runSyncNow: async () => {
       syncCount += 1;
       return { ok: true, acceptedCount: 1, rejectedCount: 0 };
@@ -87,7 +88,7 @@ test("realtime orchestrator answers heartbeat pings", async () => {
     now: () => new Date("2026-06-01T00:00:00.000Z"),
     nextId: () => "client-msg-1",
     sendWsMessage: (message) => sent.push(JSON.stringify(message)),
-    sendOutboundMessagesViaOneTalk: async () => [],
+    sendOutboundMessages: async () => [],
     runSyncNow: async () => ({ ok: true })
   });
 

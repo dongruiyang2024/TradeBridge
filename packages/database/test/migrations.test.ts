@@ -13,10 +13,21 @@ test("internal sync migrations expose the initial schema in order", () => {
       ["005_channel_dimension", "005_channel_dimension.sql"],
       ["006_customer_profile_enrichment", "006_customer_profile_enrichment.sql"],
       ["007_collector_device_trademind_binding", "007_collector_device_trademind_binding.sql"],
-      ["008_managed_trademind_activation", "008_managed_trademind_activation.sql"]
+      ["008_managed_trademind_activation", "008_managed_trademind_activation.sql"],
+      ["009_channel_account_identity_scope", "009_channel_account_identity_scope.sql"]
     ]
   );
   assert.doesNotMatch(INTERNAL_SYNC_MIGRATIONS[0].sql, /CREATE TABLE IF NOT EXISTS org/i);
+});
+
+test("channel account identity migration upgrades uniqueness to account scope", () => {
+  const normalized = INTERNAL_SYNC_MIGRATIONS[8].sql.replace(/\s+/g, " ").toLowerCase();
+
+  assert.match(normalized, /drop constraint if exists customer_seller_channel_account_external_customer_key/);
+  assert.match(normalized, /unique \(seller_account_id, channel, channel_account_id, external_customer_id\)/);
+  assert.match(normalized, /unique \(seller_account_id, channel, channel_account_id, external_conversation_id\)/);
+  assert.match(normalized, /unique \(seller_account_id, channel, channel_account_id, source_batch_key\)/);
+  assert.match(normalized, /idx_outbound_message_seller_channel_account_claimable/);
 });
 
 test("customer profile enrichment migration adds whitelisted OneTalk profile columns", () => {

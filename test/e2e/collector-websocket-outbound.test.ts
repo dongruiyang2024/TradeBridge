@@ -43,7 +43,7 @@ test("collector websocket drives realtime outbound delivery from web to OneTalk"
         if (!client) throw new Error("collector_ws_not_connected");
         client.send(message);
       },
-      sendOutboundMessagesViaOneTalk: async ({ messages }) => {
+      sendOutboundMessages: async ({ messages }) => {
         deliveredMessages.push(...messages);
         return messages.map((message) => ({
           outboundMessageId: message.id,

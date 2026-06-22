@@ -39,6 +39,7 @@ import {
   type InternalUser,
   type InternalUserCredentials,
   type IssueInternalSessionInput,
+  type ListMessagesInput,
   type ListOutboundMessagesInput,
   type ListPendingOutboundMessagesInput,
   type MarkOutboundMessageDeliveredInput,
@@ -140,7 +141,7 @@ export interface SyncStore {
   acceptSyncBatch(batch: SyncBatch): Promise<SyncBatchResult>;
   listCustomers(): Promise<StoredCustomer[]> | StoredCustomer[];
   listConversations(): Promise<StoredConversation[]> | StoredConversation[];
-  listMessages(externalConversationId?: string): Promise<StoredMessage[]> | StoredMessage[];
+  listMessages(input?: string | ListMessagesInput): Promise<StoredMessage[]> | StoredMessage[];
   createCustomerNote(input: CreateCustomerNoteInput): Promise<StoredCustomerNote> | StoredCustomerNote;
   listCustomerNotes(scope: CustomerScope): Promise<StoredCustomerNote[]> | StoredCustomerNote[];
   addCustomerTag(input: AddCustomerTagInput): Promise<StoredCustomerTag> | StoredCustomerTag;
@@ -516,6 +517,8 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       ok: true,
       messages: await store.listPendingOutboundMessages({
         sellerAccountExternalId: collectorSellerAccountExternalId(collectorDevice),
+        channel: queryStringField(request.query, "channel") || undefined,
+        channelAccountExternalId: queryStringField(request.query, "channelAccountExternalId") || undefined,
         limit: queryNumberField(request.query, "limit") || 20
       })
     };
@@ -867,9 +870,12 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     if (!auth) return;
 
     const params = request.params as { externalConversationId?: string };
+    const conversationScope = await resolveConversationScope(store, request.query, request.params);
     return {
       ok: true,
-      messages: await store.listMessages(params.externalConversationId)
+      messages: conversationScope
+        ? await store.listMessages(conversationScope.scope)
+        : await store.listMessages(params.externalConversationId)
     };
   });
 
@@ -886,7 +892,9 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       ok: true,
       outboundMessages: await store.listOutboundMessages({
         sellerAccountExternalId: conversationScope.scope.sellerAccountExternalId,
-        externalConversationId: conversationScope.scope.externalConversationId
+        externalConversationId: conversationScope.scope.externalConversationId,
+        channel: conversationScope.scope.channel,
+        channelAccountExternalId: conversationScope.scope.channelAccountExternalId
       })
     };
   });
@@ -918,11 +926,18 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
         targetId: message.id,
         metadata: {
           sellerAccountExternalId: message.sellerAccountExternalId,
+          channel: message.channel,
+          channelAccountExternalId: message.channelAccountExternalId,
           externalCustomerId: message.externalCustomerId,
           externalConversationId: message.externalConversationId
         }
       });
-      realtimeHub.notifyOutboundAvailable(message.sellerAccountExternalId, 1);
+      realtimeHub.notifyOutboundAvailable({
+        sellerAccountExternalId: message.sellerAccountExternalId,
+        pendingCount: 1,
+        channel: message.channel,
+        channelAccountExternalId: message.channelAccountExternalId
+      });
 
       return { ok: true, message };
     } catch (error) {
@@ -997,7 +1012,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     }
 
     const { scope, conversation, customer } = conversationScope;
-    const messages = await store.listMessages(scope.externalConversationId);
+    const messages = await store.listMessages(scope);
     const job = await aiJobQueue.run("reply-suggestions", { scope }, async () => {
       const generated = await aiProvider.generateReplySuggestion({
         scope,
@@ -1919,15 +1934,24 @@ async function loadCustomerMessageBundle(store: SyncStore, scope: CustomerScope)
     customers.find(
       (item) =>
         item.sellerAccountExternalId === scope.sellerAccountExternalId &&
-        item.externalCustomerId === scope.externalCustomerId
+        item.externalCustomerId === scope.externalCustomerId &&
+        matchesOptionalChannelScope(item, scope)
     ) || null;
   const scopedConversations = conversations.filter(
     (item) =>
       item.sellerAccountExternalId === scope.sellerAccountExternalId &&
-      item.externalCustomerId === scope.externalCustomerId
+      item.externalCustomerId === scope.externalCustomerId &&
+      matchesOptionalChannelScope(item, scope)
   );
   const messageGroups = await Promise.all(
-    scopedConversations.map((conversation) => store.listMessages(conversation.externalConversationId))
+    scopedConversations.map((conversation) =>
+      store.listMessages({
+        sellerAccountExternalId: conversation.sellerAccountExternalId,
+        externalConversationId: conversation.externalConversationId,
+        channel: conversation.channel,
+        channelAccountExternalId: conversation.channelAccountExternalId
+      })
+    )
   );
   return {
     customer,
@@ -1947,6 +1971,8 @@ async function resolveConversationScope(
 } | null> {
   const sellerAccountExternalId = queryStringField(query, "sellerAccountExternalId");
   const externalConversationId = queryStringField(params, "externalConversationId");
+  const channel = queryStringField(query, "channel") || undefined;
+  const channelAccountExternalId = queryStringField(query, "channelAccountExternalId") || undefined;
   if (!sellerAccountExternalId || !externalConversationId) return null;
 
   const conversations = await store.listConversations();
@@ -1954,6 +1980,7 @@ async function resolveConversationScope(
     (item) =>
       item.sellerAccountExternalId === sellerAccountExternalId &&
       item.externalConversationId === externalConversationId &&
+      matchesOptionalChannelScope(item, { channel, channelAccountExternalId }) &&
       item.externalCustomerId
   );
   if (!conversation?.externalCustomerId) return null;
@@ -1963,14 +1990,18 @@ async function resolveConversationScope(
     customers.find(
       (item) =>
         item.sellerAccountExternalId === sellerAccountExternalId &&
-        item.externalCustomerId === conversation.externalCustomerId
+        item.externalCustomerId === conversation.externalCustomerId &&
+        matchesOptionalChannelScope(item, conversation)
     ) || null;
 
   return {
     scope: {
       sellerAccountExternalId,
       externalCustomerId: conversation.externalCustomerId,
-      externalConversationId
+      externalConversationId,
+      channel: conversation.channel,
+      channelAccountExternalId: conversation.channelAccountExternalId,
+      channelSurface: conversation.channelSurface
     },
     conversation,
     customer
@@ -2054,8 +2085,20 @@ function customerScopeFromQueryOrSession(
 
   return {
     sellerAccountExternalId,
-    externalCustomerId
+    externalCustomerId,
+    channel: queryStringField(query, "channel") || undefined,
+    channelAccountExternalId: queryStringField(query, "channelAccountExternalId") || undefined
   };
+}
+
+function matchesOptionalChannelScope(
+  item: { channel?: string; channelAccountExternalId?: string | null },
+  scope: { channel?: string; channelAccountExternalId?: string | null }
+): boolean {
+  return (
+    (!scope.channel || item.channel === scope.channel) &&
+    (!scope.channelAccountExternalId || item.channelAccountExternalId === scope.channelAccountExternalId)
+  );
 }
 
 function queryStringField(source: unknown, field: string): string | null {

@@ -11,7 +11,7 @@
     "128": "icons/icon-128.png"
   },
   "permissions": ["storage", "alarms", "scripting"],
-  "host_permissions": ["https://onetalk.alibaba.com/*"],
+  "host_permissions": ["https://onetalk.alibaba.com/*", "https://web.whatsapp.com/*"],
   "optional_host_permissions": ["https://*/*", "http://*/*"],
   "background": {
     "service_worker": "background/index.js",
@@ -22,12 +22,21 @@
       "matches": ["https://onetalk.alibaba.com/*"],
       "js": ["channels/alibaba-im/onetalk-page-bridge.js"],
       "run_at": "document_start"
+    },
+    {
+      "matches": ["https://web.whatsapp.com/*"],
+      "js": ["channels/whatsapp-web/whatsapp-page-bridge.js"],
+      "run_at": "document_start"
     }
   ],
   "web_accessible_resources": [
     {
       "resources": ["channels/alibaba-im/onetalk-page-script.js"],
       "matches": ["https://onetalk.alibaba.com/*"]
+    },
+    {
+      "resources": ["channels/whatsapp-web/whatsapp-page-script.js"],
+      "matches": ["https://web.whatsapp.com/*"]
     }
   ],
   "action": {
