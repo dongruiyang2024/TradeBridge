@@ -1349,6 +1349,14 @@ export class PostgresSyncStore {
             AND om.id = $1::uuid
             AND s.external_account_id = $2
             AND ($9::text IS NULL OR om.channel = $9)
+            AND (
+              $10::text IS NULL OR EXISTS (
+                SELECT 1
+                FROM channel_account ca_match
+                WHERE ca_match.id = om.channel_account_id
+                  AND ca_match.external_account_id = $10
+              )
+            )
           RETURNING om.*
         )
         SELECT
@@ -1376,7 +1384,6 @@ export class PostgresSyncStore {
         INNER JOIN customer c ON c.id = om.customer_id
         INNER JOIN conversation conv ON conv.id = om.conversation_id
         LEFT JOIN channel_account ca ON ca.id = om.channel_account_id
-        WHERE ($10::text IS NULL OR ca.external_account_id = $10)
         `,
       [
         input.id,

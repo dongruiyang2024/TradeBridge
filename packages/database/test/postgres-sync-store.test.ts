@@ -599,6 +599,34 @@ class FakePostgresClient implements SqlClient {
         rowCount: 1
       };
     }
+    if (/mark_outbound_message_delivered/i.test(sql)) {
+      return {
+        rows: [
+          {
+            id: "outbound-db-id",
+            sellerAccountExternalId: "seller-1",
+            channel: "whatsapp-web",
+            channelAccountExternalId: "wa-account-1",
+            channelSurface: "whatsapp-web",
+            externalCustomerId: "customer-1",
+            externalConversationId: "conv-1",
+            content: "Quote is ready.",
+            status: "sent",
+            createdByUserId: null,
+            deliveredByDeviceId: "device-1",
+            externalMessageId: "wa-msg-1",
+            errorCode: null,
+            errorMessage: null,
+            createdAt: "2026-06-01T00:00:00.000Z",
+            updatedAt: "2026-06-01T00:00:02.000Z",
+            deliveredAt: "2026-06-01T00:00:02.000Z",
+            claimedByDeviceId: "device-1",
+            claimExpiresAt: "2026-06-01T00:02:01.000Z"
+          }
+        ] as T[],
+        rowCount: 1
+      };
+    }
 
     return { rows: [], rowCount: 0 };
   }
@@ -1480,4 +1508,41 @@ test("PostgresSyncStore claims pending outbound messages with a lease", async ()
   assert.equal(claimed.length, 1);
   assert.equal(claimed[0].claimedByDeviceId, "device-1");
   assert.equal(claimed[0].claimExpiresAt, "2026-06-01T00:02:01.000Z");
+});
+
+test("PostgresSyncStore guards outbound delivery updates by channel account before mutating rows", async () => {
+  const client = new FakePostgresClient();
+  const store = new PostgresSyncStore(client);
+
+  await store.markOutboundMessageDelivered({
+    id: "outbound-db-id",
+    sellerAccountExternalId: "seller-1",
+    channel: "whatsapp-web",
+    channelAccountExternalId: "wa-account-1",
+    status: "sent",
+    externalMessageId: "wa-msg-1",
+    deliveredByDeviceId: "device-1",
+    deliveredAt: "2026-06-01T00:00:02.000Z"
+  });
+
+  const deliveryQuery = client.queries.find((query) => /mark_outbound_message_delivered/i.test(query.sql));
+  assert.ok(deliveryQuery);
+  const updatedMessageCte = deliveryQuery.sql.slice(
+    deliveryQuery.sql.indexOf("WITH updated_message AS"),
+    deliveryQuery.sql.indexOf("RETURNING om.*")
+  );
+  assert.match(updatedMessageCte, /\$10::text IS NULL/i);
+  assert.match(updatedMessageCte, /channel_account/i);
+  assert.deepEqual(deliveryQuery.params, [
+    "outbound-db-id",
+    "seller-1",
+    "sent",
+    "wa-msg-1",
+    "device-1",
+    "2026-06-01T00:00:02.000Z",
+    null,
+    null,
+    "whatsapp-web",
+    "wa-account-1"
+  ]);
 });

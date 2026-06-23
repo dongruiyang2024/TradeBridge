@@ -1,6 +1,7 @@
 import {
   buildCollectorWsMessage,
   serializeCollectorWsMessage,
+  type ChannelAccountRef,
   type CollectorWsMessage
 } from "@wangwang/collector-protocol";
 
@@ -17,6 +18,7 @@ export interface CollectorRealtimeSession {
   sellerAccountExternalId: string;
   deviceId: string;
   capabilities?: string[];
+  channelAccounts?: ChannelAccountRef[];
   socket: CollectorRealtimeSocket;
 }
 
@@ -65,6 +67,13 @@ export function createCollectorRealtimeHub(options: CollectorRealtimeHubOptions 
       for (const session of sessions.values()) {
         if (session.sellerAccountExternalId !== input.sellerAccountExternalId) continue;
         if (input.channel && !sessionSupportsChannel(session, input.channel)) continue;
+        if (
+          input.channel &&
+          input.channelAccountExternalId &&
+          !sessionSupportsChannelAccount(session, input.channel, input.channelAccountExternalId)
+        ) {
+          continue;
+        }
         if (send(session.socket, message)) delivered += 1;
       }
       return delivered;
@@ -77,7 +86,19 @@ export function createCollectorRealtimeHub(options: CollectorRealtimeHubOptions 
 }
 
 function sessionSupportsChannel(session: CollectorRealtimeSession, channel: string): boolean {
+  if (session.channelAccounts?.some((account) => account.channel === channel)) return true;
   return !session.capabilities?.length || session.capabilities.includes(`channel:${channel}`);
+}
+
+function sessionSupportsChannelAccount(
+  session: CollectorRealtimeSession,
+  channel: string,
+  channelAccountExternalId: string
+): boolean {
+  if (!session.channelAccounts?.length) return true;
+  return session.channelAccounts.some(
+    (account) => account.channel === channel && account.externalAccountId === channelAccountExternalId
+  );
 }
 
 function send(socket: CollectorRealtimeSocket, message: CollectorWsMessage): boolean {

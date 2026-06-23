@@ -247,6 +247,8 @@ test("markOutboundMessageDelivered posts send result", async () => {
     serverUrl: "http://127.0.0.1:5032",
     collectorToken: "device-token",
     outboundMessageId: "outbound-1",
+    channel: "whatsapp-web",
+    channelAccountExternalId: "wa-account",
     status: "sent",
     externalMessageId: "onetalk-msg-1"
   });
@@ -255,7 +257,15 @@ test("markOutboundMessageDelivered posts send result", async () => {
   assert.equal(result.externalMessageId, "onetalk-msg-1");
   assert.equal(requests[0].url, "http://127.0.0.1:5032/collector/v1/outbound-messages/outbound-1/delivery");
   assert.equal(requests[0].method, "POST");
-  assert.equal(await requests[0].text(), JSON.stringify({ status: "sent", externalMessageId: "onetalk-msg-1" }));
+  assert.deepEqual(
+    await requests[0].json(),
+    {
+      status: "sent",
+      externalMessageId: "onetalk-msg-1",
+      channel: "whatsapp-web",
+      channelAccountExternalId: "wa-account"
+    }
+  );
 });
 
 test("activateCollectorDevice can post only credentials and let the server assign collector scope", async () => {

@@ -25,6 +25,8 @@ export interface MarkOutboundMessageDeliveredOptions {
   serverUrl: string;
   collectorToken: string;
   outboundMessageId: string;
+  channel?: string;
+  channelAccountExternalId?: string;
   status: "sent" | "failed";
   externalMessageId?: string;
   errorCode?: string;
@@ -241,6 +243,8 @@ export async function markOutboundMessageDelivered(
     body: JSON.stringify(
       stripUndefined({
         status: options.status,
+        channel: options.channel,
+        channelAccountExternalId: options.channelAccountExternalId,
         externalMessageId: options.externalMessageId,
         errorCode: options.errorCode,
         errorMessage: options.errorMessage,

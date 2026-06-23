@@ -80,7 +80,10 @@ export class TradeBridgeWsClient {
               },
               {
                 channel: "whatsapp-web",
-                externalAccountId: config.channelAccountExternalId || config.sellerAccountExternalId,
+                externalAccountId:
+                  config.whatsappChannelAccountExternalId ||
+                  config.channelAccountExternalId ||
+                  config.sellerAccountExternalId,
                 surface: "whatsapp-web"
               }
             ]

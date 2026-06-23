@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { runOutboundDelivery, sendOutboundMessagesViaOneTalk } from "../src/background/outbound-orchestrator.js";
+import {
+  runOutboundDelivery,
+  sendOutboundMessagesViaBrowserChannels,
+  sendOutboundMessagesViaOneTalk
+} from "../src/background/outbound-orchestrator.js";
 import { OutboundPacer } from "../src/background/outbound-pacer.js";
 import type { ChromeApi } from "../src/shared/chrome-api.js";
 import type { ExtensionConfig, ExtensionStatus, OutboundMessage } from "../src/shared/sync-types.js";
@@ -108,6 +112,50 @@ test("runOutboundDelivery marks sent when OneTalk page reports success without e
   assert.equal(delivered[0].externalMessageId, undefined);
 });
 
+test("runOutboundDelivery lists browser-channel outbound messages with configured channel accounts", async () => {
+  const store = new MemoryStateStore();
+  store.config = {
+    ...store.config!,
+    channelAccountExternalId: "onetalk-account",
+    whatsappChannelAccountExternalId: "wa-account"
+  };
+  const listCalls: Array<{ channel?: string; channelAccountExternalId?: string }> = [];
+  const sentToTab: unknown[] = [];
+
+  const result = await runOutboundDelivery({
+    stateStore: store,
+    chromeApi: fakeChromeApi(sentToTab, { ok: true, externalMessageId: "sent-id" }),
+    pacer: instantPacer(),
+    listOutboundMessages: async (options) => {
+      listCalls.push({
+        channel: options.channel,
+        channelAccountExternalId: options.channelAccountExternalId
+      });
+      if (options.channel === "alibaba-im") return [{ ...outboundMessage(), channel: "alibaba-im" }];
+      if (options.channel === "whatsapp-web") {
+        return [{ ...outboundMessage(), id: "outbound-wa", channel: "whatsapp-web", channelAccountExternalId: "wa-account" }];
+      }
+      return [];
+    },
+    markOutboundMessageDelivered: async (options) => ({
+      ...outboundMessage(),
+      id: options.outboundMessageId,
+      status: options.status,
+      externalMessageId: options.externalMessageId
+    })
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(listCalls, [
+    { channel: "alibaba-im", channelAccountExternalId: "onetalk-account" },
+    { channel: "whatsapp-web", channelAccountExternalId: "wa-account" }
+  ]);
+  assert.deepEqual(
+    sentToTab.map((item) => (item as { type: string }).type),
+    ["send-onetalk-message", "send-whatsapp-web-message"]
+  );
+});
+
 test("sendOutboundMessagesViaOneTalk sends provided messages and returns delivery reports", async () => {
   const sentToTab: unknown[] = [];
 
@@ -152,6 +200,27 @@ test("sendOutboundMessagesViaOneTalk stops at the pacer rate cap, leaving the re
   // report), so it stays queued and retries next cycle.
   assert.deepEqual(reports.map((report) => report.outboundMessageId), ["outbound-1", "outbound-2"]);
   assert.equal(sentToTab.length, 2);
+});
+
+test("sendOutboundMessagesViaBrowserChannels does not mark WhatsApp sends as sent without confirmation id", async () => {
+  const sentToTab: unknown[] = [];
+
+  const reports = await sendOutboundMessagesViaBrowserChannels({
+    chromeApi: fakeChromeApi(sentToTab, { ok: true }),
+    messages: [{ ...outboundMessage(), channel: "whatsapp-web", channelAccountExternalId: "wa-account" }],
+    pacer: instantPacer()
+  });
+
+  assert.deepEqual(reports, [
+    {
+      outboundMessageId: "outbound-1",
+      status: "failed",
+      channel: "whatsapp-web",
+      channelAccountExternalId: "wa-account",
+      errorCode: "whatsapp_web_send_echo_not_found",
+      errorMessage: "whatsapp_web_send_echo_not_found"
+    }
+  ]);
 });
 
 test("outbound send payload carries no third-party marker", () => {

@@ -26,6 +26,8 @@ test("TradeBridgeWsClient sends hello and handles ready", async () => {
     serverUrl: "http://127.0.0.1:5032",
     collectorToken: "collector-token",
     sellerAccountExternalId: "seller-1",
+    channelAccountExternalId: "onetalk-account",
+    whatsappChannelAccountExternalId: "wa-account",
     deviceId: "device-1",
     deviceName: "Chrome Extension"
   });
@@ -33,6 +35,18 @@ test("TradeBridgeWsClient sends hello and handles ready", async () => {
   const hello = parseCollectorWsMessage(sockets[0].sent[0]);
   assert.equal(hello.type, "collector.hello");
   assert.equal(hello.payload.collectorToken, "collector-token");
+  assert.deepEqual(hello.payload.channelAccounts, [
+    {
+      channel: "alibaba-im",
+      externalAccountId: "onetalk-account",
+      surface: "onetalk-web"
+    },
+    {
+      channel: "whatsapp-web",
+      externalAccountId: "wa-account",
+      surface: "whatsapp-web"
+    }
+  ]);
 
   sockets[0].message(
     JSON.stringify(

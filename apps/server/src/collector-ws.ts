@@ -5,6 +5,7 @@ import {
   isOutboundDeliveryReportMessage,
   parseCollectorWsMessage,
   serializeCollectorWsMessage,
+  type ChannelAccountRef,
   type CollectorWsMessage,
   type CollectorWsMessageInput
 } from "@wangwang/collector-protocol";
@@ -35,6 +36,7 @@ export async function registerCollectorWsRoutes(
     let sellerAccountExternalId: string | null = null;
     let deviceId: string | null = null;
     let capabilities: string[] = [];
+    let channelAccounts: ChannelAccountRef[] = [];
     const heartbeat = globalThis.setInterval(() => {
       send(socket, {
         id: nextId(),
@@ -65,13 +67,14 @@ export async function registerCollectorWsRoutes(
         if (message.type === "heartbeat.pong" || message.type === "collector.status") return;
 
         if (isOutboundClaimMessage(message)) {
+          const scope = claimScope(message.payload, capabilities, channelAccounts);
           const messages = await options.store.claimPendingOutboundMessages({
             sellerAccountExternalId: sellerAccountExternalId || "default-seller",
             deviceId: deviceId || "unknown-device",
             limit: message.payload.limit,
             leaseMs: message.payload.leaseMs || OUTBOUND_LEASE_MS,
-            channel: claimChannel(message.payload.channel, capabilities),
-            channelAccountExternalId: message.payload.channelAccountExternalId
+            channel: scope.channel,
+            channelAccountExternalId: scope.channelAccountExternalId
           });
           send(socket, {
             id: nextId(),
@@ -143,11 +146,13 @@ export async function registerCollectorWsRoutes(
       sellerAccountExternalId = collectorDevice.sellerAccountExternalId || "default-seller";
       deviceId = collectorDevice.externalDeviceId || message.payload.deviceId;
       capabilities = message.payload.capabilities;
+      channelAccounts = message.payload.channelAccounts || [];
       options.hub.addSession({
         sessionId,
         sellerAccountExternalId,
         deviceId,
         capabilities,
+        channelAccounts,
         socket
       });
       send(socket, {
@@ -166,12 +171,54 @@ export async function registerCollectorWsRoutes(
   });
 }
 
-function claimChannel(requestedChannel: string | undefined, capabilities: string[]): string | undefined {
-  if (requestedChannel) return requestedChannel;
-  const supportedChannels = capabilities
+function claimScope(
+  payload: { channel?: string; channelAccountExternalId?: string },
+  capabilities: string[],
+  channelAccounts: ChannelAccountRef[]
+): { channel?: string; channelAccountExternalId?: string } {
+  const channel = payload.channel || singleSupportedChannel(capabilities, channelAccounts);
+  if (channel && !supportsChannel(channel, capabilities, channelAccounts)) {
+    throw new Error("collector_channel_not_supported");
+  }
+  if (payload.channelAccountExternalId) {
+    if (channelAccounts.length && !supportsChannelAccount(channel, payload.channelAccountExternalId, channelAccounts)) {
+      throw new Error("collector_channel_account_not_supported");
+    }
+    return { channel, channelAccountExternalId: payload.channelAccountExternalId };
+  }
+
+  const matchingAccounts = channel
+    ? channelAccounts.filter((account) => account.channel === channel)
+    : channelAccounts;
+  return {
+    channel,
+    channelAccountExternalId: matchingAccounts.length === 1 ? matchingAccounts[0].externalAccountId : undefined
+  };
+}
+
+function singleSupportedChannel(capabilities: string[], channelAccounts: ChannelAccountRef[]): string | undefined {
+  const declaredChannels = Array.from(new Set(channelAccounts.map((account) => account.channel)));
+  if (declaredChannels.length === 1) return declaredChannels[0];
+  const capabilityChannels = capabilities
     .filter((capability) => capability.startsWith("channel:"))
     .map((capability) => capability.slice("channel:".length));
-  return supportedChannels.length === 1 ? supportedChannels[0] : undefined;
+  return capabilityChannels.length === 1 ? capabilityChannels[0] : undefined;
+}
+
+function supportsChannel(channel: string, capabilities: string[], channelAccounts: ChannelAccountRef[]): boolean {
+  return channelAccounts.some((account) => account.channel === channel) || capabilities.includes(`channel:${channel}`);
+}
+
+function supportsChannelAccount(
+  channel: string | undefined,
+  channelAccountExternalId: string,
+  channelAccounts: ChannelAccountRef[]
+): boolean {
+  return channelAccounts.some(
+    (account) =>
+      (!channel || account.channel === channel) &&
+      account.externalAccountId === channelAccountExternalId
+  );
 }
 
 function send(socket: WebSocket, message: CollectorWsMessageInput): void {

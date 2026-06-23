@@ -540,6 +540,8 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       const message = await store.markOutboundMessageDelivered({
         id: messageId,
         sellerAccountExternalId: collectorSellerAccountExternalId(collectorDevice),
+        channel: bodyStringField(request.body, "channel") || undefined,
+        channelAccountExternalId: bodyStringField(request.body, "channelAccountExternalId") || undefined,
         status,
         externalMessageId: bodyStringField(request.body, "externalMessageId") || undefined,
         deliveredByDeviceId: collectorDevice.externalDeviceId || collectorDevice.id,

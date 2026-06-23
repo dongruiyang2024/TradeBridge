@@ -77,6 +77,39 @@ test("collector realtime hub filters channel availability by session capabilitie
   assert.equal(onetalkSocket.sent.length, 0);
 });
 
+test("collector realtime hub filters channel availability by declared channel account", () => {
+  const hub = createCollectorRealtimeHub();
+  const matchingSocket = fakeSocket();
+  const otherAccountSocket = fakeSocket();
+  hub.addSession({
+    sessionId: "session-whatsapp-1",
+    sellerAccountExternalId: "seller-1",
+    deviceId: "device-1",
+    capabilities: ["channel:whatsapp-web"],
+    channelAccounts: [{ channel: "whatsapp-web", externalAccountId: "wa-account-1" }],
+    socket: matchingSocket
+  });
+  hub.addSession({
+    sessionId: "session-whatsapp-2",
+    sellerAccountExternalId: "seller-1",
+    deviceId: "device-2",
+    capabilities: ["channel:whatsapp-web"],
+    channelAccounts: [{ channel: "whatsapp-web", externalAccountId: "wa-account-2" }],
+    socket: otherAccountSocket
+  });
+
+  const delivered = hub.notifyOutboundAvailable({
+    sellerAccountExternalId: "seller-1",
+    pendingCount: 1,
+    channel: "whatsapp-web",
+    channelAccountExternalId: "wa-account-1"
+  });
+
+  assert.equal(delivered, 1);
+  assert.equal(matchingSocket.sent.length, 1);
+  assert.equal(otherAccountSocket.sent.length, 0);
+});
+
 function fakeSocket() {
   return {
     readyState: 1,
