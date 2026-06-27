@@ -247,8 +247,8 @@ test("markOutboundMessageDelivered posts send result", async () => {
     serverUrl: "http://127.0.0.1:5032",
     collectorToken: "device-token",
     outboundMessageId: "outbound-1",
-    channel: "whatsapp-web",
-    channelAccountExternalId: "wa-account",
+    channel: "marketplace-chat",
+    channelAccountExternalId: "marketplace-account",
     status: "sent",
     externalMessageId: "onetalk-msg-1"
   });
@@ -262,8 +262,8 @@ test("markOutboundMessageDelivered posts send result", async () => {
     {
       status: "sent",
       externalMessageId: "onetalk-msg-1",
-      channel: "whatsapp-web",
-      channelAccountExternalId: "wa-account"
+      channel: "marketplace-chat",
+      channelAccountExternalId: "marketplace-account"
     }
   );
 });

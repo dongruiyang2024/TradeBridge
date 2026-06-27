@@ -157,7 +157,7 @@ export async function sendOutboundMessagesViaBrowserChannels(options: {
         outboundMessageId: message.id,
         status: "failed",
         channel: message.channel,
-        channelAccountExternalId: message.channelAccountExternalId,
+        ...(message.channelAccountExternalId ? { channelAccountExternalId: message.channelAccountExternalId } : {}),
         errorCode: "channel_not_supported_by_collector",
         errorMessage: "Channel not supported by collector"
       });

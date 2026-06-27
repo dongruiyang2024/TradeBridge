@@ -190,7 +190,14 @@ function claimScope(
   ) {
     throw new Error("collector_channel_account_not_supported");
   }
-  return { channel, channelAccountExternalId: payload.channelAccountExternalId };
+  if (payload.channelAccountExternalId) return { channel, channelAccountExternalId: payload.channelAccountExternalId };
+  const matchingAccounts = payload.channel
+    ? channelAccounts.filter((account) => account.channel === payload.channel)
+    : [];
+  return {
+    channel,
+    channelAccountExternalId: matchingAccounts.length === 1 ? matchingAccounts[0].externalAccountId : undefined
+  };
 }
 
 function singleSupportedChannel(capabilities: string[], channelAccounts: ChannelAccountRef[]): string | undefined {
