@@ -2,10 +2,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type PluginOption } from "vite";
 
-const CLASSIC_PAGE_SCRIPT_OUTPUTS = [
-  "channels/alibaba-im/onetalk-page-script.js",
-  "channels/whatsapp-web/whatsapp-page-script.js"
-];
+const CLASSIC_PAGE_SCRIPT_OUTPUTS = ["channels/alibaba-im/onetalk-page-script.js"];
 const configDir = fileURLToPath(new URL(".", import.meta.url));
 
 export function wrapClassicScriptInIife(code: string): string {
@@ -42,8 +39,6 @@ export default defineConfig({
         "background/index": resolve(configDir, "src/background/index.ts"),
         "channels/alibaba-im/onetalk-page-bridge": resolve(configDir, "src/channels/alibaba-im/onetalk-page-bridge.ts"),
         "channels/alibaba-im/onetalk-page-script": resolve(configDir, "src/channels/alibaba-im/onetalk-page-script.ts"),
-        "channels/whatsapp-web/whatsapp-page-bridge": resolve(configDir, "src/channels/whatsapp-web/whatsapp-page-bridge.ts"),
-        "channels/whatsapp-web/whatsapp-page-script": resolve(configDir, "src/channels/whatsapp-web/whatsapp-page-script.ts"),
         "popup/popup": resolve(configDir, "src/popup/popup.html"),
         "options/options": resolve(configDir, "src/options/options.html")
       },

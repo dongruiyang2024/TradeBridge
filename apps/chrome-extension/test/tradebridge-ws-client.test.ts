@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildCollectorWsMessage, parseCollectorWsMessage } from "@wangwang/collector-protocol";
+import type { BrowserChannelAdapter } from "../src/background/browser-channel-adapters.js";
 import { TradeBridgeWsClient, tradebridgeWsUrl } from "../src/background/tradebridge-ws-client.js";
 
 test("tradebridgeWsUrl maps http and https server urls to ws urls", () => {
@@ -26,8 +27,6 @@ test("TradeBridgeWsClient sends hello and handles ready", async () => {
     serverUrl: "http://127.0.0.1:5032",
     collectorToken: "collector-token",
     sellerAccountExternalId: "seller-1",
-    channelAccountExternalId: "onetalk-account",
-    whatsappChannelAccountExternalId: "wa-account",
     deviceId: "device-1",
     deviceName: "Chrome Extension"
   });
@@ -35,16 +34,17 @@ test("TradeBridgeWsClient sends hello and handles ready", async () => {
   const hello = parseCollectorWsMessage(sockets[0].sent[0]);
   assert.equal(hello.type, "collector.hello");
   assert.equal(hello.payload.collectorToken, "collector-token");
+  assert.deepEqual(hello.payload.capabilities, [
+    "outbound.claim",
+    "delivery.report",
+    "collector.status",
+    "channel:alibaba-im"
+  ]);
   assert.deepEqual(hello.payload.channelAccounts, [
     {
       channel: "alibaba-im",
-      externalAccountId: "onetalk-account",
+      externalAccountId: "seller-1",
       surface: "onetalk-web"
-    },
-    {
-      channel: "whatsapp-web",
-      externalAccountId: "wa-account",
-      surface: "whatsapp-web"
     }
   ]);
 
@@ -67,6 +67,74 @@ test("TradeBridgeWsClient sends hello and handles ready", async () => {
 
   assert.equal((await ready).sessionId, "session-1");
   assert.equal(client.state.kind, "connected");
+});
+
+test("TradeBridgeWsClient derives hello channels from registered browser channel adapters", async () => {
+  const sockets: FakeWebSocket[] = [];
+  const marketplaceAdapter: BrowserChannelAdapter = {
+    channel: "marketplace-chat",
+    surface: "marketplace-web",
+    channelAccount: () => ({
+      channel: "marketplace-chat",
+      externalAccountId: "marketplace-account-1",
+      surface: "marketplace-web"
+    }),
+    async send() {
+      return { ok: true };
+    }
+  };
+  const client = new TradeBridgeWsClient({
+    socketFactory: (url) => {
+      const socket = new FakeWebSocket(url);
+      sockets.push(socket);
+      return socket;
+    },
+    channelAdapters: [marketplaceAdapter],
+    setInterval: () => 1,
+    clearInterval: () => undefined
+  });
+
+  const ready = client.connect({
+    serverUrl: "http://127.0.0.1:5032",
+    collectorToken: "collector-token",
+    sellerAccountExternalId: "seller-1",
+    deviceId: "device-1"
+  });
+  sockets[0].open();
+  const hello = parseCollectorWsMessage(sockets[0].sent[0]);
+  assert.equal(hello.type, "collector.hello");
+  assert.deepEqual(hello.payload.capabilities, [
+    "outbound.claim",
+    "delivery.report",
+    "collector.status",
+    "channel:marketplace-chat"
+  ]);
+  assert.deepEqual(hello.payload.channelAccounts, [
+    {
+      channel: "marketplace-chat",
+      externalAccountId: "marketplace-account-1",
+      surface: "marketplace-web"
+    }
+  ]);
+
+  sockets[0].message(
+    JSON.stringify(
+      buildCollectorWsMessage({
+        id: "server-1",
+        type: "collector.ready",
+        sentAt: "2026-06-01T00:00:00.000Z",
+        payload: {
+          sessionId: "session-1",
+          sellerAccountExternalId: "seller-1",
+          deviceId: "device-1",
+          heartbeatIntervalMs: 20000,
+          serverTime: "2026-06-01T00:00:00.000Z"
+        }
+      })
+    )
+  );
+
+  assert.equal((await ready).sessionId, "session-1");
 });
 
 test("TradeBridgeWsClient rejects connect when socket closes before ready", async () => {

@@ -1,9 +1,15 @@
-import { sendMessageToOneTalkTab } from "./onetalk-tab-messaging.js";
+import {
+  defaultBrowserChannelAdapters,
+  findBrowserChannelAdapter,
+  oneTalkBrowserChannelAdapter,
+  type BrowserChannelAdapter
+} from "./browser-channel-adapters.js";
 import { OutboundPacer } from "./outbound-pacer.js";
 import { validateConfig } from "./storage.js";
-import { sendMessageToWhatsAppTab } from "./whatsapp-tab-messaging.js";
 import type { ChromeApi } from "../shared/chrome-api.js";
 import type { ExtensionConfig, ExtensionStatus, OutboundMessage } from "../shared/sync-types.js";
+
+const LEGACY_DEFAULT_CHANNEL = "alibaba-im";
 
 export interface OutboundStateStore {
   getConfig(): Promise<ExtensionConfig | null>;
@@ -15,6 +21,7 @@ export interface RunOutboundDeliveryOptions {
   stateStore: OutboundStateStore;
   chromeApi: ChromeApi;
   pacer?: OutboundPacer;
+  adapters?: readonly BrowserChannelAdapter[];
   listOutboundMessages(options: {
     serverUrl: string;
     collectorToken: string;
@@ -52,12 +59,6 @@ export interface OutboundDeliveryReport {
   errorMessage?: string;
 }
 
-interface PageSendResponse {
-  ok: boolean;
-  externalMessageId?: string;
-  error?: string;
-}
-
 export async function runOutboundDelivery(options: RunOutboundDeliveryOptions): Promise<RunOutboundDeliveryResult> {
   const previousStatus = await options.stateStore.getStatus();
 
@@ -65,30 +66,41 @@ export async function runOutboundDelivery(options: RunOutboundDeliveryOptions): 
     const config = await options.stateStore.getConfig();
     validateConfig(config);
 
-    const messages = await listBrowserChannelOutboundMessages(config, options.listOutboundMessages);
+    const adapters = options.adapters ?? defaultBrowserChannelAdapters;
     let sentCount = 0;
     let failedCount = 0;
 
-    const reports = await sendOutboundMessagesViaBrowserChannels({
-      chromeApi: options.chromeApi,
-      messages,
-      pacer: options.pacer
-    });
-    for (const report of reports) {
-      await options.markOutboundMessageDelivered({
+    for (const adapter of adapters) {
+      const account = adapter.channelAccount(config);
+      const messages = await options.listOutboundMessages({
         serverUrl: config.serverUrl,
         collectorToken: config.collectorToken,
-        outboundMessageId: report.outboundMessageId,
-        channel: report.channel,
-        channelAccountExternalId: report.channelAccountExternalId,
-        status: report.status,
-        externalMessageId: report.externalMessageId,
-        errorCode: report.errorCode,
-        errorMessage: report.errorMessage,
-        deliveredAt: new Date().toISOString()
+        channel: account.channel,
+        channelAccountExternalId: account.externalAccountId
       });
-      if (report.status === "sent") sentCount += 1;
-      else failedCount += 1;
+
+      const reports = await sendOutboundMessagesViaBrowserChannels({
+        chromeApi: options.chromeApi,
+        messages,
+        pacer: options.pacer,
+        adapters: [adapter]
+      });
+      for (const report of reports) {
+        await options.markOutboundMessageDelivered({
+          serverUrl: config.serverUrl,
+          collectorToken: config.collectorToken,
+          outboundMessageId: report.outboundMessageId,
+          channel: report.channel,
+          channelAccountExternalId: report.channelAccountExternalId,
+          status: report.status,
+          externalMessageId: report.externalMessageId,
+          errorCode: report.errorCode,
+          errorMessage: report.errorMessage,
+          deliveredAt: new Date().toISOString()
+        });
+        if (report.status === "sent") sentCount += 1;
+        else failedCount += 1;
+      }
     }
 
     await options.stateStore.saveStatus({
@@ -114,15 +126,20 @@ export async function sendOutboundMessagesViaOneTalk(options: {
   messages: OutboundMessage[];
   pacer?: OutboundPacer;
 }): Promise<OutboundDeliveryReport[]> {
-  return sendOutboundMessagesViaBrowserChannels(options);
+  return sendOutboundMessagesViaBrowserChannels({
+    ...options,
+    adapters: [oneTalkBrowserChannelAdapter]
+  });
 }
 
 export async function sendOutboundMessagesViaBrowserChannels(options: {
   chromeApi: ChromeApi;
   messages: OutboundMessage[];
   pacer?: OutboundPacer;
+  adapters?: readonly BrowserChannelAdapter[];
 }): Promise<OutboundDeliveryReport[]> {
   const pacer = options.pacer ?? new OutboundPacer();
+  const adapters = options.adapters ?? defaultBrowserChannelAdapters;
   pacer.beginBatch();
   const reports: OutboundDeliveryReport[] = [];
   for (const message of options.messages) {
@@ -133,13 +150,30 @@ export async function sendOutboundMessagesViaBrowserChannels(options: {
     if (decision.kind === "defer") break;
     await pacer.waitAndRecord(decision.waitMs);
 
-    const result = await sendViaChannelTab(options.chromeApi, message);
+    const channel = message.channel || LEGACY_DEFAULT_CHANNEL;
+    const adapter = findBrowserChannelAdapter(channel, adapters);
+    if (!adapter) {
+      reports.push({
+        outboundMessageId: message.id,
+        status: "failed",
+        channel: message.channel,
+        channelAccountExternalId: message.channelAccountExternalId,
+        errorCode: "channel_not_supported_by_collector",
+        errorMessage: "Channel not supported by collector"
+      });
+      continue;
+    }
+
+    const result = await adapter.send(options.chromeApi, message);
+    const scope = {
+      channel,
+      ...(message.channelAccountExternalId ? { channelAccountExternalId: message.channelAccountExternalId } : {})
+    };
     if (result.ok) {
       const report: OutboundDeliveryReport = {
         outboundMessageId: message.id,
         status: "sent",
-        ...(message.channel ? { channel: message.channel } : {}),
-        ...(message.channelAccountExternalId ? { channelAccountExternalId: message.channelAccountExternalId } : {})
+        ...scope
       };
       if (result.externalMessageId) report.externalMessageId = result.externalMessageId;
       reports.push(report);
@@ -147,97 +181,11 @@ export async function sendOutboundMessagesViaBrowserChannels(options: {
       reports.push({
         outboundMessageId: message.id,
         status: "failed",
-        ...(message.channel ? { channel: message.channel } : {}),
-        ...(message.channelAccountExternalId ? { channelAccountExternalId: message.channelAccountExternalId } : {}),
+        ...scope,
         errorCode: result.error || "channel_send_failed",
         errorMessage: result.error || "Channel send failed"
       });
     }
   }
   return reports;
-}
-
-async function listBrowserChannelOutboundMessages(
-  config: ExtensionConfig,
-  listOutboundMessages: RunOutboundDeliveryOptions["listOutboundMessages"]
-): Promise<OutboundMessage[]> {
-  const scopes = outboundListScopes(config);
-  if (!scopes.length) {
-    return listOutboundMessages({
-      serverUrl: config.serverUrl,
-      collectorToken: config.collectorToken
-    });
-  }
-
-  const messages: OutboundMessage[] = [];
-  for (const scope of scopes) {
-    messages.push(
-      ...(await listOutboundMessages({
-        serverUrl: config.serverUrl,
-        collectorToken: config.collectorToken,
-        channel: scope.channel,
-        channelAccountExternalId: scope.channelAccountExternalId
-      }))
-    );
-  }
-  return messages;
-}
-
-function outboundListScopes(config: ExtensionConfig): Array<{ channel: string; channelAccountExternalId: string }> {
-  const onetalkAccount = config.channelAccountExternalId || config.sellerAccountExternalId;
-  const whatsappAccount =
-    config.whatsappChannelAccountExternalId || config.channelAccountExternalId || config.sellerAccountExternalId;
-  if (!config.channelAccountExternalId && !config.whatsappChannelAccountExternalId) return [];
-  return [
-    { channel: "alibaba-im", channelAccountExternalId: onetalkAccount },
-    { channel: "whatsapp-web", channelAccountExternalId: whatsappAccount }
-  ];
-}
-
-async function sendViaChannelTab(chromeApi: ChromeApi, message: OutboundMessage): Promise<PageSendResponse> {
-  const channel = message.channel || "alibaba-im";
-  if (channel === "alibaba-im") return sendViaOneTalkTab(chromeApi, message);
-  if (channel === "whatsapp-web") return sendViaWhatsAppTab(chromeApi, message);
-  return { ok: false, error: "channel_not_supported_by_collector" };
-}
-
-async function sendViaOneTalkTab(chromeApi: ChromeApi, message: OutboundMessage): Promise<PageSendResponse> {
-  try {
-    const response = await sendMessageToOneTalkTab(chromeApi, {
-      type: "send-onetalk-message",
-      message
-    });
-    return isPageSendResponse(response) ? response : { ok: false, error: "onetalk_send_response_invalid" };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "onetalk_send_failed" };
-  }
-}
-
-async function sendViaWhatsAppTab(chromeApi: ChromeApi, message: OutboundMessage): Promise<PageSendResponse> {
-  try {
-    const response = await sendMessageToWhatsAppTab(chromeApi, {
-      type: "send-whatsapp-web-message",
-      message
-    });
-    if (!isPageSendResponse(response)) return { ok: false, error: "whatsapp_web_send_response_invalid" };
-    if (response.ok && !response.externalMessageId) {
-      return { ok: false, error: "whatsapp_web_send_echo_not_found" };
-    }
-    return response;
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "whatsapp_web_send_failed" };
-  }
-}
-
-function isPageSendResponse(value: unknown): value is PageSendResponse {
-  return (
-    isRecord(value) &&
-    typeof value.ok === "boolean" &&
-    (value.externalMessageId === undefined || typeof value.externalMessageId === "string") &&
-    (value.error === undefined || typeof value.error === "string")
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
 }

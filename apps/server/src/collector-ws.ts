@@ -176,24 +176,21 @@ function claimScope(
   capabilities: string[],
   channelAccounts: ChannelAccountRef[]
 ): { channel?: string; channelAccountExternalId?: string } {
-  const channel = payload.channel || singleSupportedChannel(capabilities, channelAccounts);
+  const channel =
+    payload.channel ||
+    channelForAccount(payload.channelAccountExternalId, channelAccounts) ||
+    singleSupportedChannel(capabilities, channelAccounts);
   if (channel && !supportsChannel(channel, capabilities, channelAccounts)) {
     throw new Error("collector_channel_not_supported");
   }
-  if (payload.channelAccountExternalId) {
-    if (channelAccounts.length && !supportsChannelAccount(channel, payload.channelAccountExternalId, channelAccounts)) {
-      throw new Error("collector_channel_account_not_supported");
-    }
-    return { channel, channelAccountExternalId: payload.channelAccountExternalId };
+  if (
+    payload.channelAccountExternalId &&
+    channelAccounts.length &&
+    !supportsChannelAccount(channel, payload.channelAccountExternalId, channelAccounts)
+  ) {
+    throw new Error("collector_channel_account_not_supported");
   }
-
-  const matchingAccounts = channel
-    ? channelAccounts.filter((account) => account.channel === channel)
-    : channelAccounts;
-  return {
-    channel,
-    channelAccountExternalId: matchingAccounts.length === 1 ? matchingAccounts[0].externalAccountId : undefined
-  };
+  return { channel, channelAccountExternalId: payload.channelAccountExternalId };
 }
 
 function singleSupportedChannel(capabilities: string[], channelAccounts: ChannelAccountRef[]): string | undefined {
@@ -203,6 +200,15 @@ function singleSupportedChannel(capabilities: string[], channelAccounts: Channel
     .filter((capability) => capability.startsWith("channel:"))
     .map((capability) => capability.slice("channel:".length));
   return capabilityChannels.length === 1 ? capabilityChannels[0] : undefined;
+}
+
+function channelForAccount(
+  channelAccountExternalId: string | undefined,
+  channelAccounts: ChannelAccountRef[]
+): string | undefined {
+  if (!channelAccountExternalId) return undefined;
+  const matchingAccounts = channelAccounts.filter((account) => account.externalAccountId === channelAccountExternalId);
+  return matchingAccounts.length === 1 ? matchingAccounts[0].channel : undefined;
 }
 
 function supportsChannel(channel: string, capabilities: string[], channelAccounts: ChannelAccountRef[]): boolean {

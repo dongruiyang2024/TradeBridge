@@ -80,7 +80,11 @@ test("collector websocket receives outbound availability and reports delivery", 
         id: "hello-1",
         type: "collector.hello",
         sentAt: "2026-06-01T00:00:00.000Z",
-        payload: { collectorToken: "device-token", deviceId: "device-1", capabilities: ["outbound.claim"] }
+        payload: {
+          collectorToken: "device-token",
+          deviceId: "device-1",
+          capabilities: ["outbound.claim", "channel:alibaba-im"]
+        }
       })
     )
   );

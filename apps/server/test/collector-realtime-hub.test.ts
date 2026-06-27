@@ -49,32 +49,32 @@ test("collector realtime hub removes closed sessions", () => {
 
 test("collector realtime hub filters channel availability by session capabilities", () => {
   const hub = createCollectorRealtimeHub();
-  const whatsappSocket = fakeSocket();
-  const onetalkSocket = fakeSocket();
+  const alibabaSocket = fakeSocket();
+  const otherChannelSocket = fakeSocket();
   hub.addSession({
-    sessionId: "session-whatsapp",
+    sessionId: "session-alibaba",
     sellerAccountExternalId: "seller-1",
     deviceId: "device-1",
-    capabilities: ["channel:whatsapp-web"],
-    socket: whatsappSocket
+    capabilities: ["channel:alibaba-im"],
+    socket: alibabaSocket
   });
   hub.addSession({
-    sessionId: "session-onetalk",
+    sessionId: "session-other-channel",
     sellerAccountExternalId: "seller-1",
     deviceId: "device-2",
-    capabilities: ["channel:alibaba-im"],
-    socket: onetalkSocket
+    capabilities: ["channel:facebook-messenger"],
+    socket: otherChannelSocket
   });
 
   const delivered = hub.notifyOutboundAvailable({
     sellerAccountExternalId: "seller-1",
     pendingCount: 1,
-    channel: "whatsapp-web"
+    channel: "alibaba-im"
   });
 
   assert.equal(delivered, 1);
-  assert.equal(whatsappSocket.sent.length, 1);
-  assert.equal(onetalkSocket.sent.length, 0);
+  assert.equal(alibabaSocket.sent.length, 1);
+  assert.equal(otherChannelSocket.sent.length, 0);
 });
 
 test("collector realtime hub filters channel availability by declared channel account", () => {

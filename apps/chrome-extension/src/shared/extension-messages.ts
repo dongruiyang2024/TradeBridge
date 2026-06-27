@@ -12,11 +12,6 @@ export type ExtensionMessage =
   | { type: "onetalk-messages-observed"; externalConversationId: string; messages: Record<string, unknown>[] }
   | { type: "onetalk-capture-diagnostics"; seenEventNames: string[] }
   | { type: "send-onetalk-message"; message: OutboundMessage }
-  | { type: "whatsapp-web-page-ready"; url: string }
-  | { type: "whatsapp-web-login-required"; url: string }
-  | { type: "whatsapp-web-messages-observed"; externalConversationId: string; messages: Record<string, unknown>[] }
-  | { type: "whatsapp-web-capture-diagnostics"; seenEventNames: string[] }
-  | { type: "send-whatsapp-web-message"; message: OutboundMessage }
   | { type: "get-onetalk-customer-profiles"; contacts: OneTalkCustomerProfileContact[] }
   | { type: "get-onetalk-conversations"; cursor: number; count: number }
   | { type: "get-onetalk-history-messages"; conversations: Record<string, unknown>[]; count: number }

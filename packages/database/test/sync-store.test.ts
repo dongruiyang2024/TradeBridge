@@ -145,8 +145,8 @@ test("acceptSyncBatch keeps identical external ids isolated by channel", async (
 test("acceptSyncBatch keeps identical external ids isolated by channel account", async () => {
   const store = new InMemorySyncStore();
 
-  await store.acceptSyncBatch(channelBatch("whatsapp-web", "wa-account-1", "hello from account 1"));
-  await store.acceptSyncBatch(channelBatch("whatsapp-web", "wa-account-2", "hello from account 2"));
+  await store.acceptSyncBatch(channelBatch("marketplace-chat", "marketplace-account-1", "hello from account 1"));
+  await store.acceptSyncBatch(channelBatch("marketplace-chat", "marketplace-account-2", "hello from account 2"));
 
   assert.deepEqual(
     store.listMessages().map((message) => [
@@ -157,8 +157,8 @@ test("acceptSyncBatch keeps identical external ids isolated by channel account",
       message.content
     ]),
     [
-      ["whatsapp-web", "wa-account-1", "conv-same", "msg-same", "hello from account 1"],
-      ["whatsapp-web", "wa-account-2", "conv-same", "msg-same", "hello from account 2"]
+      ["marketplace-chat", "marketplace-account-1", "conv-same", "msg-same", "hello from account 1"],
+      ["marketplace-chat", "marketplace-account-2", "conv-same", "msg-same", "hello from account 2"]
     ]
   );
 });
@@ -403,6 +403,58 @@ test("outbound messages are queued and marked delivered by collector devices", a
   assert.equal(sent.externalMessageId, "onetalk-msg-1");
   assert.equal(sent.deliveredByDeviceId, "device-1");
   assert.equal((await store.listPendingOutboundMessages({ sellerAccountExternalId: "seller-1", limit: 10 })).length, 0);
+});
+
+test("legacy unscoped outbound messages are visible to the default Alibaba IM collector", async () => {
+  const store = new InMemorySyncStore();
+  await store.acceptSyncBatch({
+    sellerAccount: { externalAccountId: "seller-1" },
+    device: { deviceId: "device-1" },
+    customers: [{ externalCustomerId: "customer-1" }],
+    conversations: [{ externalConversationId: "conv-1", externalCustomerId: "customer-1" }]
+  });
+
+  const queued = await store.createOutboundMessage({
+    sellerAccountExternalId: "seller-1",
+    externalCustomerId: "customer-1",
+    externalConversationId: "conv-1",
+    content: "Legacy conversation reply"
+  });
+
+  assert.equal(queued.channel, undefined);
+  assert.equal(queued.channelAccountExternalId, undefined);
+  assert.deepEqual(
+    (
+      await store.listPendingOutboundMessages({
+        sellerAccountExternalId: "seller-1",
+        channel: "alibaba-im",
+        channelAccountExternalId: "seller-1",
+        limit: 10
+      })
+    ).map((message) => message.id),
+    [queued.id]
+  );
+
+  const claimed = await store.claimPendingOutboundMessages({
+    sellerAccountExternalId: "seller-1",
+    channel: "alibaba-im",
+    channelAccountExternalId: "seller-1",
+    deviceId: "device-1",
+    limit: 10,
+    leaseMs: 120000
+  });
+  assert.deepEqual(claimed.map((message) => message.id), [queued.id]);
+
+  const sent = await store.markOutboundMessageDelivered({
+    id: queued.id,
+    sellerAccountExternalId: "seller-1",
+    channel: "alibaba-im",
+    channelAccountExternalId: "seller-1",
+    status: "sent",
+    externalMessageId: "onetalk-msg-legacy"
+  });
+  assert.equal(sent.status, "sent");
+  assert.equal(sent.externalMessageId, "onetalk-msg-legacy");
 });
 
 test("outbound messages are claimed once until lease expires", async () => {

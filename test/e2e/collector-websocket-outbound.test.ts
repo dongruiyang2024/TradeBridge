@@ -66,6 +66,7 @@ test("collector websocket drives realtime outbound delivery from web to OneTalk"
         serverUrl: "http://tradebridge.internal",
         collectorToken: activation.token,
         sellerAccountExternalId: SELLER_ACCOUNT_ID,
+        channelAccountExternalId: SELLER_ACCOUNT_ID,
         deviceId: DEVICE_ID,
         deviceName: "Chrome Extension E2E"
       })
@@ -75,7 +76,7 @@ test("collector websocket drives realtime outbound delivery from web to OneTalk"
     const internalHeaders = await createInternalAuthHeaders(app);
     const outboundResponse = await app.inject({
       method: "POST",
-      url: `/internal/v1/conversations/${CONVERSATION_ID}/outbound-messages?sellerAccountExternalId=${SELLER_ACCOUNT_ID}`,
+      url: `/internal/v1/conversations/${CONVERSATION_ID}/outbound-messages?sellerAccountExternalId=${SELLER_ACCOUNT_ID}&channel=alibaba-im&channelAccountExternalId=${SELLER_ACCOUNT_ID}`,
       headers: internalHeaders,
       payload: { content: "Hello from web over WS" }
     });
@@ -85,7 +86,9 @@ test("collector websocket drives realtime outbound delivery from web to OneTalk"
     await waitFor(async () => {
       const messages = await store.listOutboundMessages({
         sellerAccountExternalId: SELLER_ACCOUNT_ID,
-        externalConversationId: CONVERSATION_ID
+        externalConversationId: CONVERSATION_ID,
+        channel: "alibaba-im",
+        channelAccountExternalId: SELLER_ACCOUNT_ID
       });
       return messages.some(
         (message) =>
@@ -125,6 +128,12 @@ async function uploadConversationFixture(app: Awaited<ReturnType<typeof createSe
     url: "/collector/v1/sync-batches",
     headers: { authorization: `Bearer ${collectorToken}` },
     payload: {
+      channel: "alibaba-im",
+      channelAccount: {
+        channel: "alibaba-im",
+        externalAccountId: SELLER_ACCOUNT_ID,
+        surface: "onetalk-web"
+      },
       sellerAccount: { externalAccountId: SELLER_ACCOUNT_ID },
       device: { deviceId: DEVICE_ID },
       customers: [{ externalCustomerId: CUSTOMER_ID }],

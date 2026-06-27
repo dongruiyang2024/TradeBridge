@@ -88,7 +88,6 @@ export interface ExtensionConfig {
   sellerAccountExternalId: string;
   sellerAccountDisplayName?: string;
   channelAccountExternalId?: string;
-  whatsappChannelAccountExternalId?: string;
   tradeMindBindingToken?: string;
   deviceId: string;
   deviceName?: string;

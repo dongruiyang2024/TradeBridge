@@ -6,6 +6,12 @@ import {
   type CollectorWsMessage,
   type CollectorWsMessageInput
 } from "@wangwang/collector-protocol";
+import {
+  browserChannelAccounts,
+  browserChannelCapabilities,
+  defaultBrowserChannelAdapters,
+  type BrowserChannelAdapter
+} from "./browser-channel-adapters.js";
 import type { ExtensionConfig } from "../shared/sync-types.js";
 
 const SOCKET_OPEN = 1;
@@ -29,6 +35,7 @@ export interface TradeBridgeWsClientOptions {
   clearInterval?: (timerId: unknown) => void;
   onMessage?: (message: CollectorWsMessage) => void | Promise<void>;
   onStateChange?: (state: TradeBridgeWsState) => void | Promise<void>;
+  channelAdapters?: readonly BrowserChannelAdapter[];
 }
 
 export type TradeBridgeWsState =
@@ -57,6 +64,7 @@ export class TradeBridgeWsClient {
       let resolved = false;
 
       socket.onopen = () => {
+        const channelAdapters = this.options.channelAdapters ?? defaultBrowserChannelAdapters;
         this.send({
           id: this.nextId(),
           type: "collector.hello",
@@ -69,24 +77,9 @@ export class TradeBridgeWsClient {
               "outbound.claim",
               "delivery.report",
               "collector.status",
-              "channel:alibaba-im",
-              "channel:whatsapp-web"
+              ...browserChannelCapabilities(channelAdapters)
             ],
-            channelAccounts: [
-              {
-                channel: "alibaba-im",
-                externalAccountId: config.channelAccountExternalId || config.sellerAccountExternalId,
-                surface: "onetalk-web"
-              },
-              {
-                channel: "whatsapp-web",
-                externalAccountId:
-                  config.whatsappChannelAccountExternalId ||
-                  config.channelAccountExternalId ||
-                  config.sellerAccountExternalId,
-                surface: "whatsapp-web"
-              }
-            ]
+            channelAccounts: browserChannelAccounts(config, channelAdapters)
           }
         });
         this.startKeepalive();

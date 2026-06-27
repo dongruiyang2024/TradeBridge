@@ -2,12 +2,11 @@ import { AutoSyncScheduler } from "./auto-sync-scheduler.js";
 import { OneTalkHistoryMessageSource } from "./onetalk-history-message-source.js";
 import { OneTalkMessageBuffer } from "./onetalk-message-buffer.js";
 import { OneTalkPageWebliteSource } from "./onetalk-page-weblite-source.js";
-import { runOutboundDelivery, sendOutboundMessagesViaBrowserChannels } from "./outbound-orchestrator.js";
+import { runOutboundDelivery, sendOutboundMessagesViaOneTalk } from "./outbound-orchestrator.js";
 import { OutboundPacer } from "./outbound-pacer.js";
 import { createRealtimeOrchestrator } from "./realtime-orchestrator.js";
 import { ExtensionStateStore, validateConfig } from "./storage.js";
 import { runSyncOnce } from "./sync-orchestrator.js";
-import { runWhatsAppSyncOnce } from "./whatsapp-sync-orchestrator.js";
 import {
   listOutboundMessages,
   markOutboundMessageDelivered,
@@ -29,9 +28,6 @@ import type {
 const chromeApi = getChrome();
 const stateStore = new ExtensionStateStore(chromeApi.storage.local);
 const messageBuffer = new OneTalkMessageBuffer(chromeApi.storage.local);
-const whatsappMessageBuffer = new OneTalkMessageBuffer(chromeApi.storage.local, {
-  storageKey: "tradebridgeWhatsAppObservedMessages"
-});
 // Single pacer shared by both delivery paths (alarm + realtime claim) so the
 // per-account rate window is continuous, not reset per invocation.
 const outboundPacer = new OutboundPacer();
@@ -50,7 +46,7 @@ const realtimeOrchestrator = createRealtimeOrchestrator({
     realtimeClient.send(message);
   },
   sendOutboundMessages: ({ messages }) =>
-    sendOutboundMessagesViaBrowserChannels({ chromeApi, messages, pacer: outboundPacer }),
+    sendOutboundMessagesViaOneTalk({ chromeApi, messages, pacer: outboundPacer }),
   runSyncNow: runDefaultSyncAndOutbound
 });
 
@@ -126,34 +122,7 @@ chromeApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     void recordSeenEventNames(typed.seenEventNames).then(() => sendResponse({ ok: true }));
     return true;
   }
-  if (typed.type === "whatsapp-web-page-ready") {
-    void ensureRealtimeConnection()
-      .then(() => {
-        autoSyncScheduler.schedule();
-        sendResponse({ ok: true });
-      })
-      .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
-    return true;
-  }
-  if (typed.type === "whatsapp-web-login-required") {
-    sendResponse({ ok: true });
-    return false;
-  }
-  if (typed.type === "whatsapp-web-messages-observed") {
-    void whatsappMessageBuffer
-      .add(typed.externalConversationId, typed.messages)
-      .then(() => recordObservedMessages(typed.messages.length))
-      .then(() => {
-        if (typed.messages.length > 0) autoSyncScheduler.schedule();
-      })
-      .then(() => sendResponse({ ok: true }));
-    return true;
-  }
-  if (typed.type === "whatsapp-web-capture-diagnostics") {
-    void recordSeenEventNames(typed.seenEventNames).then(() => sendResponse({ ok: true }));
-    return true;
-  }
-    if (typed.type === "sync-now") {
+  if (typed.type === "sync-now") {
     void runDefaultSyncAndOutbound().then(sendResponse);
     return true;
   }
@@ -196,29 +165,13 @@ void ensureRealtimeConnection();
 void refreshTradeMindBindingValidation();
 
 async function runDefaultSync() {
-  const onetalkResult = await runSyncOnce({
+  return runSyncOnce({
     stateStore,
     onetalkClient: new OneTalkPageWebliteSource({ chromeApi }),
     messageSource: messageBuffer,
     historyMessageSource: new OneTalkHistoryMessageSource({ chromeApi }),
     uploadSyncBatch
   });
-  const whatsappResult = await runWhatsAppSyncOnce({
-    stateStore,
-    messageSource: whatsappMessageBuffer,
-    uploadSyncBatch
-  }).catch((error) => {
-    if (onetalkResult.ok) throw error;
-    return null;
-  });
-  if (!whatsappResult) return onetalkResult;
-  return {
-    ok: onetalkResult.ok,
-    acceptedCount: (onetalkResult.acceptedCount || 0) + whatsappResult.acceptedCount,
-    rejectedCount: (onetalkResult.rejectedCount || 0) + whatsappResult.rejectedCount,
-    nextCursor: onetalkResult.nextCursor,
-    error: onetalkResult.error
-  };
 }
 
 async function runDefaultSyncAndOutbound() {

@@ -1130,8 +1130,12 @@ export class PostgresSyncStore {
           WHERE s.external_account_id = $1
             AND c.external_customer_id = $2
             AND conv.external_conversation_id = $3
-            AND ($6::text IS NULL OR conv.channel = $6)
-            AND ($7::text IS NULL OR ca.external_account_id = $7)
+            AND ($6::text IS NULL OR conv.channel = $6 OR (conv.channel IS NULL AND $6 = 'alibaba-im'))
+            AND (
+              $7::text IS NULL
+              OR ca.external_account_id = $7
+              OR (conv.channel IS NULL AND $6 = 'alibaba-im')
+            )
         )
         INSERT INTO outbound_message (seller_account_id, customer_id, conversation_id, channel_account_id, channel, content, created_by)
         SELECT s.id, customer_id, conversation_id, channel_account_id, channel, $4, $5::uuid
@@ -1202,8 +1206,12 @@ export class PostgresSyncStore {
         WHERE s.external_account_id = $1
           AND om.status = 'queued'
           AND (om.claim_expires_at IS NULL OR om.claim_expires_at <= now())
-          AND ($3::text IS NULL OR om.channel = $3)
-          AND ($4::text IS NULL OR ca.external_account_id = $4)
+          AND ($3::text IS NULL OR om.channel = $3 OR (om.channel IS NULL AND $3 = 'alibaba-im'))
+          AND (
+            $4::text IS NULL
+            OR ca.external_account_id = $4
+            OR (om.channel IS NULL AND $3 = 'alibaba-im')
+          )
         ORDER BY om.created_at ASC, om.id ASC
         LIMIT $2
         `,
@@ -1231,8 +1239,12 @@ export class PostgresSyncStore {
           WHERE s.external_account_id = $1
             AND om.status = 'queued'
             AND (om.claim_expires_at IS NULL OR om.claim_expires_at <= now())
-            AND ($5::text IS NULL OR om.channel = $5)
-            AND ($6::text IS NULL OR ca.external_account_id = $6)
+            AND ($5::text IS NULL OR om.channel = $5 OR (om.channel IS NULL AND $5 = 'alibaba-im'))
+            AND (
+              $6::text IS NULL
+              OR ca.external_account_id = $6
+              OR (om.channel IS NULL AND $5 = 'alibaba-im')
+            )
           ORDER BY om.created_at ASC, om.id ASC
         LIMIT $2
         FOR UPDATE SKIP LOCKED
@@ -1316,8 +1328,12 @@ export class PostgresSyncStore {
         LEFT JOIN channel_account ca ON ca.id = om.channel_account_id
         WHERE s.external_account_id = $1
           AND ($2::text IS NULL OR conv.external_conversation_id = $2)
-          AND ($3::text IS NULL OR om.channel = $3)
-          AND ($4::text IS NULL OR ca.external_account_id = $4)
+          AND ($3::text IS NULL OR om.channel = $3 OR (om.channel IS NULL AND $3 = 'alibaba-im'))
+          AND (
+            $4::text IS NULL
+            OR ca.external_account_id = $4
+            OR (om.channel IS NULL AND $3 = 'alibaba-im')
+          )
         ORDER BY om.created_at ASC, om.id ASC
         `,
       [
@@ -1348,14 +1364,16 @@ export class PostgresSyncStore {
         WHERE om.seller_account_id = s.id
             AND om.id = $1::uuid
             AND s.external_account_id = $2
-            AND ($9::text IS NULL OR om.channel = $9)
+            AND ($9::text IS NULL OR om.channel = $9 OR (om.channel IS NULL AND $9 = 'alibaba-im'))
             AND (
-              $10::text IS NULL OR EXISTS (
+              $10::text IS NULL
+              OR EXISTS (
                 SELECT 1
                 FROM channel_account ca_match
                 WHERE ca_match.id = om.channel_account_id
                   AND ca_match.external_account_id = $10
               )
+              OR (om.channel IS NULL AND $9 = 'alibaba-im')
             )
           RETURNING om.*
         )

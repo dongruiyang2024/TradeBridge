@@ -1504,6 +1504,7 @@ test("PostgresSyncStore claims pending outbound messages with a lease", async ()
   assert.ok(claimQuery);
   assert.match(claimQuery.sql, /FOR UPDATE SKIP LOCKED/i);
   assert.match(claimQuery.sql, /claim_expires_at/i);
+  assert.match(claimQuery.sql, /om\.channel IS NULL AND \$5 = 'alibaba-im'/i);
   assert.deepEqual(claimQuery.params, ["seller-1", 5, "device-1", 120000, null, null]);
   assert.equal(claimed.length, 1);
   assert.equal(claimed[0].claimedByDeviceId, "device-1");

@@ -49,13 +49,17 @@ class MemoryStateStore {
 test("runOutboundDelivery sends queued messages through an open OneTalk tab and marks delivery", async () => {
   const store = new MemoryStateStore();
   const delivered: Array<{ outboundMessageId: string; status: string; externalMessageId?: string }> = [];
+  const listRequests: Array<{ serverUrl: string; collectorToken: string; channel?: string; channelAccountExternalId?: string }> = [];
   const sentToTab: unknown[] = [];
 
   const result = await runOutboundDelivery({
     stateStore: store,
     chromeApi: fakeChromeApi(sentToTab, { ok: true, externalMessageId: "onetalk-msg-1" }),
     pacer: instantPacer(),
-    listOutboundMessages: async () => [outboundMessage()],
+    listOutboundMessages: async (options) => {
+      listRequests.push(options);
+      return [outboundMessage()];
+    },
     markOutboundMessageDelivered: async (options) => {
       delivered.push(options);
       return { ...outboundMessage(), status: options.status, externalMessageId: options.externalMessageId };
@@ -67,6 +71,8 @@ test("runOutboundDelivery sends queued messages through an open OneTalk tab and 
   assert.equal(delivered[0].outboundMessageId, "outbound-1");
   assert.equal(delivered[0].status, "sent");
   assert.equal(delivered[0].externalMessageId, "onetalk-msg-1");
+  assert.equal(listRequests[0].channel, "alibaba-im");
+  assert.equal(listRequests[0].channelAccountExternalId, "seller-1");
   assert.deepEqual(sentToTab, [{ type: "send-onetalk-message", message: outboundMessage() }]);
 });
 
@@ -173,6 +179,26 @@ test("sendOutboundMessagesViaOneTalk sends provided messages and returns deliver
     }
   ]);
   assert.deepEqual(sentToTab, [{ type: "send-onetalk-message", message: outboundMessage() }]);
+});
+
+test("sendOutboundMessagesViaOneTalk rejects messages for other channel types", async () => {
+  const sentToTab: unknown[] = [];
+
+  const reports = await sendOutboundMessagesViaOneTalk({
+    chromeApi: fakeChromeApi(sentToTab, { ok: true }),
+    messages: [{ ...outboundMessage(), channel: "marketplace-chat" }],
+    pacer: instantPacer()
+  });
+
+  assert.deepEqual(reports, [
+    {
+      outboundMessageId: "outbound-1",
+      status: "failed",
+      errorCode: "channel_not_supported_by_collector",
+      errorMessage: "Channel not supported by collector"
+    }
+  ]);
+  assert.deepEqual(sentToTab, []);
 });
 
 test("sendOutboundMessagesViaOneTalk stops at the pacer rate cap, leaving the rest unreported for retry", async () => {

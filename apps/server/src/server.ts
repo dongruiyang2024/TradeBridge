@@ -75,6 +75,7 @@ import { registerCollectorWsRoutes } from "./collector-ws.js";
 const DEFAULT_SELLER_ACCOUNT_EXTERNAL_ID = "default-seller";
 const DEFAULT_COLLECTOR_DEVICE_NAME = "TradeBridge Collector";
 const MANAGED_ACTIVATION_TTL_MS = 15 * 60 * 1000;
+const LEGACY_DEFAULT_CHANNEL = "alibaba-im";
 
 export interface CreateServerOptions {
   store?: SyncStore;
@@ -2097,9 +2098,10 @@ function matchesOptionalChannelScope(
   item: { channel?: string; channelAccountExternalId?: string | null },
   scope: { channel?: string; channelAccountExternalId?: string | null }
 ): boolean {
+  const legacyDefaultMatch = !item.channel && scope.channel === LEGACY_DEFAULT_CHANNEL;
   return (
-    (!scope.channel || item.channel === scope.channel) &&
-    (!scope.channelAccountExternalId || item.channelAccountExternalId === scope.channelAccountExternalId)
+    (!scope.channel || item.channel === scope.channel || legacyDefaultMatch) &&
+    (!scope.channelAccountExternalId || item.channelAccountExternalId === scope.channelAccountExternalId || legacyDefaultMatch)
   );
 }
 

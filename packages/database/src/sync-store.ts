@@ -58,6 +58,8 @@ import type {
   UpdateInternalUserInput
 } from "./sync-types.js";
 
+const LEGACY_DEFAULT_CHANNEL = "alibaba-im";
+
 export class InMemorySyncStore {
   private readonly sellerAccounts = new Map<string, StoredSellerAccount>();
   private readonly customers = new Map<string, StoredCustomer>();
@@ -819,10 +821,11 @@ function matchesOptionalChannelScope(
   item: { channel?: string; channelAccountExternalId?: string; channelSurface?: string },
   scope: { channel?: string; channelAccountExternalId?: string; channelSurface?: string }
 ): boolean {
+  const legacyDefaultMatch = !item.channel && scope.channel === LEGACY_DEFAULT_CHANNEL;
   return (
-    (!scope.channel || item.channel === scope.channel) &&
-    (!scope.channelAccountExternalId || item.channelAccountExternalId === scope.channelAccountExternalId) &&
-    (!scope.channelSurface || item.channelSurface === scope.channelSurface)
+    (!scope.channel || item.channel === scope.channel || legacyDefaultMatch) &&
+    (!scope.channelAccountExternalId || item.channelAccountExternalId === scope.channelAccountExternalId || legacyDefaultMatch) &&
+    (!scope.channelSurface || item.channelSurface === scope.channelSurface || legacyDefaultMatch)
   );
 }
 
