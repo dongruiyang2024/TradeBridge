@@ -2,11 +2,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import {
-  runOutboundDelivery,
-  sendOutboundMessagesViaBrowserChannels,
-  sendOutboundMessagesViaOneTalk
-} from "../src/background/outbound-orchestrator.js";
+import type { BrowserChannelAdapter } from "../src/background/browser-channel-adapters.js";
+import { runOutboundDelivery, sendOutboundMessagesViaOneTalk } from "../src/background/outbound-orchestrator.js";
 import { OutboundPacer } from "../src/background/outbound-pacer.js";
 import type { ChromeApi } from "../src/shared/chrome-api.js";
 import type { ExtensionConfig, ExtensionStatus, OutboundMessage } from "../src/shared/sync-types.js";
@@ -76,6 +73,56 @@ test("runOutboundDelivery sends queued messages through an open OneTalk tab and 
   assert.deepEqual(sentToTab, [{ type: "send-onetalk-message", message: outboundMessage() }]);
 });
 
+test("runOutboundDelivery can send through a registered browser channel adapter", async () => {
+  const store = new MemoryStateStore();
+  const delivered: Array<{ outboundMessageId: string; status: string; externalMessageId?: string }> = [];
+  const listRequests: Array<{ serverUrl: string; collectorToken: string; channel?: string; channelAccountExternalId?: string }> = [];
+  const sentMessages: OutboundMessage[] = [];
+  const marketplaceAdapter: BrowserChannelAdapter = {
+    channel: "marketplace-chat",
+    surface: "marketplace-web",
+    channelAccount: () => ({
+      channel: "marketplace-chat",
+      externalAccountId: "marketplace-account-1",
+      surface: "marketplace-web"
+    }),
+    async send(_chromeApi, message) {
+      sentMessages.push(message);
+      return { ok: true, externalMessageId: `marketplace-${message.id}` };
+    }
+  };
+
+  const result = await runOutboundDelivery({
+    stateStore: store,
+    chromeApi: fakeChromeApi([], { ok: true }),
+    pacer: instantPacer(),
+    adapters: [marketplaceAdapter],
+    listOutboundMessages: async (options) => {
+      listRequests.push(options);
+      return [
+        outboundMessage({
+          channel: "marketplace-chat",
+          channelAccountExternalId: "marketplace-account-1"
+        })
+      ];
+    },
+    markOutboundMessageDelivered: async (options) => {
+      delivered.push(options);
+      return {
+        ...outboundMessage(),
+        status: options.status,
+        externalMessageId: options.externalMessageId
+      };
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(listRequests[0].channel, "marketplace-chat");
+  assert.equal(listRequests[0].channelAccountExternalId, "marketplace-account-1");
+  assert.deepEqual(sentMessages.map((message) => message.channel), ["marketplace-chat"]);
+  assert.equal(delivered[0].externalMessageId, "marketplace-outbound-1");
+});
+
 test("runOutboundDelivery marks queued messages failed when no OneTalk tab is open", async () => {
   const store = new MemoryStateStore();
   const delivered: Array<{ status: string; errorCode?: string }> = [];
@@ -118,50 +165,6 @@ test("runOutboundDelivery marks sent when OneTalk page reports success without e
   assert.equal(delivered[0].externalMessageId, undefined);
 });
 
-test("runOutboundDelivery lists browser-channel outbound messages with configured channel accounts", async () => {
-  const store = new MemoryStateStore();
-  store.config = {
-    ...store.config!,
-    channelAccountExternalId: "onetalk-account",
-    whatsappChannelAccountExternalId: "wa-account"
-  };
-  const listCalls: Array<{ channel?: string; channelAccountExternalId?: string }> = [];
-  const sentToTab: unknown[] = [];
-
-  const result = await runOutboundDelivery({
-    stateStore: store,
-    chromeApi: fakeChromeApi(sentToTab, { ok: true, externalMessageId: "sent-id" }),
-    pacer: instantPacer(),
-    listOutboundMessages: async (options) => {
-      listCalls.push({
-        channel: options.channel,
-        channelAccountExternalId: options.channelAccountExternalId
-      });
-      if (options.channel === "alibaba-im") return [{ ...outboundMessage(), channel: "alibaba-im" }];
-      if (options.channel === "whatsapp-web") {
-        return [{ ...outboundMessage(), id: "outbound-wa", channel: "whatsapp-web", channelAccountExternalId: "wa-account" }];
-      }
-      return [];
-    },
-    markOutboundMessageDelivered: async (options) => ({
-      ...outboundMessage(),
-      id: options.outboundMessageId,
-      status: options.status,
-      externalMessageId: options.externalMessageId
-    })
-  });
-
-  assert.equal(result.ok, true);
-  assert.deepEqual(listCalls, [
-    { channel: "alibaba-im", channelAccountExternalId: "onetalk-account" },
-    { channel: "whatsapp-web", channelAccountExternalId: "wa-account" }
-  ]);
-  assert.deepEqual(
-    sentToTab.map((item) => (item as { type: string }).type),
-    ["send-onetalk-message", "send-whatsapp-web-message"]
-  );
-});
-
 test("sendOutboundMessagesViaOneTalk sends provided messages and returns delivery reports", async () => {
   const sentToTab: unknown[] = [];
 
@@ -175,6 +178,7 @@ test("sendOutboundMessagesViaOneTalk sends provided messages and returns deliver
     {
       outboundMessageId: "outbound-1",
       status: "sent",
+      channel: "alibaba-im",
       externalMessageId: "onetalk-msg-1"
     }
   ]);
@@ -194,6 +198,7 @@ test("sendOutboundMessagesViaOneTalk rejects messages for other channel types", 
     {
       outboundMessageId: "outbound-1",
       status: "failed",
+      channel: "marketplace-chat",
       errorCode: "channel_not_supported_by_collector",
       errorMessage: "Channel not supported by collector"
     }
@@ -226,27 +231,6 @@ test("sendOutboundMessagesViaOneTalk stops at the pacer rate cap, leaving the re
   // report), so it stays queued and retries next cycle.
   assert.deepEqual(reports.map((report) => report.outboundMessageId), ["outbound-1", "outbound-2"]);
   assert.equal(sentToTab.length, 2);
-});
-
-test("sendOutboundMessagesViaBrowserChannels does not mark WhatsApp sends as sent without confirmation id", async () => {
-  const sentToTab: unknown[] = [];
-
-  const reports = await sendOutboundMessagesViaBrowserChannels({
-    chromeApi: fakeChromeApi(sentToTab, { ok: true }),
-    messages: [{ ...outboundMessage(), channel: "whatsapp-web", channelAccountExternalId: "wa-account" }],
-    pacer: instantPacer()
-  });
-
-  assert.deepEqual(reports, [
-    {
-      outboundMessageId: "outbound-1",
-      status: "failed",
-      channel: "whatsapp-web",
-      channelAccountExternalId: "wa-account",
-      errorCode: "whatsapp_web_send_echo_not_found",
-      errorMessage: "whatsapp_web_send_echo_not_found"
-    }
-  ]);
 });
 
 test("outbound send payload carries no third-party marker", () => {
@@ -286,7 +270,7 @@ function fakeChromeApi(sentToTab: unknown[], response: unknown, tabs = [{ id: 9 
   };
 }
 
-function outboundMessage(): OutboundMessage {
+function outboundMessage(overrides: Partial<OutboundMessage> = {}): OutboundMessage {
   return {
     id: "outbound-1",
     sellerAccountExternalId: "seller-1",
@@ -295,6 +279,7 @@ function outboundMessage(): OutboundMessage {
     content: "Hello",
     status: "queued",
     createdAt: "2026-05-27T07:00:00.000Z",
-    updatedAt: "2026-05-27T07:00:00.000Z"
+    updatedAt: "2026-05-27T07:00:00.000Z",
+    ...overrides
   };
 }
