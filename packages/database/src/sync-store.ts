@@ -22,6 +22,7 @@ import type {
   CreateReplySuggestionInput,
   CreateUserInvitationInput,
   CustomerScope,
+  GetCollectorDeviceByTradeMindBindingTokenInput,
   GetInternalUserCredentialsByEmailInput,
   GetInternalUserCredentialsInput,
   InternalSession,
@@ -667,6 +668,15 @@ export class InMemorySyncStore {
     const tokenHash = hashContent(token);
     const device = Array.from(this.collectorDevices.values()).find(
       (item) => item.tokenHash === tokenHash && item.status === "active"
+    );
+    return device ? toPublicCollectorDevice(device) : null;
+  }
+
+  async getCollectorDeviceByTradeMindBindingToken(
+    input: GetCollectorDeviceByTradeMindBindingTokenInput
+  ): Promise<CollectorDevice | null> {
+    const device = Array.from(this.collectorDevices.values()).find(
+      (item) => item.tradeMindBindingToken === input.bindingToken && item.status === "active"
     );
     return device ? toPublicCollectorDevice(device) : null;
   }

@@ -23,6 +23,7 @@ import type {
   CreateReplySuggestionInput,
   CreateUserInvitationInput,
   CustomerScope,
+  GetCollectorDeviceByTradeMindBindingTokenInput,
   GetInternalUserCredentialsByEmailInput,
   GetInternalUserCredentialsInput,
   InternalRole,
@@ -2299,6 +2300,41 @@ export class PostgresSyncStore {
       LEFT JOIN seller_account s ON s.id = d.seller_account_id
       `,
       [hashContent(token)]
+    );
+    const row = result.rows[0];
+    return row ? mapCollectorDevice(row) : null;
+  }
+
+  async getCollectorDeviceByTradeMindBindingToken(
+    input: GetCollectorDeviceByTradeMindBindingTokenInput
+  ): Promise<CollectorDevice | null> {
+    const result = await this.client.query<CollectorDeviceRow>(
+      `
+      /* get_collector_device_by_trademind_binding_token */
+      SELECT
+        d.id::text AS "id",
+        d.external_device_id AS "externalDeviceId",
+        s.external_account_id AS "sellerAccountExternalId",
+        d.trade_mind_binding_token AS "tradeMindBindingToken",
+        d.device_name AS "deviceName",
+        d.activated_by_user_id AS "activatedByUserId",
+        d.activated_by_user_email AS "activatedByUserEmail",
+        d.activated_by_user_display_name AS "activatedByUserDisplayName",
+        d.activated_by_user_roles AS "activatedByUserRoles",
+        d.status AS "status",
+        d.last_heartbeat_at AS "lastHeartbeatAt",
+        d.last_sync_at AS "lastSyncAt",
+        d.last_error AS "lastError",
+        d.created_at AS "createdAt",
+        d.updated_at AS "updatedAt"
+      FROM collector_device d
+      LEFT JOIN seller_account s ON s.id = d.seller_account_id
+      WHERE d.trade_mind_binding_token = $1
+        AND d.status = 'active'
+      ORDER BY d.updated_at DESC, d.created_at DESC
+      LIMIT 1
+      `,
+      [input.bindingToken]
     );
     const row = result.rows[0];
     return row ? mapCollectorDevice(row) : null;

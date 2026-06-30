@@ -19,15 +19,11 @@ class BootstrapSqlClient implements SqlClient {
   }
 }
 
-test("createServerFromEnv uses in-memory store when DATABASE_URL is absent", async () => {
-  const app = await createServerFromEnv({ env: {} });
-  const response = await app.inject({
-    method: "GET",
-    url: "/health"
-  });
-
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.json().ok, true);
+test("createServerFromEnv requires DATABASE_URL", async () => {
+  await assert.rejects(
+    () => createServerFromEnv({ env: {} }),
+    /DATABASE_URL is required/
+  );
 });
 
 test("createServerFromEnv runs migrations and uses PostgresSyncStore when DATABASE_URL is present", async () => {

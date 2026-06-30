@@ -77,7 +77,7 @@ test("POST /collector/v1/sync-batches forwards scoped batches to Trade-Mind with
         });
         return new Response(JSON.stringify({ ok: true }), { status: 201 });
       },
-      ingestSecret: "shared-secret",
+      bridgeSecret: "bridge-secret",
       ingestUrl: "http://trademind.local/api/ingest/conversations",
       nonce: () => "nonce-1",
       now: () => new Date("2026-06-10T08:00:00.000Z")
@@ -137,12 +137,12 @@ test("POST /collector/v1/sync-batches forwards scoped batches to Trade-Mind with
   assert.equal(typeof forwarded.sourceBatchId, "string");
   assert.match(forwarded.sourceBatchId, /^tb_[a-f0-9]{48}$/);
   assert.equal(forwardCalls[0].headers["Content-Type"], "application/json");
-  assert.equal(forwardCalls[0].headers["x-trademind-ingest-secret"], "shared-secret");
+  assert.equal(forwardCalls[0].headers["x-trademind-bridge-secret"], "bridge-secret");
   assert.equal(forwardCalls[0].headers["x-trademind-timestamp"], "1781078400");
   assert.equal(forwardCalls[0].headers["x-trademind-nonce"], "nonce-1");
   assert.equal(
     forwardCalls[0].headers["x-trademind-signature"],
-    createHmac("sha256", "shared-secret")
+    createHmac("sha256", "bridge-secret")
       .update(`1781078400.nonce-1.${forwardCalls[0].body}`)
       .digest("hex")
   );
@@ -179,7 +179,7 @@ test("POST /collector/v1/sync-batches skips Trade-Mind forwarding for devices wi
         forwardCount += 1;
         return new Response(JSON.stringify({ ok: true }), { status: 201 });
       },
-      ingestSecret: "shared-secret",
+      bridgeSecret: "bridge-secret",
       ingestUrl: "http://trademind.local/api/ingest/conversations"
     }
   });

@@ -4,7 +4,6 @@ import websocket from "@fastify/websocket";
 import { loadWorkspaceEnv } from "@wangwang/env";
 import {
   type ClaimPendingOutboundMessagesInput,
-  InMemorySyncStore,
   PostgresSyncStore,
   createNodePostgresClient,
   runMigrations,
@@ -32,6 +31,7 @@ import {
   type CreateOutboundMessageInput,
   type CreateReplySuggestionInput,
   type CustomerScope,
+  type GetCollectorDeviceByTradeMindBindingTokenInput,
   type GetInternalUserCredentialsByEmailInput,
   type GetInternalUserCredentialsInput,
   type InternalRole,
@@ -78,13 +78,14 @@ const MANAGED_ACTIVATION_TTL_MS = 15 * 60 * 1000;
 const LEGACY_DEFAULT_CHANNEL = "alibaba-im";
 
 export interface CreateServerOptions {
-  store?: SyncStore;
+  store: SyncStore;
   aiProvider?: AiProvider;
   aiJobQueue?: AiJobQueue;
   logger?: boolean;
   tradeMindForwarder?: TradeMindForwarderOptions;
   tradeMindBindingConfirmer?: TradeMindBindingConfirmerOptions;
   tradeMindProvision?: TradeMindProvisionOptions;
+  tradeMindBridgeInbound?: TradeMindBridgeInboundOptions;
   /**
    * Extra Web workbench origins allowed to call the internal API, e.g.
    * `https://workbench.example.com`. Local dev origins and Chrome extension
@@ -97,7 +98,7 @@ export interface CreateServerOptions {
 
 export interface TradeMindForwarderOptions {
   ingestUrl: string;
-  ingestSecret: string;
+  bridgeSecret: string;
   fetch?: typeof fetch;
   now?: () => Date;
   nonce?: () => string;
@@ -128,7 +129,12 @@ export interface TradeMindBindingValidatorOptions {
 }
 
 export interface TradeMindProvisionOptions {
-  secret: string;
+  bridgeSecret: string;
+}
+
+export interface TradeMindBridgeInboundOptions {
+  bridgeSecret: string;
+  now?: () => Date;
 }
 
 export interface CreateServerFromEnvOptions {
@@ -181,10 +187,11 @@ export interface SyncStore {
   listManagedTradeMindActivations(): Promise<ProvisionedManagedTradeMindActivation[]> | ProvisionedManagedTradeMindActivation[];
   recordCollectorHeartbeat(input: RecordCollectorHeartbeatInput): Promise<CollectorDevice> | CollectorDevice;
   authenticateCollectorDevice(token: string): Promise<CollectorDevice | null> | CollectorDevice | null;
+  getCollectorDeviceByTradeMindBindingToken(input: GetCollectorDeviceByTradeMindBindingTokenInput): Promise<CollectorDevice | null> | CollectorDevice | null;
 }
 
-export async function createServer(options: CreateServerOptions = {}): Promise<FastifyInstance> {
-  const store = options.store || new InMemorySyncStore();
+export async function createServer(options: CreateServerOptions): Promise<FastifyInstance> {
+  const store = options.store;
   const aiProvider = options.aiProvider || createDeterministicAiProvider();
   const aiJobQueue = options.aiJobQueue || createSyncAiJobQueue();
   const allowedWebOrigins = normalizeAllowedWebOrigins(options.allowedWebOrigins);
@@ -193,6 +200,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   const tradeMindBindingHealthReporter = normalizeTradeMindBindingHealthReporter(options.tradeMindBindingHealthReporter);
   const tradeMindBindingValidator = normalizeTradeMindBindingValidator(options.tradeMindBindingValidator);
   const tradeMindProvision = normalizeTradeMindProvision(options.tradeMindProvision);
+  const tradeMindBridgeInbound = normalizeTradeMindBridgeInbound(options.tradeMindBridgeInbound);
   const realtimeHub = createCollectorRealtimeHub();
   const internalAccessRoles: InternalRole[] = ["admin", "supervisor", "sales"];
   const adminRoles: InternalRole[] = ["admin"];
@@ -223,7 +231,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
 
   app.post("/collector/v1/trademind/provision", async (request, reply) => {
     if (!tradeMindProvision) return reply.code(404).send({ ok: false, error: "trademind_provision_disabled" });
-    if (request.headers["x-trademind-provision-secret"] !== tradeMindProvision.secret) {
+    if (request.headers["x-trademind-bridge-secret"] !== tradeMindProvision.bridgeSecret) {
       return reply.code(401).send({ ok: false, error: "trademind_provision_unauthorized" });
     }
 
@@ -310,7 +318,9 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       });
     } catch (error) {
       request.log.error({ err: error }, "trademind_binding_confirm_failed");
-      return reply.code(502).send({ ok: false, error: "trademind_binding_confirm_failed" });
+      return reply
+        .code(502)
+        .send(tradeMindConfirmFailureResponse(error, "trademind_binding_confirm_failed"));
     }
 
     return {
@@ -375,6 +385,93 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     }
   });
 
+  app.post("/collector/v1/trademind/outbound-messages", async (request, reply) => {
+    if (!tradeMindBridgeInbound) {
+      return reply.code(404).send({ ok: false, error: "trademind_bridge_inbound_disabled" });
+    }
+
+    const rawBody = JSON.stringify(request.body || {});
+    const auth = verifyTradeMindSignedHeaders({
+      configuredSecret: tradeMindBridgeInbound.bridgeSecret,
+      headers: request.headers,
+      nowSeconds: Math.floor(tradeMindBridgeInbound.now().getTime() / 1000),
+      rawBody,
+      secretHeaderName: "x-trademind-bridge-secret"
+    });
+    if (!auth.ok) {
+      return reply.code(401).send({ ok: false, error: "trademind_bridge_unauthorized" });
+    }
+
+    const bindingToken = bodyStringField(request.body, "bindingToken");
+    const externalConversationId = bodyStringField(request.body, "externalConversationId");
+    const content = bodyStringField(request.body, "content");
+    const tmLoginId = bodyStringField(request.body, "tmLoginId") || undefined;
+    const tmAliId = bodyStringField(request.body, "tmAliId") || undefined;
+    if (!bindingToken || !externalConversationId) {
+      return reply.code(400).send({ ok: false, error: "invalid_trademind_outbound_request" });
+    }
+    if (!content) {
+      return reply.code(400).send({ ok: false, error: "outbound_content_required" });
+    }
+
+    const collectorDevice = await store.getCollectorDeviceByTradeMindBindingToken({ bindingToken });
+    if (!collectorDevice) {
+      return reply.code(404).send({ ok: false, error: "trademind_binding_not_found" });
+    }
+
+    const sellerAccountExternalId = collectorSellerAccountExternalId(collectorDevice);
+    if (tmAliId && tmAliId !== sellerAccountExternalId) {
+      return reply.code(409).send({ ok: false, error: "trademind_binding_account_mismatch" });
+    }
+
+    const conversationScope = await resolveConversationScopeByFields(store, {
+      sellerAccountExternalId,
+      externalConversationId,
+      channel: LEGACY_DEFAULT_CHANNEL,
+      channelAccountExternalId: tmLoginId
+    });
+    if (!conversationScope) {
+      return reply.code(400).send({ ok: false, error: "conversation_scope_required" });
+    }
+
+    try {
+      const message = await store.createOutboundMessage({
+        ...conversationScope.scope,
+        content,
+        createdByUserId: undefined
+      });
+      await store.appendAuditLog({
+        actorUserId: undefined,
+        action: "outbound_message.queued",
+        targetType: "outbound_message",
+        targetId: message.id,
+        metadata: {
+          source: "trademind_binding",
+          bindingDeviceId: collectorDevice.id,
+          activatedByUserId: collectorDevice.activatedByUserId,
+          sellerAccountExternalId: message.sellerAccountExternalId,
+          channel: message.channel,
+          channelAccountExternalId: message.channelAccountExternalId,
+          externalCustomerId: message.externalCustomerId,
+          externalConversationId: message.externalConversationId
+        }
+      });
+      realtimeHub.notifyOutboundAvailable({
+        sellerAccountExternalId: message.sellerAccountExternalId,
+        pendingCount: 1,
+        channel: message.channel,
+        channelAccountExternalId: message.channelAccountExternalId
+      });
+
+      return { ok: true, message };
+    } catch (error) {
+      if (isNotFoundError(error, "outbound_conversation")) {
+        return reply.code(404).send({ ok: false, error: "outbound_conversation_not_found" });
+      }
+      throw error;
+    }
+  });
+
   app.post("/collector/v1/auth/login", async (request, reply) => {
     const email = bodyStringField(request.body, "email");
     const password = bodyStringField(request.body, "password");
@@ -432,10 +529,9 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       });
     } catch (error) {
       request.log.error({ err: error }, "trademind_binding_confirm_failed");
-      return reply.code(502).send({
-        ok: false,
-        error: "trademind_binding_confirm_failed"
-      });
+      return reply
+        .code(502)
+        .send(tradeMindConfirmFailureResponse(error, "trademind_binding_confirm_failed"));
     }
 
     return {
@@ -1272,10 +1368,11 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
 
 export async function createServerFromEnv(options: CreateServerFromEnvOptions = {}): Promise<FastifyInstance> {
   const env = options.env || process.env;
-  const databaseUrl = env.DATABASE_URL;
-  const store = databaseUrl
-    ? await createPostgresStore(databaseUrl, options.sqlClientFactory)
-    : new InMemorySyncStore();
+  const databaseUrl = env.DATABASE_URL?.trim();
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL is required");
+  }
+  const store = await createPostgresStore(databaseUrl, options.sqlClientFactory);
   const aiJobQueue = options.aiJobQueueFactory
     ? await options.aiJobQueueFactory(env)
     : await createAiJobQueueFromEnv(env);
@@ -1289,15 +1386,16 @@ export async function createServerFromEnv(options: CreateServerFromEnvOptions = 
     tradeMindBindingConfirmer: createTradeMindBindingConfirmerFromEnv(env),
     tradeMindBindingHealthReporter: createTradeMindBindingHealthReporterFromEnv(env),
     tradeMindBindingValidator: createTradeMindBindingValidatorFromEnv(env),
-    tradeMindProvision: createTradeMindProvisionFromEnv(env)
+    tradeMindProvision: createTradeMindProvisionFromEnv(env),
+    tradeMindBridgeInbound: createTradeMindBridgeInboundFromEnv(env)
   });
 }
 
 function createTradeMindForwarderFromEnv(env: Record<string, string | undefined>): TradeMindForwarderOptions | undefined {
   const ingestUrl = env.TRADEMIND_INGEST_URL?.trim();
-  const ingestSecret = env.TRADEMIND_INGEST_SECRET?.trim();
-  if (!ingestUrl || !ingestSecret) return undefined;
-  return { ingestSecret, ingestUrl };
+  const bridgeSecret = env.TRADEMIND_BRIDGE_SECRET?.trim();
+  if (!ingestUrl || !bridgeSecret) return undefined;
+  return { bridgeSecret, ingestUrl };
 }
 
 function createTradeMindBindingConfirmerFromEnv(env: Record<string, string | undefined>): TradeMindBindingConfirmerOptions | undefined {
@@ -1322,14 +1420,25 @@ function createTradeMindBindingValidatorFromEnv(env: Record<string, string | und
 }
 
 function createTradeMindProvisionFromEnv(env: Record<string, string | undefined>): TradeMindProvisionOptions | undefined {
-  const secret = env.TRADEMIND_PROVISION_SECRET?.trim() || env.TRADEMIND_BRIDGE_SECRET?.trim();
-  if (!secret) return undefined;
-  return { secret };
+  const bridgeSecret = env.TRADEMIND_BRIDGE_SECRET?.trim();
+  if (!bridgeSecret) return undefined;
+  return { bridgeSecret };
+}
+
+function createTradeMindBridgeInboundFromEnv(env: Record<string, string | undefined>): TradeMindBridgeInboundOptions | undefined {
+  const bridgeSecret = env.TRADEMIND_BRIDGE_SECRET?.trim();
+  if (!bridgeSecret) return undefined;
+  return { bridgeSecret };
 }
 
 function parseEnvWebOrigins(env: Record<string, string | undefined>): string[] {
   const raw = env.WANGWANG_WEB_ORIGINS || env.WANGWANG_ALLOWED_WEB_ORIGINS;
-  return raw ? [raw] : [];
+  return raw
+    ? raw
+        .split(",")
+        .map((origin) => origin.trim())
+        .filter(Boolean)
+    : [];
 }
 
 async function createAiJobQueueFromEnv(env: Record<string, string | undefined>): Promise<AiJobQueue | undefined> {
@@ -1380,7 +1489,7 @@ function collectorSellerAccountExternalId(device: CollectorDevice): string {
 
 interface NormalizedTradeMindForwarder {
   ingestUrl: string;
-  ingestSecret: string;
+  bridgeSecret: string;
   fetch: typeof fetch;
   now: () => Date;
   nonce: () => string;
@@ -1411,7 +1520,12 @@ interface NormalizedTradeMindBindingValidator {
 }
 
 interface NormalizedTradeMindProvision {
-  secret: string;
+  bridgeSecret: string;
+}
+
+interface NormalizedTradeMindBridgeInbound {
+  bridgeSecret: string;
+  now: () => Date;
 }
 
 interface TradeMindSignedRequestOptions {
@@ -1421,6 +1535,19 @@ interface TradeMindSignedRequestOptions {
   now: () => Date;
   nonce: () => string;
 }
+
+interface VerifyTradeMindSignedHeadersInput {
+  configuredSecret: string;
+  headers: Record<string, string | string[] | undefined>;
+  nowSeconds: number;
+  rawBody: string;
+  secretHeaderName: string;
+  windowSeconds?: number;
+}
+
+type VerifyTradeMindSignedHeadersResult =
+  | { ok: true; nonce: string; timestamp: string }
+  | { ok: false; reason: string };
 
 type TradeMindBindingStatus = "unbound" | "bound" | "revoked";
 type TradeMindTokenStatus = "valid" | "invalid" | "unknown";
@@ -1446,21 +1573,30 @@ interface TradeMindBindingValidationResult {
 }
 
 function normalizeTradeMindProvision(options?: TradeMindProvisionOptions): NormalizedTradeMindProvision | undefined {
-  const secret = options?.secret.trim();
-  if (!secret) return undefined;
-  return { secret };
+  const bridgeSecret = options?.bridgeSecret.trim();
+  if (!bridgeSecret) return undefined;
+  return { bridgeSecret };
+}
+
+function normalizeTradeMindBridgeInbound(
+  options?: TradeMindBridgeInboundOptions
+): NormalizedTradeMindBridgeInbound | undefined {
+  const bridgeSecret = options?.bridgeSecret.trim();
+  const now = options?.now || (() => new Date());
+  if (!bridgeSecret) return undefined;
+  return { bridgeSecret, now };
 }
 
 function normalizeTradeMindForwarder(options?: TradeMindForwarderOptions): NormalizedTradeMindForwarder | undefined {
   const ingestUrl = options?.ingestUrl.trim();
-  const ingestSecret = options?.ingestSecret.trim();
+  const bridgeSecret = options?.bridgeSecret.trim();
   const fetchImpl = options?.fetch || fetch;
   const now = options?.now || (() => new Date());
   const nonce = options?.nonce || (() => crypto.randomBytes(16).toString("hex"));
-  if (!ingestUrl || !ingestSecret) return undefined;
+  if (!ingestUrl || !bridgeSecret) return undefined;
   return {
     ingestUrl,
-    ingestSecret,
+    bridgeSecret,
     fetch: fetchImpl,
     now,
     nonce
@@ -1538,8 +1674,8 @@ async function forwardSyncBatchToTradeMind(
     method: "POST",
     headers: tradeMindSignedHeaders({
       rawBody,
-      secret: forwarder.ingestSecret,
-      secretHeaderName: "x-trademind-ingest-secret",
+      secret: forwarder.bridgeSecret,
+      secretHeaderName: "x-trademind-bridge-secret",
       now: forwarder.now,
       nonce: forwarder.nonce
     }),
@@ -1651,8 +1787,52 @@ async function confirmTradeMindBindingForCollector(input: {
     body: rawBody
   });
   if (!response.ok) {
-    throw new Error(`trademind_binding_confirm_failed_${response.status}`);
+    const errorCode = await tradeMindErrorCode(response);
+    throw new Error(errorCode || `trademind_binding_confirm_failed_${response.status}`);
   }
+}
+
+async function tradeMindErrorCode(response: Response): Promise<string | null> {
+  const body = await response.text().catch(() => "");
+  const error = readResponseError(body);
+  if (!error) return null;
+  return `trademind_binding_confirm_failed_${response.status}:${error}`;
+}
+
+function readResponseError(body: string): string | null {
+  if (!body.trim()) return null;
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (isObjectRecord(parsed) && typeof parsed.error === "string" && parsed.error.trim()) {
+      return parsed.error.trim();
+    }
+  } catch {
+    return body.trim().slice(0, 300);
+  }
+  return null;
+}
+
+function tradeMindConfirmFailureResponse(error: unknown, fallback: string): {
+  ok: false;
+  error: string;
+  detail?: string;
+} {
+  const message = error instanceof Error ? error.message : String(error);
+  const parsed = parseTradeMindConfirmFailure(message, fallback);
+  return parsed.detail
+    ? { ok: false, error: parsed.error, detail: parsed.detail }
+    : { ok: false, error: parsed.error };
+}
+
+function parseTradeMindConfirmFailure(message: string, fallback: string): { error: string; detail?: string } {
+  const match = /^trademind_binding_confirm_failed_(\d+)(?::([\s\S]+))?$/.exec(message);
+  if (!match) return { error: fallback };
+  const status = match[1];
+  const detail = match[2]?.trim();
+  return {
+    error: `trademind_binding_confirm_failed_${status}`,
+    detail: detail || undefined
+  };
 }
 
 function unboundTradeMindBindingValidation(): TradeMindBindingValidationResult {
@@ -1728,6 +1908,56 @@ function tradeMindSignedHeaders(options: TradeMindSignedRequestOptions): Record<
     "x-trademind-nonce": nonce,
     "x-trademind-signature": signature
   };
+}
+
+function verifyTradeMindSignedHeaders(input: VerifyTradeMindSignedHeadersInput): VerifyTradeMindSignedHeadersResult {
+  const configuredSecret = input.configuredSecret.trim();
+  if (!configuredSecret) {
+    return { ok: false, reason: "secret_unconfigured" };
+  }
+
+  const providedSecret = signedHeader(input.headers, input.secretHeaderName);
+  if (!providedSecret || !safeEqual(configuredSecret, providedSecret)) {
+    return { ok: false, reason: "secret_invalid" };
+  }
+
+  const timestamp = signedHeader(input.headers, "x-trademind-timestamp");
+  const nonce = signedHeader(input.headers, "x-trademind-nonce");
+  const signature = signedHeader(input.headers, "x-trademind-signature");
+  if (!timestamp || !nonce || !signature) {
+    return { ok: false, reason: "signature_headers_missing" };
+  }
+
+  const timestampNumber = Number(timestamp);
+  if (!Number.isFinite(timestampNumber)) {
+    return { ok: false, reason: "timestamp_invalid" };
+  }
+  if (Math.abs(input.nowSeconds - timestampNumber) > (input.windowSeconds || 300)) {
+    return { ok: false, reason: "timestamp_stale" };
+  }
+
+  const expectedSignature = crypto
+    .createHmac("sha256", configuredSecret)
+    .update(`${timestamp}.${nonce}.${input.rawBody}`)
+    .digest("hex");
+  if (!safeEqual(expectedSignature, signature)) {
+    return { ok: false, reason: "signature_invalid" };
+  }
+
+  return { ok: true, nonce, timestamp };
+}
+
+function signedHeader(headers: Record<string, string | string[] | undefined>, name: string): string | null {
+  const value = headers[name] || headers[name.toLowerCase()];
+  if (Array.isArray(value)) return value[0] || null;
+  return value || null;
+}
+
+function safeEqual(expected: string, actual: string): boolean {
+  const expectedBuffer = Buffer.from(expected);
+  const actualBuffer = Buffer.from(actual);
+  if (expectedBuffer.length !== actualBuffer.length) return false;
+  return crypto.timingSafeEqual(expectedBuffer, actualBuffer);
 }
 
 function createTradeMindSourceBatchId(batch: SyncBatch): string {
@@ -1976,8 +2206,32 @@ async function resolveConversationScope(
   const externalConversationId = queryStringField(params, "externalConversationId");
   const channel = queryStringField(query, "channel") || undefined;
   const channelAccountExternalId = queryStringField(query, "channelAccountExternalId") || undefined;
-  if (!sellerAccountExternalId || !externalConversationId) return null;
+  return resolveConversationScopeByFields(store, {
+    sellerAccountExternalId,
+    externalConversationId,
+    channel,
+    channelAccountExternalId
+  });
+}
 
+async function resolveConversationScopeByFields(
+  store: SyncStore,
+  fields: {
+    sellerAccountExternalId?: string | null;
+    externalConversationId?: string | null;
+    channel?: string;
+    channelAccountExternalId?: string;
+  }
+): Promise<{
+  scope: ConversationCustomerScope;
+  conversation: StoredConversation;
+  customer: StoredCustomer | null;
+} | null> {
+  const sellerAccountExternalId = fields.sellerAccountExternalId;
+  const externalConversationId = fields.externalConversationId;
+  const channel = fields.channel;
+  const channelAccountExternalId = fields.channelAccountExternalId;
+  if (!sellerAccountExternalId || !externalConversationId) return null;
   const conversations = await store.listConversations();
   const conversation = conversations.find(
     (item) =>

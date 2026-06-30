@@ -220,7 +220,7 @@ test("POST /collector/v1/auth/login stores Trade-Mind binding tokens without exp
 
 test("POST /collector/v1/trademind/provision is idempotent for a Trade-Mind workspace member", async () => {
   const store = new InMemorySyncStore();
-  const app = await createServer({ store, tradeMindProvision: { secret: "provision-secret" } });
+  const app = await createServer({ store, tradeMindProvision: { bridgeSecret: "bridge-secret" } });
   const payload = {
     provider: "trade-mind",
     workspaceId: "workspace-1",
@@ -234,13 +234,13 @@ test("POST /collector/v1/trademind/provision is idempotent for a Trade-Mind work
   const first = await app.inject({
     method: "POST",
     url: "/collector/v1/trademind/provision",
-    headers: { "x-trademind-provision-secret": "provision-secret" },
+    headers: { "x-trademind-bridge-secret": "bridge-secret" },
     payload
   });
   const second = await app.inject({
     method: "POST",
     url: "/collector/v1/trademind/provision",
-    headers: { "x-trademind-provision-secret": "provision-secret" },
+    headers: { "x-trademind-bridge-secret": "bridge-secret" },
     payload
   });
 
@@ -264,7 +264,7 @@ test("POST /collector/v1/auth/activate consumes a Trade-Mind activation token wi
   const confirmCalls = [];
   const app = await createServer({
     store,
-    tradeMindProvision: { secret: "provision-secret" },
+    tradeMindProvision: { bridgeSecret: "bridge-secret" },
     tradeMindBindingConfirmer: {
       bridgeSecret: "bridge-secret",
       confirmUrl: "https://pilot.sinan.yun/api/communication/binding/bridge-confirm",
@@ -279,7 +279,7 @@ test("POST /collector/v1/auth/activate consumes a Trade-Mind activation token wi
   const provision = await app.inject({
     method: "POST",
     url: "/collector/v1/trademind/provision",
-    headers: { "x-trademind-provision-secret": "provision-secret" },
+    headers: { "x-trademind-bridge-secret": "bridge-secret" },
     payload: {
       provider: "trade-mind",
       workspaceId: "workspace-1",
@@ -335,6 +335,56 @@ test("POST /collector/v1/auth/activate consumes a Trade-Mind activation token wi
   });
   assert.equal(replay.statusCode, 401);
   assert.deepEqual(replay.json(), { ok: false, error: "activation_token_invalid" });
+});
+
+test("POST /collector/v1/auth/activate returns Trade-Mind confirm details when auto-confirm fails", async () => {
+  const store = new InMemorySyncStore();
+  const app = await createServer({
+    store,
+    tradeMindProvision: { bridgeSecret: "bridge-secret" },
+    tradeMindBindingConfirmer: {
+      bridgeSecret: "bridge-secret",
+      confirmUrl: "https://pilot.sinan.yun/api/communication/binding/bridge-confirm",
+      fetch: async () =>
+        Response.json({ error: "绑定会话不存在、已消费或已过期。" }, { status: 400 }),
+      nonce: () => "confirm-nonce-1",
+      now: () => new Date("2026-06-14T08:00:00.000Z")
+    }
+  });
+  const provision = await app.inject({
+    method: "POST",
+    url: "/collector/v1/trademind/provision",
+    headers: { "x-trademind-bridge-secret": "bridge-secret" },
+    payload: {
+      provider: "trade-mind",
+      workspaceId: "workspace-1",
+      userId: "user-1",
+      userEmail: "owner@example.com",
+      userDisplayName: "Owner One",
+      channel: "onetalk",
+      bindingToken: "tm-binding-token"
+    }
+  });
+  assert.equal(provision.statusCode, 201);
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/collector/v1/auth/activate",
+    payload: {
+      activationToken: provision.json().activationToken,
+      sellerAccountExternalId: "self-ali-1",
+      channelAccountExternalId: "self-login-1",
+      deviceExternalId: "chrome-extension-1",
+      deviceName: "Chrome Extension"
+    }
+  });
+
+  assert.equal(response.statusCode, 502);
+  assert.deepEqual(response.json(), {
+    ok: false,
+    error: "trademind_binding_confirm_failed_400",
+    detail: "绑定会话不存在、已消费或已过期。"
+  });
 });
 
 test("POST /collector/v1/heartbeat records collector health without expiring the collector token", async () => {

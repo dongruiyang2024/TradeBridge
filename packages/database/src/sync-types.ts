@@ -440,6 +440,10 @@ export interface RegisterCollectorDeviceInput {
   status?: string;
 }
 
+export interface GetCollectorDeviceByTradeMindBindingTokenInput {
+  bindingToken: string;
+}
+
 export interface RevokeCollectorDeviceInput {
   deviceId: string;
 }

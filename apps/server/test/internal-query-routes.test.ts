@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { test } from "node:test";
 import { InMemorySyncStore } from "@wangwang/database";
 import { hashPassword } from "../src/auth.js";
@@ -36,6 +37,12 @@ const syncPayload = {
   ]
 };
 
+const scopedWangwangSyncPayload = {
+  ...syncPayload,
+  channel: "alibaba-im",
+  channelAccount: { channel: "alibaba-im", externalAccountId: "cn-seller-1" }
+};
+
 async function createSeededApp() {
   const store = new InMemorySyncStore();
   await store.createInternalUser({
@@ -60,6 +67,45 @@ async function createSeededApp() {
   });
 
   return app;
+}
+
+async function createSeededTradeMindApp() {
+  const store = new InMemorySyncStore();
+  await store.registerCollectorDevice({
+    sellerAccountExternalId: "seller-1",
+    tradeMindBindingToken: "binding-token-1",
+    externalDeviceId: "device-1",
+    deviceName: "Test Device",
+    token: "device-token"
+  });
+  const app = await createServer({
+    store,
+    tradeMindBridgeInbound: {
+      bridgeSecret: "bridge-secret",
+      now: () => new Date("2026-05-25T10:00:00.000Z")
+    }
+  });
+
+  await app.inject({
+    method: "POST",
+    url: "/collector/v1/sync-batches",
+    headers: { authorization: "Bearer device-token" },
+    payload: scopedWangwangSyncPayload
+  });
+
+  return { app, store };
+}
+
+function tradeMindSignedHeaders(rawBody: string, secret = "bridge-secret") {
+  const timestamp = String(Math.floor(Date.parse("2026-05-25T10:00:00.000Z") / 1000));
+  const nonce = "nonce-1";
+  return {
+    "content-type": "application/json",
+    "x-trademind-bridge-secret": secret,
+    "x-trademind-timestamp": timestamp,
+    "x-trademind-nonce": nonce,
+    "x-trademind-signature": createHmac("sha256", secret).update(`${timestamp}.${nonce}.${rawBody}`).digest("hex")
+  };
 }
 
 async function createInternalAuthHeaders(app: Awaited<ReturnType<typeof createServer>>) {
@@ -147,6 +193,62 @@ test("POST /internal/v1/conversations/:id/outbound-messages queues a manual repl
   assert.equal(response.json().message.status, "queued");
   assert.equal(response.json().message.externalConversationId, "conv-1");
   assert.equal(response.json().message.content, "Thanks, I will check and reply soon.");
+});
+
+test("POST /collector/v1/trademind/outbound-messages queues Wangwang outbound through binding token", async () => {
+  const { app, store } = await createSeededTradeMindApp();
+  const payload = {
+    bindingToken: "binding-token-1",
+    content: "Thanks, I will check and reply soon.",
+    externalConversationId: "conv-1",
+    tmAliId: "seller-1",
+    tmLoginId: "cn-seller-1"
+  };
+  const rawBody = JSON.stringify(payload);
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/collector/v1/trademind/outbound-messages",
+    headers: tradeMindSignedHeaders(rawBody),
+    payload
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().ok, true);
+  assert.equal(response.json().message.status, "queued");
+  assert.equal(response.json().message.externalConversationId, "conv-1");
+  assert.equal(response.json().message.channel, "alibaba-im");
+  assert.equal(response.json().message.channelAccountExternalId, "cn-seller-1");
+  assert.equal(response.json().message.content, "Thanks, I will check and reply soon.");
+
+  const pending = await store.listPendingOutboundMessages({
+    sellerAccountExternalId: "seller-1",
+    channel: "alibaba-im",
+    channelAccountExternalId: "cn-seller-1"
+  });
+  assert.equal(pending.length, 1);
+});
+
+test("POST /collector/v1/trademind/outbound-messages rejects invalid bridge signatures", async () => {
+  const { app } = await createSeededTradeMindApp();
+  const payload = {
+    bindingToken: "binding-token-1",
+    content: "hello",
+    externalConversationId: "conv-1",
+    tmAliId: "seller-1",
+    tmLoginId: "cn-seller-1"
+  };
+  const rawBody = JSON.stringify(payload);
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/collector/v1/trademind/outbound-messages",
+    headers: tradeMindSignedHeaders(rawBody, "wrong-secret"),
+    payload
+  });
+
+  assert.equal(response.statusCode, 401);
+  assert.deepEqual(response.json(), { ok: false, error: "trademind_bridge_unauthorized" });
 });
 
 test("collector device tokens cannot read internal query APIs", async () => {

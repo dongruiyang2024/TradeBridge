@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { InMemorySyncStore } from "@wangwang/database";
-import { createServer } from "../src/server.js";
+import { InMemorySyncStore, type SqlClient } from "@wangwang/database";
+import { createServer, createServerFromEnv } from "../src/server.js";
+
+class CorsSqlClient implements SqlClient {
+  async query<T>(sql: string): Promise<{ rows: T[]; rowCount: number }> {
+    if (/select id from schema_migration/i.test(sql)) return { rows: [] as T[], rowCount: 0 };
+    return { rows: [] as T[], rowCount: 0 };
+  }
+}
 
 test("local Web workbench origins can preflight internal APIs", async () => {
   const app = await createServer({ store: new InMemorySyncStore() });
@@ -54,6 +61,28 @@ test("configured production Web origins can preflight internal APIs", async () =
 
   assert.equal(response.statusCode, 204);
   assert.equal(response.headers["access-control-allow-origin"], "https://workbench.example.com");
+});
+
+test("comma separated Web origins from env can preflight internal APIs", async () => {
+  const app = await createServerFromEnv({
+    env: {
+      DATABASE_URL: "postgres://local/test",
+      WANGWANG_WEB_ORIGINS: "https://workbench.example.com, https://ops.example.com"
+    },
+    sqlClientFactory: async () => new CorsSqlClient()
+  });
+  const response = await app.inject({
+    method: "OPTIONS",
+    url: "/internal/v1/customers",
+    headers: {
+      origin: "https://ops.example.com",
+      "access-control-request-method": "GET",
+      "access-control-request-headers": "authorization,content-type"
+    }
+  });
+
+  assert.equal(response.statusCode, 204);
+  assert.equal(response.headers["access-control-allow-origin"], "https://ops.example.com");
 });
 
 test("unconfigured production origins are rejected", async () => {
