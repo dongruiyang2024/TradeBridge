@@ -5,11 +5,8 @@
   "type": "module",
   "scripts": {
     "test": "npm run build -w @wangwang/onetalk-adapter && node --import tsx --test test/*.test.ts",
-    "build": "npm run build:local",
-    "build:local": "tsc -p tsconfig.json && vite build --mode development",
-    "build:test": "tsc -p tsconfig.json && vite build --mode test",
-    "build:prod": "npm run build:production",
-    "build:production": "tsc -p tsconfig.json && vite build --mode production",
+    "build": "tsc -p tsconfig.json && vite build --mode production",
+    "build:local": "tsc -p tsconfig.json && vite build --mode localtest",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

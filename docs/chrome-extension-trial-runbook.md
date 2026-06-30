@@ -22,27 +22,22 @@ OneTalk 是阿里国际站消息通道当前接入的 Web 实现面，不是和 
 
 ## 构建插件
 
+默认正式包请先在本地环境文件里配置正式服务地址：
+
+```bash
+TRADEBRIDGE_SERVER_URL=https://tradebridge.example.com
+```
+
+然后构建默认正式包：
+
 ```bash
 npm run build -w @wangwang/chrome-extension
 ```
 
-本地插件包默认使用 `http://127.0.0.1:5032`，不需要额外配置。
-
-测试或生产包请先在对应的本地环境文件里配置服务地址：
+如需连接本机 TradeBridge 服务，显式构建本地测试包：
 
 ```bash
-# .env.test.local
-TRADEBRIDGE_SERVER_URL=https://tradebridge-test.example.com
-
-# .env.production.local
-TRADEBRIDGE_SERVER_URL=https://tradebridge.example.com
-```
-
-之后使用固定脚本构建，不需要每次手动拼 IP：
-
-```bash
-npm run build:test -w @wangwang/chrome-extension
-npm run build:production -w @wangwang/chrome-extension
+npm run build:local -w @wangwang/chrome-extension
 ```
 
 构建产物在：
@@ -62,7 +57,7 @@ apps/chrome-extension/dist
 
 在插件设置页完成采集端激活：
 
-- 服务连接：本地包默认使用 `http://127.0.0.1:5032`；测试/生产包由 `.env.test.local` 或 `.env.production.local` 的 `TRADEBRIDGE_SERVER_URL` 决定
+- 服务连接：默认正式包使用 `TRADEBRIDGE_SERVER_URL`；本地测试包固定使用 `http://127.0.0.1:5032`
 - Trade-Mind 激活码：从 Trade-Mind 沟通页复制
 - 同步间隔：默认 30 分钟，可按试运行需要调整
 - 启用历史消息回补：默认开启

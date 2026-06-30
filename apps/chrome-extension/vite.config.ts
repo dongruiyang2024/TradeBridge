@@ -4,7 +4,8 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, type PluginOption } from "vite";
 
 const CLASSIC_PAGE_SCRIPT_OUTPUTS = ["channels/alibaba-im/onetalk-page-script.js"];
-export const DEFAULT_TRADEBRIDGE_SERVER_URL = "http://127.0.0.1:5032";
+export const LOCAL_TRADEBRIDGE_SERVER_URL = "http://127.0.0.1:5032";
+const LOCAL_EXTENSION_BUILD_MODE = "localtest";
 const configDir = fileURLToPath(new URL(".", import.meta.url));
 const repoRoot = resolve(configDir, "../..");
 
@@ -14,11 +15,11 @@ export function loadTradeBridgeServerEnv(
 ): Record<string, string | undefined> {
   const envDir = options.envDir || repoRoot;
   const processEnv = options.processEnv || process.env;
-  const isLocalMode = mode === "development";
-  if (isLocalMode) return {};
+  const isLocalMode = mode === LOCAL_EXTENSION_BUILD_MODE;
+  if (isLocalMode) return { TRADEBRIDGE_SERVER_URL: LOCAL_TRADEBRIDGE_SERVER_URL };
 
   const fileNames =
-    [`.env.${mode}`, `.env.${mode}.local`];
+    [".env", ".env.local", `.env.${mode}`, `.env.${mode}.local`];
   const env: Record<string, string | undefined> = {};
 
   for (const fileName of fileNames) {
@@ -41,7 +42,7 @@ export function resolveTradeBridgeServerUrl(
     throw new Error(`TRADEBRIDGE_SERVER_URL must be set${modeLabel}`);
   }
 
-  const rawValue = explicitValue || DEFAULT_TRADEBRIDGE_SERVER_URL;
+  const rawValue = explicitValue || LOCAL_TRADEBRIDGE_SERVER_URL;
   try {
     const url = new URL(rawValue);
     if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("invalid_tradebridge_server_url");
@@ -100,7 +101,7 @@ export const createOneTalkPageScriptIifePlugin = createPageScriptIifePlugin;
 
 export default defineConfig(({ mode }) => {
   const env = loadTradeBridgeServerEnv(mode);
-  const requireExplicitServerUrl = mode !== "development";
+  const requireExplicitServerUrl = mode !== LOCAL_EXTENSION_BUILD_MODE;
   return {
     root: "src",
     envDir: repoRoot,

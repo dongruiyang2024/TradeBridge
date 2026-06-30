@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import type { Plugin } from "vite";
 import {
-  DEFAULT_TRADEBRIDGE_SERVER_URL,
+  LOCAL_TRADEBRIDGE_SERVER_URL,
   createOneTalkPageScriptIifePlugin,
   loadTradeBridgeServerEnv,
   resolveTradeBridgeServerUrl,
@@ -50,11 +50,11 @@ test("OneTalk page script IIFE plugin wraps only the injected page script chunk"
   assert.equal(bundle["background/index.js"].code, "const $ = 2;");
 });
 
-test("resolveTradeBridgeServerUrl defaults to local server", () => {
-  assert.equal(resolveTradeBridgeServerUrl({}), DEFAULT_TRADEBRIDGE_SERVER_URL);
+test("resolveTradeBridgeServerUrl falls back to local server when explicit url is optional", () => {
+  assert.equal(resolveTradeBridgeServerUrl({}), LOCAL_TRADEBRIDGE_SERVER_URL);
 });
 
-test("resolveTradeBridgeServerUrl requires explicit server url for non-local builds", () => {
+test("resolveTradeBridgeServerUrl requires explicit server url for default official builds", () => {
   assert.throws(
     () => resolveTradeBridgeServerUrl({}, { requireExplicit: true, mode: "production" }),
     /TRADEBRIDGE_SERVER_URL must be set for production extension builds/
@@ -75,23 +75,24 @@ test("resolveTradeBridgeServerUrl rejects invalid URLs", () => {
   );
 });
 
-test("loadTradeBridgeServerEnv ignores env files for development builds", () => {
+test("loadTradeBridgeServerEnv pins local test builds to the local server", () => {
   const envDir = fs.mkdtempSync(path.join(os.tmpdir(), "tradebridge-env-"));
-  fs.writeFileSync(path.join(envDir, ".env.local"), "TRADEBRIDGE_SERVER_URL=http://127.0.0.1:5032\n");
+  fs.writeFileSync(path.join(envDir, ".env.local"), "TRADEBRIDGE_SERVER_URL=https://official.example.com\n");
   fs.writeFileSync(path.join(envDir, ".env.production.local"), "TRADEBRIDGE_SERVER_URL=https://tradebridge.example.com\n");
 
   assert.deepEqual(
-    loadTradeBridgeServerEnv("development", {
+    loadTradeBridgeServerEnv("localtest", {
       envDir,
       processEnv: { TRADEBRIDGE_SERVER_URL: "https://shell.example.com" }
     }),
-    {}
+    { TRADEBRIDGE_SERVER_URL: LOCAL_TRADEBRIDGE_SERVER_URL }
   );
 });
 
-test("loadTradeBridgeServerEnv reads only mode-specific extension env files for production", () => {
+test("loadTradeBridgeServerEnv reads shared and mode-specific env files for official builds", () => {
   const envDir = fs.mkdtempSync(path.join(os.tmpdir(), "tradebridge-env-"));
-  fs.writeFileSync(path.join(envDir, ".env.local"), "TRADEBRIDGE_SERVER_URL=http://127.0.0.1:5032\n");
+  fs.writeFileSync(path.join(envDir, ".env"), "TRADEBRIDGE_SERVER_URL=https://base.example.com\n");
+  fs.writeFileSync(path.join(envDir, ".env.local"), "TRADEBRIDGE_SERVER_URL=https://official.example.com\n");
   fs.writeFileSync(path.join(envDir, ".env.production.local"), "TRADEBRIDGE_SERVER_URL=https://tradebridge.example.com\n");
 
   assert.deepEqual(loadTradeBridgeServerEnv("production", { envDir, processEnv: {} }), {
@@ -101,10 +102,11 @@ test("loadTradeBridgeServerEnv reads only mode-specific extension env files for 
 
 test("loadTradeBridgeServerEnv lets shell env override mode files", () => {
   const envDir = fs.mkdtempSync(path.join(os.tmpdir(), "tradebridge-env-"));
-  fs.writeFileSync(path.join(envDir, ".env.test.local"), "TRADEBRIDGE_SERVER_URL=https://file.example.com\n");
+  fs.writeFileSync(path.join(envDir, ".env.local"), "TRADEBRIDGE_SERVER_URL=https://official.example.com\n");
+  fs.writeFileSync(path.join(envDir, ".env.production.local"), "TRADEBRIDGE_SERVER_URL=https://file.example.com\n");
 
   assert.deepEqual(
-    loadTradeBridgeServerEnv("test", {
+    loadTradeBridgeServerEnv("production", {
       envDir,
       processEnv: { TRADEBRIDGE_SERVER_URL: "https://shell.example.com" }
     }),

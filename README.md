@@ -94,19 +94,22 @@ WANGWANG_SERVER_HOST=127.0.0.1
 WANGWANG_SERVER_PORT=5032
 ```
 
-`WANGWANG_SERVER_HOST` / `WANGWANG_SERVER_PORT` 控制服务端监听地址。Chrome 插件的本地 development 构建默认连接 `http://127.0.0.1:5032`；测试和生产构建必须通过 `TRADEBRIDGE_SERVER_URL` 指定 HTTPS TradeBridge 服务地址。
+`WANGWANG_SERVER_HOST` / `WANGWANG_SERVER_PORT` 控制服务端监听地址。Chrome 插件默认构建会读取 `TRADEBRIDGE_SERVER_URL` 并连接正式 TradeBridge 服务；只有显式本地测试构建才固定连接 `http://127.0.0.1:5032`。
 
-为了避免每次构建手动拼环境变量，插件支持按 Vite mode 读取环境文件：
+为了避免每次构建手动拼环境变量，请在 `.env.local` 中配置正式服务地址：
 
 ```bash
-# 本地包，使用 development mode，未配置时默认 http://127.0.0.1:5032
+TRADEBRIDGE_SERVER_URL=https://tradebridge.example.com
+```
+
+插件构建分为两条分支：
+
+```bash
+# 默认正式包，读取 TRADEBRIDGE_SERVER_URL；缺失时构建失败
 npm run build -w @wangwang/chrome-extension
 
-# 测试包，读取 .env.test.local，必须配置 TRADEBRIDGE_SERVER_URL
-npm run build:test -w @wangwang/chrome-extension
-
-# 生产包，读取 .env.production.local，必须配置 TRADEBRIDGE_SERVER_URL
-npm run build:production -w @wangwang/chrome-extension
+# 本地测试包，固定使用 http://127.0.0.1:5032
+npm run build:local -w @wangwang/chrome-extension
 ```
 
 需要把同步批次转发到 Trade-Mind 沟通助手时，再配置：
@@ -236,7 +239,7 @@ curl -X POST http://127.0.0.1:5032/collector/v1/auth/activate \
 
 2. 在 Chrome 扩展管理页加载 `apps/chrome-extension/dist`。
 3. 打开并登录 `https://onetalk.alibaba.com/`。
-4. 在插件设置页填写 Trade-Mind 激活码和历史回补设置。本地包默认连接 `http://127.0.0.1:5032`；测试/生产包由 `.env.test.local` 或 `.env.production.local` 的 `TRADEBRIDGE_SERVER_URL` 决定。同步间隔固定为 10 秒，OneTalk Login ID / Ali ID 会从已登录的 OneTalk 页面自动检测。服务端配置自动确认回调后，激活成功会自动完成 Trade-Mind 绑定。
+4. 在插件设置页填写 Trade-Mind 激活码和历史回补设置。默认正式包连接 `TRADEBRIDGE_SERVER_URL` 指定的服务；本地测试包连接 `http://127.0.0.1:5032`。同步间隔固定为 10 秒，OneTalk Login ID / Ali ID 会从已登录的 OneTalk 页面自动检测。服务端配置自动确认回调后，激活成功会自动完成 Trade-Mind 绑定。
 5. 激活成功后保持 OneTalk 页面打开。后台会建立实时连接，并按 10 秒固定间隔和页面新消息事件自动同步。
 6. 打开插件弹窗查看账号校验、实时连接、同步、抓取和历史回补状态；实时连接异常时可在弹窗中手动重连。
 7. 回到 Web 工作台查看客户、会话和消息。
@@ -295,8 +298,8 @@ curl -fsS http://127.0.0.1:5032/health
 | `npm run build` | 构建全部 workspace |
 | `npm run typecheck` | 对全部 workspace 做类型检查 |
 | `npm run test:e2e` | 运行端到端试运行测试 |
-| `npm run build:test -w @wangwang/chrome-extension` | 使用 test mode 构建插件，要求配置 `TRADEBRIDGE_SERVER_URL` |
-| `npm run build:production -w @wangwang/chrome-extension` | 使用 production mode 构建插件，要求配置 `TRADEBRIDGE_SERVER_URL` |
+| `npm run build -w @wangwang/chrome-extension` | 构建默认正式插件包，要求配置 `TRADEBRIDGE_SERVER_URL` |
+| `npm run build:local -w @wangwang/chrome-extension` | 构建本地测试插件包，固定使用 `http://127.0.0.1:5032` |
 | `npm run test -w @wangwang/server` | 运行服务端测试 |
 | `npm run test -w @wangwang/web` | 运行 Web 测试 |
 | `npm run test -w @wangwang/chrome-extension` | 运行 Chrome 插件测试 |
