@@ -6,6 +6,8 @@ import type { ExtensionConfig } from "../shared/sync-types.js";
 import { createActivatedExtensionConfig } from "./activation-config.js";
 import { boundedInteger, normalizeServerUrl, serverHostPermissionPatterns } from "./server-url.js";
 
+declare const __TRADEBRIDGE_SERVER_URL__: string;
+
 const chromeApi = getChrome();
 const store = new ExtensionStateStore(chromeApi.storage.local);
 const form = document.querySelector<HTMLFormElement>("#options-form");
@@ -16,7 +18,7 @@ const currentDeviceId = document.querySelector<HTMLElement>("#current-device-id"
 const detectedLoginId = document.querySelector<HTMLElement>("#detected-login-id");
 const detectedAliId = document.querySelector<HTMLElement>("#detected-ali-id");
 const serverUrlDisplay = document.querySelector<HTMLElement>("#server-url");
-const DEFAULT_SERVER_URL = "http://112.124.53.207";
+const DEFAULT_SERVER_URL = __TRADEBRIDGE_SERVER_URL__;
 const DEFAULT_DEVICE_NAME = "Chrome Extension";
 const DEFAULT_SYNC_INTERVAL_SECONDS = 10;
 const DEFAULT_HISTORY_MESSAGES_PER_CONVERSATION = 20;
@@ -132,6 +134,9 @@ function renderDetectedOneTalkAccount(loginId?: string, aliId?: string): void {
 }
 
 function activationErrorMessage(code: string): string {
+  if (code.startsWith("trademind_binding_confirm_failed_")) {
+    return tradeMindBindingConfirmErrorMessage(code);
+  }
   const messages: Record<string, string> = {
     missing_activationToken: "请从 Trade-Mind 沟通页复制激活码",
     invalid_server_url: "TradeBridge 服务地址无效",
@@ -142,6 +147,7 @@ function activationErrorMessage(code: string): string {
     invalid_collector_login_request: "激活请求格式不匹配，请确认服务端已重启到最新版本",
     activation_token_invalid: "激活码无效或已过期，请回到 Trade-Mind 重新生成",
     missing_trademind_channel_account: "未检测到 OneTalk Login ID，无法完成 Trade-Mind 绑定",
+    trademind_binding_confirm_failed: "Trade-Mind 自动确认绑定失败，请回到 Trade-Mind 重新生成激活码后再试",
     collector_activation_failed: "采集端激活请求失败",
     collector_activation_response_invalid: "采集端激活响应格式不正确，请确认 TradeBridge 服务端可访问"
   };
@@ -149,6 +155,16 @@ function activationErrorMessage(code: string): string {
     return "采集端激活请求失败（HTTP " + code.slice("collector_activation_failed_".length) + "），请确认 TradeBridge 服务端可访问";
   }
   return messages[code] || code;
+}
+
+function tradeMindBindingConfirmErrorMessage(code: string): string {
+  const separatorIndex = code.indexOf(":");
+  const detail = separatorIndex >= 0 ? code.slice(separatorIndex + 1).trim() : "";
+  if (detail) {
+    return `Trade-Mind 自动确认绑定失败：${detail} 请回到 Trade-Mind 重新生成激活码后再试`;
+  }
+  const status = code.slice("trademind_binding_confirm_failed_".length);
+  return `Trade-Mind 自动确认绑定失败（HTTP ${status}），请回到 Trade-Mind 重新生成激活码后再试`;
 }
 
 function createDeviceExternalId(): string {

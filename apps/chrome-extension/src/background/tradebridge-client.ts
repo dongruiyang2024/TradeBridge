@@ -298,7 +298,10 @@ function outboundDeliveryUrl(serverUrl: string, outboundMessageId: string): stri
 }
 
 function responseErrorCode(body: unknown, fallback: string): string {
-  if (isRecord(body) && typeof body.error === "string") return body.error;
+  if (isRecord(body) && typeof body.error === "string") {
+    const detail = typeof body.detail === "string" && body.detail.trim() ? body.detail.trim() : "";
+    return detail ? `${body.error}:${detail}` : body.error;
+  }
   return fallback;
 }
 

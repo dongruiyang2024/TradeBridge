@@ -26,11 +26,14 @@ test("options markup is tailored to the managed TradeBridge deployment", () => {
   assert.equal(markup.includes('name="historyMessagesPerConversation"'), true);
   assert.equal(markup.includes('id="current-account"'), true);
   assert.equal(markup.includes('id="current-device-id"'), true);
-  assert.match(optionsSource, /DEFAULT_SERVER_URL = "http:\/\/112\.124\.53\.207"/);
+  assert.match(optionsSource, /DEFAULT_SERVER_URL = __TRADEBRIDGE_SERVER_URL__/);
+  assert.equal(optionsSource.includes("http://112.124.53.207"), false);
   assert.equal(optionsSource.includes("http://127.0.0.1:5032"), false);
   assert.match(optionsSource, /activationToken/);
   assert.match(optionsSource, /detectOneTalkAccount/);
   assert.match(optionsSource, /missing_onetalk_account_identity/);
+  assert.match(optionsSource, /tradeMindBindingConfirmErrorMessage/);
+  assert.match(optionsSource, /重新生成激活码/);
   assert.equal(markup.includes("不要填写 OneTalk 密码"), true);
   assert.equal(markup.includes("TradeBridge 管理员账号"), false);
 });

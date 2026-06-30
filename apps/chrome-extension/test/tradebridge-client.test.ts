@@ -111,6 +111,31 @@ test("activateCollectorDevice posts a Trade-Mind activation token without Bridge
   });
 });
 
+test("activateCollectorDevice preserves Trade-Mind confirm failure details", async () => {
+  globalThis.fetch = async () =>
+    Response.json(
+      {
+        ok: false,
+        error: "trademind_binding_confirm_failed_400",
+        detail: "绑定会话不存在、已消费或已过期。"
+      },
+      { status: 502 }
+    );
+
+  await assert.rejects(
+    () =>
+      activateCollectorDevice({
+        serverUrl: "http://127.0.0.1:5032",
+        activationToken: "tm-activation-token",
+        sellerAccountExternalId: "self-ali-1",
+        channelAccountExternalId: "self-login-1",
+        deviceExternalId: "chrome-extension-demo",
+        deviceName: "Chrome Extension"
+      }),
+    /trademind_binding_confirm_failed_400:绑定会话不存在、已消费或已过期。/
+  );
+});
+
 test("activateCollectorDevice posts credentials and device metadata", async () => {
   const requests: Request[] = [];
   globalThis.fetch = async (input, init) => {

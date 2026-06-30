@@ -1,11 +1,15 @@
 {
   "name": "@wangwang/chrome-extension",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.1.3",
   "type": "module",
   "scripts": {
     "test": "npm run build -w @wangwang/onetalk-adapter && node --import tsx --test test/*.test.ts",
-    "build": "tsc -p tsconfig.json && vite build",
+    "build": "npm run build:local",
+    "build:local": "tsc -p tsconfig.json && vite build --mode development",
+    "build:test": "tsc -p tsconfig.json && vite build --mode test",
+    "build:prod": "npm run build:production",
+    "build:production": "tsc -p tsconfig.json && vite build --mode production",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

@@ -5,6 +5,7 @@ import { test } from "node:test";
 import zlib from "node:zlib";
 
 const manifestPath = path.resolve("public/manifest.json");
+const packageJsonPath = path.resolve("package.json");
 
 test("manifest uses minimal permissions for internal browser-channel collector", () => {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
@@ -23,7 +24,8 @@ test("manifest uses minimal permissions for internal browser-channel collector",
 
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.minimum_chrome_version, "116");
-  assert.equal(manifest.version, "0.1.1");
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as { version?: string };
+  assert.equal(manifest.version, packageJson.version);
   assert.deepEqual(manifest.permissions?.sort(), ["alarms", "scripting", "storage"]);
   assert.deepEqual(manifest.host_permissions?.sort(), ["https://onetalk.alibaba.com/*"]);
   assert.deepEqual(manifest.optional_host_permissions?.sort(), ["http://*/*", "https://*/*"]);
