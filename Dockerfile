@@ -55,6 +55,7 @@ COPY --from=builder --chown=tradebridge:nodejs /app/packages/collector-protocol/
 COPY --from=builder --chown=tradebridge:nodejs /app/packages/collector-protocol/dist ./packages/collector-protocol/dist
 COPY --from=builder --chown=tradebridge:nodejs /app/packages/database/package.json ./packages/database/package.json
 COPY --from=builder --chown=tradebridge:nodejs /app/packages/database/dist ./packages/database/dist
+COPY --from=builder --chown=tradebridge:nodejs /app/packages/database/migrations ./packages/database/migrations
 COPY --from=builder --chown=tradebridge:nodejs /app/packages/env/package.json ./packages/env/package.json
 COPY --from=builder --chown=tradebridge:nodejs /app/packages/env/dist ./packages/env/dist
 COPY --from=builder --chown=tradebridge:nodejs /app/packages/onetalk-adapter/package.json ./packages/onetalk-adapter/package.json

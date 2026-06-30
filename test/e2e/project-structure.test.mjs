@@ -84,6 +84,13 @@ test("product docs model TM and OneTalk as one Alibaba message channel", () => {
   assert.doesNotMatch(combined, /"onetalk"\s*\|\s*"tm"|"tm"\s*\|\s*"onetalk"/);
 });
 
+test("production Docker image includes database migration SQL files", () => {
+  const dockerfile = fs.readFileSync(path.join(root, "Dockerfile"), "utf8");
+
+  assert.match(dockerfile, /packages\/database\/dist \.\/packages\/database\/dist/);
+  assert.match(dockerfile, /packages\/database\/migrations \.\/packages\/database\/migrations/);
+});
+
 function listFiles(directories) {
   return directories.flatMap((directory) => listFilesInDirectory(path.join(root, directory)));
 }
