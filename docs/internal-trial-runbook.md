@@ -8,7 +8,7 @@
 - Node.js 20+。
 - npm。
 - Chrome 浏览器。
-- 可选：Docker Desktop，用于本地 PostgreSQL。
+- 可选：Docker Desktop，用于临时启动本地 PostgreSQL。
 - 已安装项目依赖：
 
 ```bash
@@ -26,7 +26,7 @@ WANGWANG_SERVER_HOST=127.0.0.1
 WANGWANG_SERVER_PORT=5032
 ```
 
-如果使用本仓库提供的 PostgreSQL Docker Compose，建议使用：
+如果临时启动本地 PostgreSQL 容器，建议使用：
 
 ```bash
 DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:5432/tradebridge
@@ -37,25 +37,30 @@ DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:5432/tradebridge
 ## 3. 启动 PostgreSQL
 
 ```bash
-docker compose -f docker-compose.postgres.yml up -d
+docker run --name tradebridge-postgres \
+  -e POSTGRES_USER=USER \
+  -e POSTGRES_PASSWORD=PASSWORD \
+  -e POSTGRES_DB=tradebridge \
+  -p 5432:5432 \
+  -d postgres:18-alpine
 ```
 
 检查容器状态：
 
 ```bash
-docker compose -f docker-compose.postgres.yml ps
+docker ps --filter name=tradebridge-postgres
 ```
 
 停止 PostgreSQL：
 
 ```bash
-docker compose -f docker-compose.postgres.yml down
+docker stop tradebridge-postgres
 ```
 
 需要清空本地数据时再执行：
 
 ```bash
-docker compose -f docker-compose.postgres.yml down -v
+docker rm tradebridge-postgres
 ```
 
 ## 4. 启动服务端和 Web 工作台
@@ -243,7 +248,7 @@ npm run test:e2e
 
 ### 服务端启动时报数据库连接失败
 
-检查 `.env.local` 的 `DATABASE_URL` 是否和 PostgreSQL 实际账号密码一致。使用本仓库 compose 时应为：
+检查 `.env.local` 的 `DATABASE_URL` 是否和 PostgreSQL 实际账号密码一致。使用上面的临时本地容器时应为：
 
 ```bash
 DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:5432/tradebridge

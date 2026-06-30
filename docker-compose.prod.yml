@@ -1,0 +1,17 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: server-runner
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
+    image: tradebridge-server:latest
+    container_name: tradebridge-server
+    restart: unless-stopped
+    env_file:
+      - path: .env.production
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    ports:
+      - "5032:5032"

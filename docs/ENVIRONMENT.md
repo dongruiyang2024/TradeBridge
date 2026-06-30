@@ -58,7 +58,7 @@ Chrome 插件会在设置页提交：
 
 ## 持久化服务
 
-默认情况下，内部服务端使用内存存储，服务重启后数据会丢失。如需持久化数据，配置 PostgreSQL：
+内部服务端必须使用 PostgreSQL 持久化数据。启动前需要配置：
 
 ```bash
 DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:5432/tradebridge

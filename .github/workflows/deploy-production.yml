@@ -1,0 +1,90 @@
+name: Deploy TradeBridge Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.PROD_DEPLOY_HOST }}
+          username: ${{ secrets.PROD_DEPLOY_USER }}
+          key: ${{ secrets.PROD_DEPLOY_SSH_PRIVATE_KEY }}
+          script: |
+            set -euo pipefail
+
+            DEPLOY_PATH="${{ secrets.PROD_DEPLOY_PATH }}"
+            REPO_URL="https://github.com/${{ github.repository }}.git"
+            GIT_AUTH_HEADER="$(printf 'x-access-token:%s' '${{ github.token }}' | base64 | tr -d '\n')"
+            GIT_AUTH_CONFIG="http.https://github.com/.extraheader=AUTHORIZATION: basic $GIT_AUTH_HEADER"
+
+            if [ -z "$DEPLOY_PATH" ]; then
+              echo "PROD_DEPLOY_PATH secret is required."
+              exit 1
+            fi
+
+            mkdir -p "$DEPLOY_PATH"
+            git config --global --add safe.directory "$DEPLOY_PATH"
+            cd "$DEPLOY_PATH"
+
+            if [ ! -d .git ]; then
+              git init
+            fi
+
+            git remote set-url origin "$REPO_URL" 2>/dev/null || git remote add origin "$REPO_URL"
+            fetch_main() {
+              for attempt in 1 2 3 4 5; do
+                if git \
+                  -c http.version=HTTP/1.1 \
+                  -c "$GIT_AUTH_CONFIG" \
+                  fetch --prune origin main; then
+                  return 0
+                fi
+
+                if [ "$attempt" = "5" ]; then
+                  return 1
+                fi
+
+                sleep $((attempt * 5))
+              done
+            }
+
+            fetch_main
+            git checkout main 2>/dev/null || git checkout -B main origin/main
+            git merge --ff-only origin/main
+
+            if [ ! -f .env.production ]; then
+              echo ".env.production is required on the production host."
+              exit 1
+            fi
+
+            docker compose --env-file .env.production -f docker-compose.prod.yml build server
+            docker compose --env-file .env.production -f docker-compose.prod.yml up -d --force-recreate server
+
+            for attempt in 1 2 3 4 5 6 7 8 9 10; do
+              if curl -fsS http://127.0.0.1:5032/health >/dev/null; then
+                break
+              fi
+
+              if [ "$attempt" = "10" ]; then
+                docker logs --tail 120 tradebridge-server
+                exit 1
+              fi
+
+              sleep 3
+            done
+
+            docker image prune -f
